@@ -211,7 +211,8 @@ async function renderToken(t: any): Promise<string> {
     a.flags.push({ level: "DANGER", text: `Only ${reading.sol.toFixed(1)} SOL of liquidity was in the pool ${reading.fresh ? "just now" : "when it was last read"}; a position cannot be sold near the quoted price.` });
   const clean = cleanAtBirth(t, a) && !!reading?.fresh && reading.sol >= MIN_POOL_SOL;
   const pv = tokenPreview(t, a, clean);
-  return page(pv.title, tokenBody(t, a, reading, rebuilt ? "rebuilt" : "observed", clean, Date.now()), chrome, 1, pv.summary);
+  return page(pv.title, tokenBody(t, a, reading, rebuilt ? "rebuilt" : "observed", clean, Date.now()), chrome, 1, pv.summary,
+    `/t/${t.mint}.html`);
 }
 
 /** Shown while a rebuild is queued or running. It polls, so the visitor does not have to. */
@@ -306,8 +307,8 @@ const server = createServer(async (req, res) => {
           curve in our archive. That is not a statement about the wallet — only that it does not appear here.</div>`, chrome, 1));
       const line = verdictLine(p);
       return send(200, page(`Priors — ${wm[1].slice(0, 8)}`, walletBody(wm[1], p, line), chrome, 1,
-        line ?? `A wallet that has bought out ${p.buyouts.length} bonding curve${p.buyouts.length === 1 ? "" : "s"} in this archive.`),
-        "text/html; charset=utf-8", "short");
+        line ?? `A wallet that has bought out ${p.buyouts.length} bonding curve${p.buyouts.length === 1 ? "" : "s"} in this archive.`,
+        `/w/${wm[1]}.html`), "text/html; charset=utf-8", "short");
     }
 
     // a token page we have not generated: answer from the database, or rebuild it

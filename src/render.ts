@@ -112,11 +112,21 @@ export interface Chrome { coverageFrom: string; gapMin: number }
  * the moment someone chose to pass it on. The preview is written from the record, so it is an advertisement that
  * cannot say anything the page does not.
  */
-export function page(title: string, body: string, c: Chrome, depth = 0, summary?: string): string {
+/**
+ * The site's one true origin. Set CANONICAL_HOST (e.g. https://chainoftitle.org) and every page declares which URL it
+ * really lives at. Without it, the same record served from a second hostname — an apex and a www, or the platform's
+ * own *.up.railway.app — is two documents to a crawler and two link previews to a chat client, which splits the only
+ * distribution this project has.
+ */
+const CANONICAL_HOST = (process.env.CANONICAL_HOST ?? "").replace(/\/+$/, "");
+
+export function page(title: string, body: string, c: Chrome, depth = 0, summary?: string, path?: string): string {
   const root = depth ? "../" : "";
+  const canonical = CANONICAL_HOST && path ? `${CANONICAL_HOST}${path.startsWith("/") ? path : `/${path}`}` : "";
   const desc = summary ?? "The documented history of a Solana token from its first block: who created it, what they took, and who actually bought.";
   const head = [
     `<title>${esc(title)} — ${BRAND}</title>`,
+    ...(canonical ? [`<link rel="canonical" href="${esc(canonical)}">`, `<meta property="og:url" content="${esc(canonical)}">`] : []),
     `<meta name="description" content="${esc(desc)}">`,
     `<meta property="og:site_name" content="${BRAND}">`,
     `<meta property="og:type" content="website">`,

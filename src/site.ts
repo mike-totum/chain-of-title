@@ -120,7 +120,7 @@ for (const { t, a } of assessed) {
   if (PAGES) {
     const pv = tokenPreview(t, a, cleanTok);
     writeFileSync(join(OUT, "t", `${t.mint}.html`),
-      page(pv.title, tokenBody(t, a, r, "observed", cleanTok, now), chrome, 1, pv.summary));
+      page(pv.title, tokenBody(t, a, r, "observed", cleanTok, now), chrome, 1, pv.summary, `/t/${t.mint}.html`));
   }
   if (PAGES) writeFileSync(join(OUT, "api", "t", `${t.mint}.json`), JSON.stringify({
     mint: t.mint, symbol: t.symbol, observedAtLaunch: a.watched, clean: cleanTok,
@@ -139,7 +139,7 @@ for (const [w] of wallets) {
   const line = verdictLine(p);
   const rows = p.buyouts.map((b) => `<tr><td>${when(b.ts)}</td><td><a href="../t/${esc(b.mint)}.html">${esc(b.symbol ?? "?")}</a></td>
     <td>${b.sol.toFixed(0)} SOL</td><td>${b.dormantH === null ? "unknown" : dur(b.dormantH * 3600_000)} after launch</td></tr>`).join("");
-  if (PAGES) writeFileSync(join(OUT, "w", `${w}.html`), page(`Priors — ${w.slice(0, 8)}`, walletBody(w, p, line), chrome, 1));
+  if (PAGES) writeFileSync(join(OUT, "w", `${w}.html`), page(`Priors — ${w.slice(0, 8)}`, walletBody(w, p, line), chrome, 1, undefined, `/w/${w}.html`));
   if (PAGES) writeFileSync(join(OUT, "api", "w", `${w}.json`), JSON.stringify({ wallet: w, ...p, summary: line }, null, 2));
 }
 
@@ -248,7 +248,7 @@ writeFileSync(join(OUT, "404.html"), page("No record", `
   <div class="flag UNKNOWN"><span class="tag UNKNOWN">unknown</span>This is <b>not</b> a clean result.
   Once a token's float has been spread across wallets, a manufactured launch is indistinguishable from a real one by
   present-tense inspection — which is why the record has to be kept at the time, and why we will not guess.</div>
-  ${SEARCH}`, chrome));
+  ${SEARCH}`, chrome, 0, undefined, "/404.html"));
 
 // ---------- method ----------
 // The page a sceptic and a grant reviewer both need: how a claim on this site is decided, and what was done to check
@@ -347,7 +347,7 @@ writeFileSync(join(OUT, "method.html"), page("How this is decided", `
     <tr><td>Operator attribution describes wallets' behaviour inside this archive only, and says nothing about intent or identity.</td></tr>
     <tr><td>Coverage of pump.fun begins ${chrome.coverageFrom}. Other launchpads are not yet recorded at all.</td></tr>
   </table>`, chrome, 0,
-  `How Chain of Title decides what to say about a token launch: what is recorded live, how "launched clean" is defined, the labelled-set test behind it, and the four situations where we refuse to answer.`));
+  `How Chain of Title decides what to say about a token launch: what is recorded live, how "launched clean" is defined, the labelled-set test behind it, and the four situations where we refuse to answer.`, "/method.html"));
 
 // ---------- data ----------
 // A public good has to be downloadable, or the claim is rhetorical. The record database is the archive itself, not an
@@ -392,7 +392,7 @@ FROM tokens WHERE graduated=1
 FROM wallet_flow
 ORDER BY amm_sell DESC LIMIT 20;</td><td>who sold the most into buyers after taking a curve</td></tr>
   </table>`, chrome, 0,
-  `The whole Chain of Title archive as one CC0 SQLite file: ${fmt((db.prepare("SELECT COUNT(*) c FROM tokens").get() as any).c)} Solana launch records, one row each, no key or sign-up.`));
+  `The whole Chain of Title archive as one CC0 SQLite file: ${fmt((db.prepare("SELECT COUNT(*) c FROM tokens").get() as any).c)} Solana launch records, one row each, no key or sign-up.`, "/data.html"));
 
 writeFileSync(join(OUT, "favicon.svg"), FAVICON);
 
