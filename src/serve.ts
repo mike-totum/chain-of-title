@@ -110,6 +110,33 @@ async function pullRecord(first: boolean): Promise<void> {
     const n = (probe.prepare("SELECT COUNT(*) c FROM tokens").get() as any).c as number;
     probe.close();
     if (n < 1000) throw new Error(`downloaded archive holds only ${n} launches`);
+    /**
+     * An archive must never shrink.
+     *
+     * The count guard above only catches an empty file. It would have accepted a real, well-formed database holding a
+     * fraction of the history — which is exactly what was waiting to happen: the cloud collector was never seeded, so
+     * it holds 21 hours where the archive it would have replaced holds four months. A successful pull would have cut
+     * the public record from 143,102 launches to 16,731 and looked like a normal refresh in the log.
+     *
+     * The archive is the one asset here that cannot be rebuilt from anywhere else, and losing it silently is the
+     * worst outcome this service has. Coverage only ever grows, so a smaller file is by definition a mistake
+     * somewhere upstream — a half-seeded collector, a wrong path, a truncated transfer. Refusing costs a stale
+     * archive; accepting costs the archive. Set RECORD_ALLOW_SHRINK=1 to override deliberately, e.g. after a prune
+     * that is meant to reduce it.
+     */
+    const holding = (() => {
+      // Read the file on disk, not `db`: the first pull runs before the connection is opened, and on a first boot
+      // there may be no archive here at all — in which case anything is an improvement.
+      try {
+        const cur = new DatabaseSync(DB_FILE, { readOnly: true });
+        const c = (cur.prepare("SELECT COUNT(*) c FROM tokens").get() as any).c as number;
+        cur.close();
+        return c;
+      } catch { return 0; }
+    })();
+    if (process.env.RECORD_ALLOW_SHRINK !== "1" && n < holding * 0.9)
+      throw new Error(`downloaded archive holds ${n.toLocaleString()} launches against the ${holding.toLocaleString()} already here — ` +
+        `refusing to shrink the record. If this is intended, set RECORD_ALLOW_SHRINK=1.`);
     renameSync(tmp, DB_FILE);
     console.log(`[record] pulled ${(buf.length / 1048576).toFixed(1)} MB, ${n.toLocaleString()} launches`);
     // Renaming swaps the file, but an already-open SQLite handle keeps reading the old inode — so a refresh would be
