@@ -27,6 +27,13 @@ import { BUYOUT_SOL } from "./provenance.ts";
 const arg = (k: string, d: string) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : d; };
 const OUT = arg("--out", "data/record.db");
 const FULL = process.argv.includes("--full");
+/**
+ * Never write to the source database. The collector runs this against its own live file, and the `UPDATE tokens SET
+ * curve_buyers` below takes a write lock: the collector's inserts then failed with SQLITE_BUSY and the process died,
+ * crash-looping every three minutes. Readers do not block writers in WAL mode, so with this flag the build is purely
+ * a reader and the collector never notices it. `curve_buyers` is computed straight into the record instead.
+ */
+const READ_ONLY = process.argv.includes("--read-only");
 
 const db = openDb(config.dbPath);
 const log = (...a: unknown[]) => console.log(...a);
@@ -36,9 +43,9 @@ const log = (...a: unknown[]) => console.log(...a);
 // token whose curve has finished. Tokens are refreshed when the count is missing, or when the token is recent enough
 // that its curve may still be active.
 const RECENT_MS = 48 * 3600_000;
-log("counting curve buyers…");
+log(READ_ONLY ? "counting curve buyers into the record (source is read-only)…" : "counting curve buyers…");
 const t0 = Date.now();
-db.exec(`
+if (!READ_ONLY) db.exec(`
   UPDATE tokens SET curve_buyers = (
     SELECT COUNT(DISTINCT tr.wallet) FROM trades tr
     WHERE tr.mint = tokens.mint AND tr.venue = 'curve' AND tr.side = 'buy' AND COALESCE(tr.is_dev, 0) = 0
@@ -46,8 +53,10 @@ db.exec(`
   WHERE ${FULL ? "1=1" : `curve_buyers IS NULL OR updated_at >= ${Date.now() - RECENT_MS}`}
     AND EXISTS (SELECT 1 FROM trades tr2 WHERE tr2.mint = tokens.mint)
 `);
-const counted = (db.prepare("SELECT COUNT(*) c FROM tokens WHERE curve_buyers IS NOT NULL").get() as any).c;
-log(`  ${counted.toLocaleString()} launches have a stored buyer count (${((Date.now() - t0) / 1000).toFixed(0)}s)`);
+if (!READ_ONLY) {
+  const counted = (db.prepare("SELECT COUNT(*) c FROM tokens WHERE curve_buyers IS NOT NULL").get() as any).c;
+  log(`  ${counted.toLocaleString()} launches have a stored buyer count (${((Date.now() - t0) / 1000).toFixed(0)}s)`);
+}
 
 // ---------- 2. build the record ----------
 db.exec(`ATTACH DATABASE '${OUT.replace(/'/g, "''")}' AS rec`);
@@ -104,7 +113,10 @@ try {
   // Launch facts. `updated_at` is the watermark: a row is carried when the collector last touched it.
   db.exec(`INSERT INTO rec.tokens
     SELECT mint, name, symbol, creator, created_at, COALESCE(late_discovery,0), dev_pct, dev_sold,
-           unique_buyers, curve_buyers, snap30_buyers, bundled_buyers, graduated, graduated_at,
+           unique_buyers,
+           ${READ_ONLY ? `COALESCE(curve_buyers, (SELECT COUNT(DISTINCT tr.wallet) FROM trades tr
+             WHERE tr.mint = main.tokens.mint AND tr.venue='curve' AND tr.side='buy' AND COALESCE(tr.is_dev,0)=0))` : "curve_buyers"},
+           snap30_buyers, bundled_buyers, graduated, graduated_at,
            pool, vault_sol, vault_at, last_price, rebuilt_at, rebuilt_complete, updated_at
     FROM main.tokens WHERE COALESCE(updated_at, 0) >= ${since}
     ON CONFLICT(mint) DO UPDATE SET

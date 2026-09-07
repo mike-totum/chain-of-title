@@ -800,7 +800,7 @@ async function buildRecord(): Promise<void> {
   try {
     const { spawn } = await import("node:child_process");
     await new Promise<void>((resolve) => {
-      const child = spawn("npx", ["tsx", "--no-warnings=ExperimentalWarning", "src/servicedb.ts", "--out", RECORD_PATH], {
+      const child = spawn("npx", ["tsx", "--no-warnings=ExperimentalWarning", "src/servicedb.ts", "--out", RECORD_PATH, "--read-only"], {
         stdio: ["ignore", "pipe", "pipe"], env: process.env,
       });
       let tail = "";
@@ -817,9 +817,11 @@ async function buildRecord(): Promise<void> {
   } finally { buildingRecord = false; }
 }
 
-// First build a few minutes after boot (let the feed settle), then on a schedule.
-setTimeout(() => void buildRecord(), 3 * 60_000);
-setInterval(() => void buildRecord(), RECORD_EVERY_MS);
+// Off unless explicitly enabled: this runs on the machine that must never stop collecting, so it is opt-in.
+if (process.env.RECORD_BUILD === "1") {
+  setTimeout(() => void buildRecord(), 3 * 60_000);
+  setInterval(() => void buildRecord(), RECORD_EVERY_MS);
+}
 
 /**
  * Hand the record to the web service. Private network only in normal operation — Railway routes
