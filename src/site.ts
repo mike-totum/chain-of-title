@@ -395,6 +395,90 @@ writeFileSync(join(OUT, "api.html"), page("The API", `
   `, chrome, 0,
   `The Chain of Title launch record as JSON: free, keyless and unmetered, CC0. One rule — an unknown launch is never a clean one.`, "/api.html"));
 
+/**
+ * The pledge and the corrections route.
+ *
+ * Not marketing pages. A site that publishes adverse factual findings about identifiable wallets needs a stated,
+ * checkable position on who pays it, and a route by which a finding can be argued with: a registry that cannot be
+ * contradicted is not a registry, it is an accusation. Both are static because they make promises, and a promise that
+ * moves with the data is not one.
+ */
+writeFileSync(join(OUT, "pledge.html"), page("Our pledge", `
+  <h1 class="headline">Our pledge</h1>
+  <p class="lede">Three commitments about how this is paid for. They are here because a record is worth what its
+  keeper's incentives are worth, and ours should be checkable rather than assumed.</p>
+
+  <div class="sec"><h2>The launch record stays free</h2></div>
+  <p class="lede">Every launch record is free to read, free to download in bulk, and released under
+  <a href="https://creativecommons.org/publicdomain/zero/1.0/">CC0</a> into the public domain, permanently. There is no
+  paid tier of the record and there will not be one. If this project stops, the record it has already published does
+  not stop being yours.</p>
+
+  <div class="sec"><h2>We will never be paid to send you into a trade</h2></div>
+  <p class="lede">No affiliate links, no referral kickbacks, no order-flow arrangements, no buy button, no listing
+  fees. Our revenue will never depend on you transacting in anything we report on.</p>
+  <p class="callout">This is the clause most likely to be tested, and it is written down for that reason. Routing
+  readers into trades is the largest revenue line available to a site in this category. We are refusing it in advance
+  and in public, so that accepting it later would be a visible breach rather than a quiet change of policy.</p>
+
+  <div class="sec"><h2>We do not take money from the subjects of our records</h2></div>
+  <p class="lede">No project, operator, launchpad or wallet we publish a record about is ever a customer, sponsor or
+  advertiser.</p>
+
+  <div class="sec"><h2>What we do take</h2></div>
+  <p class="lede">Grants, and payment for expert analysis where this record is used as evidence. Neither can change a
+  published record. Records are generated on a schedule by machine, before any client exists, and no published finding
+  is ever altered for a paying party. Where we are engaged on a matter, the same analysis is available to either side
+  of it.</p>
+`, chrome, 0, "How Chain of Title is funded, and the three things its funding will never depend on.", "/pledge.html"));
+
+writeFileSync(join(OUT, "corrections.html"), page("Corrections", `
+  <h1 class="headline">Corrections</h1>
+  <p class="lede">We publish adverse factual findings about tokens and about the wallets behind them. Anyone affected
+  has to be able to argue with them, and we have to be able to be wrong in public.</p>
+
+  <div class="sec"><h2>How to tell us we are wrong</h2></div>
+  <p class="lede">Write to <a href="mailto:corrections@chainoftitle.org">corrections@chainoftitle.org</a>. We aim to
+  respond within five business days.</p>
+  <table>
+    <tr><th>What we will correct</th><td>Any statement of fact the chain does not support: a wrong number, a wrong
+    time, a wrong wallet, an event we said happened that did not. Show us the transaction and we will check it.</td></tr>
+    <tr><th>What we will not remove</th><td>A record that is accurate is not removed because it is unwelcome. We
+    publish what the chain shows. We do not publish conclusions about intent: we do not say "scam", "rug" or "fraud",
+    and we do not claim to know who controls a wallet.</td></tr>
+    <tr><th>If you control a wallet we wrote about</th><td>Sign a message from that address and we will publish your
+    statement on that wallet's page, in full and unedited. A signature from the address is proof we cannot fake and
+    that nobody else can impersonate you on.</td></tr>
+    <tr><th>How corrections appear</th><td>On the page, dated, saying what it said before. We do not silently edit and
+    we do not delete pages.</td></tr>
+  </table>
+
+  <div class="sec"><h2>Corrections issued</h2><span class="cnt">1</span></div>
+
+  <h3>7 September 2026: we labelled launches as manufactured that were not</h3>
+  <p class="lede">Until 7 September 2026, a launch that never completed its bonding curve could be shown on its own
+  record page as though it had. The page said the token "completed its bonding curve with zero outside buyers" and
+  that "the graduation was funded by the creator, not by demand." For a launch that never completed a curve the first
+  statement is false, and the second asserts something about a person's conduct that our record does not establish.</p>
+  <p class="lede"><b>How many.</b> Up to 34,242 launch records were in a state where that text could be shown. Most
+  launches end exactly this way, dying without a buyer, which is why the error mattered: it treated the ordinary end
+  of a token as evidence of manufacture.</p>
+  <p class="lede"><b>Why it happened.</b> The rule that fires on "no outside buyers" was never made conditional on the
+  curve having completed. It was written for launches that graduated and applied to every launch.</p>
+  <p class="lede"><b>A second, related error.</b> We also recorded a curve as having graduated on the strength of our
+  own feed reaching the graduation threshold, without confirming it against the curve account or the existence of a
+  market for the token. Records now say which of those we have, and where a graduation is unconfirmed we no longer
+  describe how the curve filled.</p>
+  <p class="lede"><b>What changed.</b> No statement that a curve completed is made unless completion is confirmed. The
+  number of launches carrying a danger flag fell from 866 to 457 as a result.</p>
+  <p class="callout">That fall is a correction, not an improvement in the market. Nothing about pump.fun changed on
+  7 September. What changed is that we stopped saying something we could not support.</p>
+  <p class="lede"><b>What was not affected.</b> No launch was certified clean because of this. Certification fails
+  closed and separately requires a pool balance read within the previous five minutes, so an unconfirmed launch could
+  not have been certified. Certification is now gated on confirmed completion as well, so this cannot become a route
+  to a false all-clear.</p>
+`, chrome, 0, "How to tell us a record is wrong, what we will and will not change, and every correction we have issued.", "/corrections.html"));
+
 writeFileSync(join(OUT, "favicon.svg"), FAVICON);
 
 // The link-preview card. A committed asset rather than a build product: it needs a real browser to render (see
