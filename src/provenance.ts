@@ -131,10 +131,12 @@ export function assess(db: DatabaseSync, t: any, covered: (ts: number) => boolea
   // 'pool', 'curve_complete', or NULL for an inference nobody ever confirmed.
   //
   // The evidence that the inference fires spuriously is a speed gradient, not a raw count. Restricted to days when
-  // pool discovery was working well, confirmation rises monotonically with how long the curve took to fill — 38% for
-  // curves flagged at <=60 s, 46% at 1-10 min, 87% at 10-60 min. Detection improving over the week cannot explain
-  // that, because pool discovery does not know how fast a curve filled. Of 628 recent fast-flagged tokens without
-  // confirmation, exactly one had a creator holding >=50% of supply, so this category is not what it claims to be.
+  // pool discovery was working, confirmation runs 38-42% for curves flagged at or under 60 s against 87-88% at 10-60
+  // min. It is not a clean rise across every bucket: past an hour it falls back to about 72% on 118 tokens, so the
+  // contrast that carries the argument is fast against slow, and calling it monotonic would overstate it in the same
+  // way the first attempt at this measurement did. Detection improving over the week cannot produce even the fast
+  // versus slow contrast, because pool discovery does not know how quickly a curve filled. Of 628 recent fast-flagged
+  // tokens without confirmation, exactly one had a creator holding 50% or more of supply.
   //
   // The converse does not hold, and reading it that way would be the project's own besetting error. Pool discovery
   // has its own coverage — it was nearly blind on 09-02 and good by 09-07 — so a missing pool is never evidence that

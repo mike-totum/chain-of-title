@@ -27,4 +27,8 @@ data/reports/
 kols.txt
 channels.txt
 channels.candidates.txt
+data/x-mute.json
+
+# macOS.
+.DS_Store
 
