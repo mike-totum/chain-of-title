@@ -108,6 +108,13 @@ form.find button{padding:11px 18px;font:600 13px/1.4 inherit;color:var(--bg);bac
   font-size:14px;color:var(--mut)}
 /* Three narrow columns stop being readable well before the phone breakpoint. */
 @media(max-width:820px){.proof{grid-template-columns:1fr}.proof > div + div{border-left:0;border-top:1px solid var(--line)}}
+/* Prose and data do not want the same width. 800px is about 70 characters, which is right for reading and cramped
+   for a six-column table of numbers - on a wide screen the tables looked squeezed while the paragraphs above them
+   were correct. So the measure stays where it is and only the tables and the stat row are allowed out of it, and
+   only when there is room. Centred by equal negative margins, so nothing shifts on a narrow screen. */
+@media(min-width:1100px){
+  .data,.stats{width:calc(100% + 180px);margin-left:-90px;margin-right:-90px;max-width:none}
+}
 td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 tbody tr:hover{background:var(--card)}
 .callout{border-left:3px solid var(--fg);padding:2px 0 2px 16px;margin:18px 0 0;font-size:14.5px;color:var(--mut)}
@@ -442,7 +449,7 @@ export function homeBody(h: Home): string {
     chain, and if we cannot do that we say so rather than guess.</p>
     ${SEARCH}
     ${p ? `<p class="sub" style="margin:-18px 0 24px">Nothing to hand? Read <a href="t/${esc(p.mint)}.html">${esc(p.symbol ?? "?")}</a>, a launch this archive holds.</p>` : ""}
-    <div style="margin:4px 0 0">
+    <div class="stats" style="margin:4px 0 0">
       <div class="stat"><span>graduated, last 24h</span><b class="big">${fmt(h.graduated24h)}</b></div>
       <div class="stat"><span>launched clean</span><b class="big">${fmt(h.clean24h)}</b></div>
       <div class="stat"><span>carrying a danger flag</span><b class="big">${fmt(h.danger24h)}</b></div>
