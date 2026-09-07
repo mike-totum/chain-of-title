@@ -39,3 +39,7 @@ data/x-mute.json
 # ASSUMPTIONS.md and DEPLOY.md carry everything a reader needs in the meantime.
 HANDOFF.md
 
+
+# Grant application drafts. Working documents with figures that go stale, and negotiating
+# positions that should not be public while they are being negotiated.
+.grants/
