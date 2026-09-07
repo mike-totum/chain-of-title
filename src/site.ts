@@ -6,7 +6,7 @@
  * Every claim on a page carries the address and the number behind it, so a reader can verify it against the chain
  * themselves. That verifiability is the asset; the pages are evidence, not persuasion.
  */
-import { mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, statSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { config } from "./config.ts";
 import { openDb } from "./db.ts";
@@ -249,6 +249,150 @@ writeFileSync(join(OUT, "404.html"), page("No record", `
   Once a token's float has been spread across wallets, a manufactured launch is indistinguishable from a real one by
   present-tense inspection — which is why the record has to be kept at the time, and why we will not guess.</div>
   ${SEARCH}`, chrome));
+
+// ---------- method ----------
+// The page a sceptic and a grant reviewer both need: how a claim on this site is decided, and what was done to check
+// it. Every figure here is computed at build time from the same code the site runs, so the page cannot describe rules
+// the site does not apply — which is the failure mode of every "methodology" page written once and left alone.
+const labelled = (() => {
+  try {
+    const set = JSON.parse(readFileSync("data/labels.json", "utf8")) as { labels: any[]; families: any[]; method: string };
+    const q = db.prepare(`SELECT ${TOKEN_COLUMNS} FROM tokens WHERE mint = ?`);
+    let checked = 0, flagged = 0, quiet = 0, falseClean = 0;
+    for (const l of set.labels) {
+      const t = q.get(l.mint) as any;
+      if (!t) continue;
+      checked++;
+      const a = assess(db, t, covered);
+      if (cleanAtBirth(t, a)) falseClean++;
+      else if (a.flags.some((f) => f.level === "DANGER")) flagged++;
+      else quiet++;
+    }
+    return { checked, flagged, quiet, falseClean, families: set.families.length, method: set.method };
+  } catch { return null; }
+})();
+
+writeFileSync(join(OUT, "method.html"), page("How this is decided", `
+  <h1 class="headline">How a claim on this site is decided</h1>
+  <p class="lede">Everything here is read from the Solana chain and can be checked against it. This page states what is
+  recorded, how the one judgement we make is defined, what was done to test it, and — the part that matters most —
+  what we refuse to say.</p>
+
+  <div class="sec"><h2>What is recorded, and when</h2></div>
+  <p class="lede">A collector decodes the pump.fun program's own events as they happen and writes down, for every
+  launch: the creator, the share of supply the creator took in the creation transaction, every distinct wallet that
+  bought on the bonding curve, how long the curve took to fill, whether a single buy completed it, and whether the
+  creator sold. These are facts about a moment. They stop being observable once the float is spread across wallets,
+  which is why they are recorded live rather than inferred later.</p>
+  <p class="callout">Coverage begins ${chrome.coverageFrom}${chrome.gapMin >= 1 ? `, with ${fmt(chrome.gapMin)} minutes of recorded downtime` : ", with no recorded downtime"}. A launch that
+  happened while the collector was down has no record, and is reported as unobserved rather than as anything else.</p>
+
+  <div class="sec"><h2>The one judgement: "launched clean"</h2></div>
+  <p class="lede">It means <b>not manufactured</b>. It is not a prediction, not a recommendation, and not a statement
+  that the token will hold its value — most tokens lose money regardless. A launch is called clean only when every one
+  of these is true of the record:</p>
+  <table>
+    <tr><th>Test</th><th>Threshold</th><th>Why</th></tr>
+    <tr><td>Creator's share in the first block</td><td class="num">under ${MAX_DEV_PCT}%</td><td>above this the creator is the market, and every buyer is bidding against their inventory</td></tr>
+    <tr><td>Distinct outside buyers on the curve</td><td class="num">at least ${MIN_BUYERS}</td><td>a curve filled by a handful of wallets was bought, not demanded</td></tr>
+    <tr><td>Time to complete the curve</td><td class="num">over ${MIN_GRAD_MS / 1000}s</td><td>a curve that fills faster than this was taken before anyone could buy at a normal price</td></tr>
+    <tr><td>Largest single buy on the curve</td><td class="num">under ${BUYOUT_SOL} SOL</td><td>one buy that completes a curve is a purchase of the float, not a market</td></tr>
+    <tr><td>Creator sold</td><td class="num">no</td><td>self-explanatory</td></tr>
+    <tr><td>Liquidity in the pool</td><td class="num">at least ${MIN_POOL_SOL} SOL</td><td>read from the chain at the moment the claim is made, never from a stored number</td></tr>
+  </table>
+  <p class="callout">Launch facts are permanent; a pool balance is not. The liquidity test is deliberately separate
+  from the rest and is applied against a balance read during the build that produced the page. A token whose pool
+  could not be read is left off the clean list rather than carried forward on an old figure.</p>
+
+  ${labelled ? `<div class="sec"><h2>Has it been tested?</h2><span class="cnt">${fmt(labelled.checked)} known-manufactured tokens</span></div>
+  <p class="lede">Yes, and the test is one-sided on purpose. A missed warning costs a reader nothing; a wrong
+  all-clear costs them everything. So the gate is that <b>no known-manufactured token may be certified clean</b> —
+  failing to flag one is reported and tolerated.</p>
+  <p class="lede">The labelled set cannot be built from the rules being tested, or it proves nothing. It comes from
+  creator-wallet reuse instead — an axis none of the criteria above read: a ticker relaunched at least 15 times, each
+  time from a fresh creator wallet. No project relaunches its own ticker under a new wallet a hundred times; an
+  operation burning identities does.</p>
+  <table>
+    <tr><th>Result over ${fmt(labelled.checked)} tokens in ${labelled.families} factory families</th><th class="num">count</th><th class="num">share</th></tr>
+    <tr><td>Flagged as dangerous</td><td class="num">${fmt(labelled.flagged)}</td><td class="num">${(100 * labelled.flagged / Math.max(labelled.checked, 1)).toFixed(1)}%</td></tr>
+    <tr><td>Not flagged, and not certified either</td><td class="num">${fmt(labelled.quiet)}</td><td class="num">${(100 * labelled.quiet / Math.max(labelled.checked, 1)).toFixed(1)}%</td></tr>
+    <tr><td><b>Wrongly certified clean</b></td><td class="num"><b>${fmt(labelled.falseClean)}</b></td><td class="num"><b>${(100 * labelled.falseClean / Math.max(labelled.checked, 1)).toFixed(1)}%</b></td></tr>
+  </table>
+  <p class="callout">Reproduce it: <span class="mono">npm run labels</span>. It exits non-zero if a single known-manufactured
+  token is ever certified clean, so the number above cannot quietly drift.</p>` : ""}
+
+  <div class="sec"><h2>What we refuse to say</h2></div>
+  <p class="lede">Every other checker always returns an answer. An answer that is always available is sometimes
+  fabricated, so this one declines in four situations, and says which:</p>
+  <table>
+    <tr><th>Situation</th><th>What you get</th></tr>
+    <tr><td>The launch happened before coverage, or while the collector was down</td><td>UNKNOWN, with an offer to rebuild the record from chain history</td></tr>
+    <tr><td>A rebuild could not read every transaction</td><td>UNKNOWN — a truncated history looks exactly like a quiet launch</td></tr>
+    <tr><td>The pool balance could not be read</td><td>no clean certificate, and no liquidity figure quoted</td></tr>
+    <tr><td>We hold no record and the address has no pump.fun bonding curve</td><td>we say so, rather than guess</td></tr>
+  </table>
+
+  <div class="sec"><h2>Rebuilt records</h2></div>
+  <p class="lede">A launch we did not watch can often be reconstructed: a bonding curve is a single account whose whole
+  transaction history is readable, so the same on-chain events can be decoded later. Those pages are marked
+  <b>rebuilt</b>. The figures are the same events read afterwards, and are judged the same way — but a rebuild cannot
+  tell you what a token <i>claimed</i> to be at launch, because the name, image and links live off-chain behind a URI
+  the operator can repoint. That, and only that, is genuinely unrecoverable.</p>
+
+  <div class="sec"><h2>Known limits</h2></div>
+  <p class="lede">Stated because a method page that lists no weaknesses is marketing.</p>
+  <table>
+    <tr><td>The labelled set is drawn from this archive, so it cannot contain a factory that uses a fresh ticker every time. It is a precision test, not a census.</td></tr>
+    <tr><td>Thresholds are judgements. They are set where the labelled set shows no false certification, not where some theory says they belong.</td></tr>
+    <tr><td>Operator attribution describes wallets' behaviour inside this archive only, and says nothing about intent or identity.</td></tr>
+    <tr><td>Coverage of pump.fun begins ${chrome.coverageFrom}. Other launchpads are not yet recorded at all.</td></tr>
+  </table>`, chrome, 0,
+  `How Chain of Title decides what to say about a token launch: what is recorded live, how "launched clean" is defined, the labelled-set test behind it, and the four situations where we refuse to answer.`));
+
+// ---------- data ----------
+// A public good has to be downloadable, or the claim is rhetorical. The record database is the archive itself, not an
+// export of it: the same file the service reads.
+const recStat = (() => { try { return statSync("data/record.db"); } catch { return null; } })();
+writeFileSync(join(OUT, "data.html"), page("The data", `
+  <h1 class="headline">Take the whole archive</h1>
+  <p class="lede">Everything this site knows is one file. It is the same database the service reads — not an export,
+  not a sample, and not a subset chosen to look good. Public domain, no attribution required, no key, no sign-up.</p>
+
+  <div class="sec"><h2>The record database</h2>${recStat ? `<span class="cnt">${(recStat.size / 1048576).toFixed(1)} MB</span>` : ""}</div>
+  <table>
+    <tr><td class="k">Download</td><td><a href="data/record.db"><b>record.db</b></a> — SQLite, ${recStat ? `${(recStat.size / 1048576).toFixed(1)} MB` : "~40 MB"}, one row per launch</td></tr>
+    <tr><td class="k">Launches</td><td>${fmt((db.prepare("SELECT COUNT(*) c FROM tokens").get() as any).c)}</td></tr>
+    <tr><td class="k">Coverage</td><td>from ${chrome.coverageFrom}${chrome.gapMin >= 1 ? `, ${fmt(chrome.gapMin)} min of recorded downtime` : ", no recorded downtime"}</td></tr>
+    <tr><td class="k">Licence</td><td>CC0 1.0 — public domain. It is a record of public facts; nobody should have to ask us for it.</td></tr>
+    <tr><td class="k">Rebuilt</td><td>on each deploy, by <span class="mono">npm run servicedb</span></td></tr>
+  </table>
+  <p class="lede">Tables: <span class="mono">tokens</span> (the launch record), <span class="mono">trades</span> and
+  <span class="mono">hist_trades</span> (curve buys large enough to be a buyout), <span class="mono">wallet_flow</span>
+  (what each curve-taking wallet did afterwards), <span class="mono">operator_wallets</span> and
+  <span class="mono">operator_policy</span>, <span class="mono">pool_map</span>, and <span class="mono">runs</span>
+  (the coverage windows, so you can check what we were awake for).</p>
+  <p class="callout">The collector's own database is around 7 GB and is not this. It holds every trade on every tracked
+  token and exists to derive the record; it is a research instrument on a retention window, not the archive.</p>
+
+  <div class="sec"><h2>Live JSON</h2></div>
+  <table>
+    <tr><td class="k"><a href="api/summary.json" class="mono">api/summary.json</a></td><td>yesterday's counts, coverage, and the current clean list</td></tr>
+  </table>
+
+  <div class="sec"><h2>Reading it</h2></div>
+  <p class="lede">Any SQLite client. The counts on the front page are these queries, and disagreeing with us is the
+  point of publishing it.</p>
+  <table>
+    <tr><td class="mono" style="white-space:pre-wrap">SELECT COUNT(*) FROM tokens
+WHERE graduated=1 AND dev_pct >= 50;</td><td>graduations where the creator took at least half the supply</td></tr>
+    <tr><td class="mono" style="white-space:pre-wrap">SELECT symbol, dev_pct, curve_buyers
+FROM tokens WHERE graduated=1
+  AND curve_buyers = 0;</td><td>curves that completed with no outside buyer at all</td></tr>
+    <tr><td class="mono" style="white-space:pre-wrap">SELECT wallet, amm_sell, curve_sol
+FROM wallet_flow
+ORDER BY amm_sell DESC LIMIT 20;</td><td>who sold the most into buyers after taking a curve</td></tr>
+  </table>`, chrome, 0,
+  `The whole Chain of Title archive as one CC0 SQLite file: ${fmt((db.prepare("SELECT COUNT(*) c FROM tokens").get() as any).c)} Solana launch records, one row each, no key or sign-up.`));
 
 writeFileSync(join(OUT, "favicon.svg"), FAVICON);
 

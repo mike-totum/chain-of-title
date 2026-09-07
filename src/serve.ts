@@ -240,6 +240,20 @@ const server = createServer(async (req, res) => {
     const file = join(DIR, safe);
     if (existsSync(file) && !file.endsWith("/")) return send(200, readFileSync(file), TYPES[safe.slice(safe.lastIndexOf("."))] ?? "application/octet-stream", "short");
 
+    // The archive itself. Served from the image rather than copied into the static tree, and cached hard because it
+    // is rebuilt on deploy — a public good nobody has to ask for.
+    if (safe === "/data/record.db") {
+      try {
+        const buf = readFileSync(DB_FILE);
+        res.writeHead(200, {
+          "content-type": "application/vnd.sqlite3",
+          "content-disposition": 'attachment; filename="chain-of-title-record.db"',
+          "cache-control": "public, max-age=3600",
+        });
+        return res.end(buf);
+      } catch { return send(404, "the record database is not available on this server"); }
+    }
+
     // a wallet's record, rendered from its trades across the whole archive
     const wm = safe.match(/^\/w\/([1-9A-HJ-NP-Za-km-z]{32,44})\.html$/);
     if (wm) {

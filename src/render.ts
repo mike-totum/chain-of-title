@@ -133,7 +133,8 @@ ${head}<style>${CSS}</style></head>
 <body><div class="wrap">
 <div class="mast"><a class="brand serif" href="${root}index.html">${MARK}<span>${BRAND}</span></a><span class="tag2">Solana launch records</span><span class="what">In property law, the chain of title is the unbroken documented history of ownership from origin — what you establish before you believe a claim about what something is.</span></div>
 ${body}
-<div class="note"><b>${BRAND}</b> — the documented history of a token from its first block. Coverage begins ${c.coverageFrom}${c.gapMin >= 1 ? `, with ${fmt(c.gapMin)} min of recorded downtime` : ", no recorded downtime"}.
+<div class="note"><a href="${root}method.html">How this is decided</a> · <a href="${root}data.html">Take the data</a> · <a href="${root}index.html">${BRAND}</a><br>
+The documented history of a token from its first block. Coverage begins ${c.coverageFrom}${c.gapMin >= 1 ? `, with ${fmt(c.gapMin)} min of recorded downtime` : ", no recorded downtime"}.
 Everything here is read from the Solana chain and can be checked against it. A clean record means a launch was <b>not manufactured</b> — it is not a prediction and not advice.
 Most tokens lose money regardless: of 19,412 bonding-curve positions measured, none reached 5x.</div>
 </div></body></html>`;
