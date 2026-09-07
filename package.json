@@ -47,6 +47,7 @@
     "backfill": "tsx --no-warnings=ExperimentalWarning src/backfill.ts",
     "serve": "tsx --no-warnings=ExperimentalWarning src/serve.ts",
     "servicedb": "tsx --no-warnings=ExperimentalWarning src/servicedb.ts",
+    "smoke": "sh scripts/smoke.sh",
     "repair": "tsx --no-warnings=ExperimentalWarning src/repair.ts"
   },
   "devDependencies": {

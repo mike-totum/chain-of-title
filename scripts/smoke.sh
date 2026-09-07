@@ -1,0 +1,23 @@
+#!/bin/sh
+# Every route the site actually needs, checked against a deployed URL. Written after two deploys in a row shipped an
+# image missing files nobody thought to look for: the first had no database, the second no pages, and both were only
+# noticed by hand. A deploy is not finished until this passes.
+#   sh scripts/smoke.sh https://chainoftitle.org
+U="${1:-https://web-production-cd0de.up.railway.app}"
+MINT="${2:-2rA7wLGp7EqXZdpGx268ZojNNKWovkUWRKEa96VBpump}"
+fail=0
+check() {
+  code=$(curl -s -o /tmp/smoke.out -w '%{http_code}' --max-time 30 "$U$1")
+  if [ "$code" != "$2" ]; then printf '  FAIL %-22s expected %s, got %s\n' "$1" "$2" "$code"; fail=1; return; fi
+  if [ -n "$3" ] && ! grep -q "$3" /tmp/smoke.out; then printf '  FAIL %-22s %s not found in body\n' "$1" "$3"; fail=1; return; fi
+  printf '  ok   %-22s %s\n' "$1" "$code"
+}
+echo "smoke test against $U"
+check "/"                    200 "Chain of Title"
+check "/method.html"         200 "launched clean"
+check "/data.html"           200 "record.db"
+check "/favicon.svg"         200 ""
+check "/api/summary.json"    200 "clean"
+check "/t/$MINT.html"        200 "At launch"
+check "/data/record.db"      200 ""
+[ $fail -eq 0 ] && echo "PASS" || { echo "FAIL — do not consider this deployed"; exit 1; }

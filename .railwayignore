@@ -1,6 +1,9 @@
-# The collector's databases are gigabytes and live on a volume, never in the image. Named explicitly rather than
-# excluding data/ and re-including one file: the first deploy relied on a negation pattern, data/record.db was
-# silently left out, and the web service came up serving an empty archive.
+# Once this became a git repo, Railway began honouring .gitignore as well — which excludes data/*.db and site/ because
+# both are build products that must not be versioned. That silently shipped an image with no archive and no pages.
+# Anything the running service needs is re-included here explicitly, and `npm run smoke` checks it after every deploy.
+!data/record.db
+!site
+!site/**
 data/pump.db*
 data/seed.db*
 data/archive.db*
@@ -8,6 +11,10 @@ data/reports
 data/run.log
 data/telegram.session
 data/*.jsonl
+site/t
+site/w
+site/api/t
+site/api/w
 node_modules
 *.log
 .env

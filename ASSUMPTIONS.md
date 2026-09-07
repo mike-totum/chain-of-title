@@ -555,3 +555,31 @@ in the Dockerfile CMD. `TRUST_PROXY=1` so the per-IP limits key on the real visi
 The record database is baked into the image, which means on-demand rebuilds performed by the running service are lost
 on the next deploy — acceptable while rebuilds are cheap and re-runnable, but the reason to move it to a volume shared
 with the collector once the rebuild queue carries real traffic.
+
+
+### `git init` took the site down (2026-09-07)
+
+Initialising version control — done to make the project grant-eligible — broke production twice in a row, and the
+mechanism is worth recording because nothing about it is visible from either file on its own.
+
+Railway honours `.railwayignore`; once a git repository exists it honours `.gitignore` **as well**. `.gitignore`
+correctly excludes build products — `data/*.db` (the collector's database is 7 GB) and `site/` (generated pages) — and
+the container requires exactly those two things. So the deploy silently shipped an image with no archive, and then,
+after that was fixed, one with no pages. `git check-ignore -v data/record.db` names the culprit in one line, which is
+the command to reach for when a file mysteriously stops shipping.
+
+The startup guard did its job both times: rather than serving "we have no record of this launch" for every token on
+Solana, the service crash-looped with the reason in its logs. That is the second time that guard has converted a
+silent, confident, catastrophic wrongness into an obvious outage.
+
+The reviewing failure is the one to learn from. Each check was correct and too narrow: secrets were verified absent
+from the commit, but not that the commit changed what ships; the record database was verified present on the second
+deploy, but not that the pages still were. **Verify that the system still works, not that the change worked.**
+`scripts/smoke.sh` (`npm run smoke`) now checks every route the site needs — pages, favicon, summary JSON, a token
+record, and the database download — against a deployed URL, asserting status and body content. A deploy is not
+finished until it passes.
+
+The underlying seam is still there and should be closed rather than patched: `.gitignore` and the deploy manifest now
+encode contradictory intentions about the same files, and re-including them by hand is fragile. The resolution is for
+the collector to write `record.db` to a volume that the web service reads, leaving the image carrying only code — which
+also ends the situation where published data is only as fresh as the last manual deploy from a laptop.
