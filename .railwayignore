@@ -13,8 +13,11 @@ data/telegram.session
 data/*.jsonl
 site/t
 site/w
-site/api/t
-site/api/w
+# The per-token and per-wallet JSON that `npm run site --pages` writes for an offline copy. These moved from
+# site/api/{t,w} to site/api/v1/{token,wallet} when the API was versioned; the old rules silently stopped matching,
+# which is how a --pages run would have shipped tens of thousands of files into the image. The live routes are served
+# dynamically by serve.ts and matched before the static tree, so nothing here is needed at runtime.
+site/api/v1
 node_modules
 *.log
 .env

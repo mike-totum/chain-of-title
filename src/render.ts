@@ -38,8 +38,14 @@ export const CSS = `
 :root{--bg:#fbfbfa;--fg:#1a1a19;--mut:#6b6b68;--line:#e4e4e1;--bad:#a4342a;--warn:#8a6a1f;--ok:#2f6b46;--card:#fff}
 @media(prefers-color-scheme:dark){:root{--bg:#141414;--fg:#e8e8e6;--mut:#9a9a96;--line:#2c2c2a;--bad:#e0796d;--warn:#d6b25e;--ok:#7fc39a;--card:#1b1b1a}}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
-.wrap{max-width:860px;margin:0 auto;padding:32px 20px 80px}
+/* One measure for the whole page. Prose was capped at 62ch inside an 860px column while every table ran the full
+   width, so each section began with a short paragraph over a wide grid and the eye had two left-to-right rhythms to
+   follow. 800px is ~70ch at this size: inside the comfortable range for reading, and still wide enough for a
+   five-column table of numbers. Prose and tables now share one edge. */
+.wrap{max-width:800px;margin:0 auto;padding:32px 20px 80px}
 a{color:inherit}h1{font-size:22px;margin:0 0 4px}h2{font-size:15px;text-transform:uppercase;letter-spacing:.08em;color:var(--mut);margin:32px 0 10px;font-weight:600}
+/* Keyboard users could see the focus ring on the search input and nowhere else. */
+a:focus-visible,button:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid var(--fg);outline-offset:2px}
 .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;word-break:break-all}
 .sub{color:var(--mut);font-size:13px;margin-bottom:24px}
 table{width:100%;border-collapse:collapse;font-size:14px}th{text-align:left;font-weight:600;color:var(--mut);font-size:12px;text-transform:uppercase;letter-spacing:.05em}
@@ -78,15 +84,18 @@ form.find button{padding:11px 18px;font:600 13px/1.4 inherit;color:var(--bg);bac
 .headline{font-family:ui-serif,Georgia,"Iowan Old Style","Times New Roman",serif;
   font-size:clamp(28px,4.6vw,40px);line-height:1.12;letter-spacing:-.015em;font-weight:600;margin:0 0 14px;text-wrap:balance}
 .headline b{font-weight:600;border-bottom:3px solid var(--bad);padding-bottom:1px}
-.lede{font-size:16px;line-height:1.62;color:var(--fg);max-width:62ch;margin:0 0 6px}
+.lede{font-size:16px;line-height:1.62;color:var(--fg);margin:0 0 6px}
 .lede + .lede{margin-top:12px;color:var(--mut);font-size:14.5px}
 .sec{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin:44px 0 6px;
   padding-bottom:8px;border-bottom:1.5px solid var(--fg)}
 .sec h2{margin:0;border:0;padding:0}
 .sec .cnt{margin-left:auto;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--mut)}
-/* the contrast that is the whole argument: what is measurable now, against what was true at birth */
-.proof{display:grid;grid-template-columns:1fr 1fr;gap:0;border:1px solid var(--line);background:var(--card);margin:22px 0 0}
-.proof > div{padding:18px 20px}
+/* The contrast that is the whole argument: what is measurable now, against what was true at birth.
+   Three panels in a two-column grid put step 3 — the step that lands the argument — alone on a second row with an
+   empty cell beside it, directly under a sentence telling the reader to read left to right. It is a sequence, so it
+   gets a column each. */
+.proof{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border:1px solid var(--line);background:var(--card);margin:22px 0 0}
+.proof > div{padding:18px 20px;min-width:0}
 .proof > div + div{border-left:1px solid var(--line)}
 .proof h3{margin:0 0 10px;font-size:11.5px;text-transform:uppercase;letter-spacing:.09em;color:var(--mut);font-weight:700}
 .proof ul{margin:0;padding:0;list-style:none;font-size:14px;line-height:1.5}
@@ -97,10 +106,37 @@ form.find button{padding:11px 18px;font:600 13px/1.4 inherit;color:var(--bg);bac
 .proof b{font-variant-numeric:tabular-nums}
 .verdictline{margin:0;padding:14px 20px;border:1px solid var(--line);border-top:0;background:var(--card);
   font-size:14px;color:var(--mut)}
-@media(max-width:620px){.proof{grid-template-columns:1fr}.proof > div + div{border-left:0;border-top:1px solid var(--line)}}
+/* Three narrow columns stop being readable well before the phone breakpoint. */
+@media(max-width:820px){.proof{grid-template-columns:1fr}.proof > div + div{border-left:0;border-top:1px solid var(--line)}}
 td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 tbody tr:hover{background:var(--card)}
 .callout{border-left:3px solid var(--fg);padding:2px 0 2px 16px;margin:18px 0 0;font-size:14.5px;color:var(--mut)}
+
+/* A row grid of five or six columns cannot be squeezed into a phone: "22.6 h" wrapped onto two lines and the header
+   "Time to fill" stacked three deep. Tables of records scroll sideways instead, which keeps every figure on one line
+   and next to its own label. Key-and-value tables are not marked .data and keep wrapping, which is right for them. */
+@media(max-width:620px){
+  .data{display:block;overflow-x:auto;white-space:nowrap;-webkit-overflow-scrolling:touch}
+  .data th,.data td{padding-right:16px}
+  .k{width:auto}
+  .stat{margin-right:24px}
+}
+
+/* The verdict. A record page is read to settle one question, and it used to open with a stack of flag boxes of equal
+   weight, leaving the reader to assemble the answer. The answer goes first; the flags below it are the evidence. */
+.verdict{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin:0 0 6px;padding:14px 0 12px;border-top:1.5px solid var(--fg);border-bottom:1px solid var(--line)}
+.verdict .v{font-family:ui-serif,Georgia,"Iowan Old Style","Times New Roman",serif;font-size:26px;font-weight:600;line-height:1.1;letter-spacing:-.01em}
+.verdict .v.DANGER{color:var(--bad)}.verdict .v.OK{color:var(--ok)}.verdict .v.UNKNOWN{color:var(--mut)}
+.verdict .vwhy{color:var(--mut);font-size:14px;flex:1;min-width:220px}
+/* The mint, with the two things a reader immediately wants to do with it: copy it, or go and check it themselves. */
+.addr{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 22px}
+.addr .mono{flex:1;min-width:0;color:var(--mut)}
+.addr a,.addr button{font:600 11px/1 inherit;text-transform:uppercase;letter-spacing:.07em;color:var(--mut);
+  background:none;border:1px solid var(--line);padding:6px 9px;cursor:pointer;text-decoration:none;white-space:nowrap}
+.addr a:hover,.addr button:hover{color:var(--fg);border-color:var(--fg)}
+/* Attribution. A registry that will not say who keeps it is asking for a trust it has not offered. */
+.who{margin-top:14px}
+.who b{font-weight:600;color:var(--fg)}
 `;
 
 export interface Chrome { coverageFrom: string; gapMin: number }
@@ -113,12 +149,37 @@ export interface Chrome { coverageFrom: string; gapMin: number }
  * cannot say anything the page does not.
  */
 /**
- * The site's one true origin. Set CANONICAL_HOST (e.g. https://chainoftitle.org) and every page declares which URL it
- * really lives at. Without it, the same record served from a second hostname — an apex and a www, or the platform's
- * own *.up.railway.app — is two documents to a crawler and two link previews to a chat client, which splits the only
- * distribution this project has.
+ * The site's one true origin. Every page declares which URL it really lives at, or the same record served from a
+ * second hostname — an apex and a www, or the platform's own *.up.railway.app — is two documents to a crawler and two
+ * link previews to a chat client, which splits the only distribution this project has.
+ *
+ * This defaults to the real host rather than to nothing. It was an env var alone, CANONICAL_HOST was never set on the
+ * deployed service, and so the tag shipped on no live page at all — a mechanism that exists only in the repository
+ * protects nothing. CANONICAL_HOST still overrides, for a staging host that must not claim to be this one.
  */
-const CANONICAL_HOST = (process.env.CANONICAL_HOST ?? "").replace(/\/+$/, "");
+export const CANONICAL_HOST = (process.env.CANONICAL_HOST ?? "https://chainoftitle.org").replace(/\/+$/, "");
+
+/**
+ * Who keeps this. A registry that will not say who stands behind it is asking for a trust it has not offered, and it
+ * is the first thing a grant reviewer looks for. The address must be a real mailbox before this ships — a published
+ * contact that bounces is worse than none.
+ */
+export const CONTACT = "hello@chainoftitle.org";
+export const KEEPER = "the Chain of Title project";
+/**
+ * Set this to the public repository URL once the auditable half of the code is pushed — the criteria (`provenance.ts`),
+ * the site, and the validation harness (`labels.ts`). Until then the footer says nothing about source rather than
+ * linking somewhere dead, which is the same discipline the rest of the site applies to its own claims.
+ */
+export const SOURCE_URL = process.env.SOURCE_URL ?? "";
+
+/**
+ * The link preview card. A record link pasted into a group chat is this project's only real distribution, and with no
+ * image every one of them rendered as a bare grey box at exactly the moment someone chose to pass it on. The card is
+ * static and brand-level; the specific finding still travels in og:title and og:description, which is the part that
+ * carries the argument. Generated by `scripts/ogcard.mjs`.
+ */
+const OG_IMAGE = "/og.png";
 
 export function page(title: string, body: string, c: Chrome, depth = 0, summary?: string, path?: string): string {
   const root = depth ? "../" : "";
@@ -132,7 +193,14 @@ export function page(title: string, body: string, c: Chrome, depth = 0, summary?
     `<meta property="og:type" content="website">`,
     `<meta property="og:title" content="${esc(title)}">`,
     `<meta property="og:description" content="${esc(desc)}">`,
-    `<meta name="twitter:card" content="summary">`,
+    ...(CANONICAL_HOST ? [
+      `<meta property="og:image" content="${esc(CANONICAL_HOST + OG_IMAGE)}">`,
+      `<meta property="og:image:width" content="1200">`,
+      `<meta property="og:image:height" content="630">`,
+      `<meta property="og:image:alt" content="${esc(BRAND)} — Solana launch records">`,
+    ] : []),
+    // The large card is what makes the headline legible in a chat client; `summary` renders it at thumbnail size.
+    `<meta name="twitter:card" content="${CANONICAL_HOST ? "summary_large_image" : "summary"}">`,
     `<meta name="twitter:title" content="${esc(title)}">`,
     `<meta name="twitter:description" content="${esc(desc)}">`,
   ].join("\n");
@@ -143,17 +211,30 @@ ${head}<style>${CSS}</style></head>
 <body><div class="wrap">
 <div class="mast"><a class="brand serif" href="${root}index.html">${MARK}<span>${BRAND}</span></a><span class="tag2">Solana launch records</span><span class="what">In property law, the chain of title is the unbroken documented history of ownership from origin — what you establish before you believe a claim about what something is.</span></div>
 ${body}
-<div class="note"><a href="${root}method.html">How this is decided</a> · <a href="${root}data.html">Take the data</a> · <a href="${root}index.html">${BRAND}</a><br>
+<div class="note"><a href="${root}method.html">How this is decided</a> · <a href="${root}data.html">Take the data</a> · <a href="${root}api.html">API</a> · <a href="${root}index.html">${BRAND}</a><br>
 The documented history of a token from its first block. Coverage begins ${c.coverageFrom}${c.gapMin >= 1 ? `, with ${fmt(c.gapMin)} min of recorded downtime` : ", no recorded downtime"}.
 Everything here is read from the Solana chain and can be checked against it. A clean record means a launch was <b>not manufactured</b> — it is not a prediction and not advice.
-Most tokens lose money regardless: of 19,412 bonding-curve positions measured, none reached 5x.</div>
+Most tokens lose money regardless: of 19,412 bonding-curve positions measured, none reached 5x.
+<div class="who">Kept by <b>${esc(KEEPER)}</b> · <a href="mailto:${esc(CONTACT)}">${esc(CONTACT)}</a>${SOURCE_URL ? ` · <a href="${esc(SOURCE_URL)}">Source</a>` : ""}<br>
+Free to use, with no account and no wallet connection. The archive is public domain (<a href="${root}data.html">CC0</a>) and
+downloadable in full, so nothing here depends on trusting us to keep publishing it. Funded by grants and by the
+services that read it — never by the projects it reports on, and never by sending you into a trade.</div></div>
 </div></body></html>`;
 }
 
-/** The search box. Present on the front page and on every page that could not answer. */
+/**
+ * The search box. On the front page, on every page that could not answer, and — because checking one token is rarely
+ * what anyone came to do — at the foot of every record.
+ *
+ * The form submits for real. It was an `onsubmit` handler with no action or method, so with scripting off the button
+ * did nothing at all and the site's one interactive element was a decoration; `/lookup` (serve.ts) redirects to the
+ * record. The script is still there to validate before spending a request, and to keep the relative path right on the
+ * static tree, but it is now an improvement on a working form rather than the only thing holding it up.
+ */
 export const SEARCH = `
-  <form class="find" onsubmit="return look(event)">
-    <input id="q" placeholder="paste a token mint address" spellcheck="false" autocomplete="off" aria-label="Token mint address">
+  <form class="find" action="/lookup" method="get" onsubmit="return look(event)">
+    <input id="q" name="mint" placeholder="paste a token mint address" spellcheck="false" autocomplete="off"
+      pattern="[1-9A-HJ-NP-Za-km-z]{32,44}" required aria-label="Token mint address">
     <button type="submit">Look up</button>
   </form>
   <div class="miss" id="miss" role="alert"></div>
@@ -169,6 +250,25 @@ export const SEARCH = `
     return false;
   }
   </script>`;
+
+/**
+ * How long after launch a curve was taken — stated only as finely as the record can support.
+ *
+ * A curve trade's `ts` is `Date.now()` inside the handler that decodes the websocket batch it arrived in, and so is
+ * the launch's `created_at`. 1,692 of the 1,736 recorded buyouts have a gap of exactly zero, which is not 1,692
+ * measurements of "the same instant": it is one clock reading assigned twice in one batch. The tracker's own bundling
+ * heuristic knows this and falls back to a 2 s window when slots are unknown (tracker.ts:313).
+ *
+ * So "0 min after launch" printed a limit of the collector as a finding about the operator — on 97% of the wallet
+ * rows, in the section whose whole purpose is to say that a curve was taken suspiciously fast. Below the resolution
+ * we actually have, the page says what it knows instead. Settling it properly needs the creation slot stored on
+ * `tokens` and compared against the trade slot; `slot` is now carried into the published record so the comparison is
+ * at least possible for anyone who wants to make it.
+ */
+export function curveAge(ms: number | null): string {
+  if (ms === null) return "at an unrecorded time";
+  return ms <= 0 ? "in the same batch of events as the launch" : `${dur(ms)} after launch`;
+}
 
 export type Reading = { sol: number; at: number; fresh: boolean };
 
@@ -187,18 +287,49 @@ export function tokenPreview(t: any, a: Assessment, clean: boolean): { title: st
   if (t.graduated_at && t.created_at) bits.push(`the curve filled in ${dur(t.graduated_at - t.created_at)}`);
   const evidence = bits.join(", ") + ".";
   if (clean) return { title: `${sym} — launched clean`, summary: `Recorded live at launch: ${evidence} Not manufactured — which is not a prediction, and most tokens lose money regardless.` };
-  // A headline written for the purpose, not a flag sentence chopped to length: slicing one produced
-  // "WOTF — The creator took 79.3% of the entire supply in the first block. Nothin".
+  const headline = manufactureHeadline(t, a);
+  return { title: headline ? `${sym} — ${headline}` : `${sym} — launch record`, summary: `Recorded live at launch: ${evidence}` };
+}
+
+/**
+ * The single worst thing the launch record says about a token, as a phrase. Written for the purpose rather than
+ * sliced out of a flag sentence, which produced "WOTF — The creator took 79.3% of the entire supply in the first
+ * block. Nothin". Shared by the link preview and the verdict so the two can never say different things about the
+ * same record — the failure this module exists to prevent.
+ */
+function manufactureHeadline(t: any, a: Assessment): string | null {
   const gradS = t.graduated_at && t.created_at ? (t.graduated_at - t.created_at) / 1000 : null;
-  const headline =
-    t.dev_pct >= 50 ? `creator took ${t.dev_pct.toFixed(0)}% of supply at launch`
+  return t.dev_pct >= 50 ? `creator took ${t.dev_pct.toFixed(0)}% of supply at launch`
     : a.curveBuyers === 0 ? "nobody bought its curve"
     : a.buyout ? `one wallet bought its curve for ${a.buyout.sol.toFixed(0)} SOL`
     : gradS !== null && gradS <= 60 ? `curve taken ${Math.round(gradS)}s after launch`
     : a.curveBuyers !== null && a.curveBuyers < 10 ? `only ${a.curveBuyers} outside buyer${a.curveBuyers === 1 ? "" : "s"}`
     : t.dev_pct >= MAX_DEV_PCT ? `creator took ${t.dev_pct.toFixed(0)}% of supply at launch`
     : null;
-  return { title: headline ? `${sym} — ${headline}` : `${sym} — launch record`, summary: `Recorded live at launch: ${evidence}` };
+}
+
+/** "OK" is a verdict but never a flag: `Level` in provenance.ts covers only the things that can go wrong. */
+export type Verdict = { level: "OK" | "DANGER" | "CAUTION" | "UNKNOWN"; label: string; why: string };
+
+/**
+ * The one line a record page exists to deliver.
+ *
+ * The distinctions are kept narrow on purpose. "Manufactured" is said only when the launch record itself shows the
+ * pattern — the creator held the float, or nobody outside bought, or one wallet took the curve. A token that merely
+ * fails a threshold is "not certified", and a token we did not watch is "not observed", because neither is evidence
+ * of manufacture and saying otherwise would spend the precision that makes the clean verdict worth anything.
+ */
+export function verdict(t: any, a: Assessment, clean: boolean): Verdict {
+  if (!a.watched) return { level: "UNKNOWN", label: "Launch not observed",
+    why: "We have no record of this launch, so we cannot say what it was at birth. That is not a clean result — once the float has been spread, a manufactured launch is indistinguishable from a real one." };
+  if (clean) return { level: "OK", label: "Launched clean",
+    why: "The launch record shows no sign of manufacture. That is not a prediction and not advice; most tokens lose money regardless." };
+  const headline = manufactureHeadline(t, a);
+  if (headline) return { level: "DANGER", label: "Manufactured launch", why: `The record shows the ${headline}.` };
+  if (a.flags.some((f) => f.level === "DANGER")) return { level: "DANGER", label: "Carries a danger flag",
+    why: "The launch itself does not show a manufacturing pattern, but something below is serious enough to warn about." };
+  return { level: "UNKNOWN", label: "Not certified",
+    why: "This launch failed at least one of the tests for a clean record without matching a manufacturing pattern. It is neither endorsed nor accused." };
 }
 
 /**
@@ -219,7 +350,8 @@ export function tokenBody(
 
   const boBlock = a.buyout ? `<h2>Who took the curve</h2>
     <p class="mono"><a href="../w/${esc(a.buyout.wallet)}.html">${esc(a.buyout.wallet)}</a></p>
-    <p>Bought <b>${a.buyout.sol.toFixed(0)} SOL</b> of this curve in a single transaction${t.created_at ? `, ${dur(a.buyout.ts - t.created_at)} after launch` : ""}.</p>` : "";
+    <p>Bought <b>${a.buyout.sol.toFixed(0)} SOL</b> of this curve in a single transaction${t.created_at ? `, ${curveAge(a.buyout.ts - t.created_at)}` : ""}.</p>
+    ${t.created_at && a.buyout.ts - t.created_at <= 0 ? `<p class="sub">Our launch and trade timestamps are both taken when the events are decoded, so events that arrived together carry the same one. That it was taken at or near launch is on the record; how many seconds after is not.</p>` : ""}` : "";
 
   const nowBlock = r ? `<h2>Pool</h2><table>
     <tr><td class="k">Liquidity</td><td>${r.sol.toFixed(1)} SOL</td></tr>
@@ -233,19 +365,29 @@ export function tokenBody(
     so the figures below are the same on-chain events, read later. What it cannot tell you is what the token
     <i>claimed</i> to be at launch — the name, image and links live off-chain and can be changed since.</div>` : "";
 
+  const v = verdict(t, a, clean);
   return `
-    <h1>${esc(t.symbol ?? "unknown")}</h1><div class="sub mono">${esc(t.mint)}</div>
-    ${clean ? '<div class="flag OK"><span class="tag OK">clean</span>Launched with no creator supply, real buyers, and measurable liquidity. This says it was not manufactured. It is not a prediction.</div>' : ""}
+    <h1>${esc(t.symbol ?? "unknown")}</h1>
+    <div class="verdict"><span class="v ${v.level}">${esc(v.label)}</span><span class="vwhy">${esc(v.why)}</span></div>
+    <div class="addr">
+      <span class="mono" id="mint">${esc(t.mint)}</span>
+      <button type="button" onclick="cp()" id="cpb">Copy</button>
+      <a href="https://solscan.io/token/${esc(t.mint)}" rel="noopener nofollow">Solscan</a>
+      <a href="https://pump.fun/coin/${esc(t.mint)}" rel="noopener nofollow">pump.fun</a>
+    </div>
+    <script>function cp(){navigator.clipboard&&navigator.clipboard.writeText(document.getElementById('mint').textContent).then(function(){
+      var b=document.getElementById('cpb'),o=b.textContent;b.textContent='Copied';setTimeout(function(){b.textContent=o},1200)})}</script>
     ${provenance}
     ${a.flags.map((f) => `<div class="flag ${f.level}"><span class="tag ${f.level}">${f.level}</span>${esc(f.text)}</div>`).join("")}
-    <h2>At launch</h2><table>${rows}</table>${boBlock}${nowBlock}`;
+    <h2>At launch</h2><table>${rows}</table>${boBlock}${nowBlock}
+    <div class="sec"><h2>Check another</h2></div>${SEARCH}`;
 }
 
 /** A wallet's record: every curve it bought outright, and what it did with the tokens afterwards. */
 export function walletBody(w: string, p: any, line: string | null): string {
   const heavy = p.ammSell > p.ammBuy * 3 && p.ammSell >= 20 ? "DANGER" : "CAUTION";
   const rows = p.buyouts.map((b: any) => `<tr><td>${when(b.ts)}</td><td><a href="../t/${esc(b.mint)}.html">${esc(b.symbol ?? "?")}</a></td>
-    <td>${b.sol.toFixed(0)} SOL</td><td>${b.dormantH === null ? "unknown" : dur(b.dormantH * 3600_000)} after launch</td></tr>`).join("");
+    <td>${b.sol.toFixed(0)} SOL</td><td>${curveAge(b.dormantH === null ? null : b.dormantH * 3600_000)}</td></tr>`).join("");
   return `
     <h1>Priors</h1><div class="sub mono">${esc(w)}</div>
     <p class="sub">Every bonding curve this wallet has bought outright, and what it did with the tokens afterwards.</p>
@@ -256,7 +398,8 @@ export function walletBody(w: string, p: any, line: string | null): string {
       <div class="stat"><span>sold on the market</span><b class="big">${fmt(p.ammSell)}</b> SOL</div>
       <div class="stat"><span>bought back</span><b class="big">${fmt(p.ammBuy)}</b> SOL</div>
     </div>
-    <h2>Curves taken</h2><table><tr><th>When</th><th>Token</th><th>Size</th><th>Curve age</th></tr>${rows}</table>`;
+    <h2>Curves taken</h2><table class="data"><tr><th>When</th><th>Token</th><th>Size</th><th>Curve age</th></tr>${rows}</table>
+    <div class="sec"><h2>Check a token</h2></div>${SEARCH}`;
 }
 
 export { MIN_POOL_SOL };

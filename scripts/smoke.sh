@@ -17,7 +17,17 @@ check "/"                    200 "Chain of Title"
 check "/method.html"         200 "launched clean"
 check "/data.html"           200 "record.db"
 check "/favicon.svg"         200 ""
+check "/og.png"              200 ""
+check "/lookup?mint=$MINT"   302 ""
+check "/api.html"            200 "cleanAtBirth"
 check "/api/summary.json"    200 "clean"
 check "/t/$MINT.html"        200 "At launch"
 check "/data/record.db"      200 ""
+
+# The JSON surface. `verdict` is the field integrators branch on, so its absence is a broken deploy even when the
+# route answers 200 — and `not_an_address` proves the error bodies are records rather than bare strings.
+check "/api/v1/status"                200 "launches"
+check "/api/v1/token/$MINT"           200 "verdict"
+check "/api/v1/token/notanaddress"    400 "not_an_address"
+check "/api/v1/nope"                  404 "unknown_endpoint"
 [ $fail -eq 0 ] && echo "PASS" || { echo "FAIL — do not consider this deployed"; exit 1; }

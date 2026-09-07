@@ -78,7 +78,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS rec.tokens_creator ON tokens(creator);
   -- only the curve buys large enough to be a buyout: findBuyout's whole input, 1,485 rows of 13.2 million
   CREATE TABLE IF NOT EXISTS rec.trades (
-    mint TEXT NOT NULL, wallet TEXT NOT NULL, side TEXT, sol REAL, ts INTEGER, venue TEXT, is_dev INTEGER
+    mint TEXT NOT NULL, wallet TEXT NOT NULL, side TEXT, sol REAL, ts INTEGER, slot INTEGER, venue TEXT, is_dev INTEGER
   );
   CREATE INDEX IF NOT EXISTS rec.trades_mint ON trades(mint, ts);
   CREATE INDEX IF NOT EXISTS rec.trades_wallet ON trades(wallet);
@@ -105,6 +105,14 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS rec.meta (k TEXT PRIMARY KEY, v TEXT);
 `);
 
+/**
+ * `slot` was added to the published record after the first databases were built. An incremental run reuses the
+ * existing file and `CREATE TABLE IF NOT EXISTS` will not widen a table that is already there, so without this the
+ * insert below fails on a column-count mismatch — on the collector, which only ever runs incrementally. Defensive
+ * ALTER is the same pattern `openDb` uses for the collector's own schema.
+ */
+try { db.exec("ALTER TABLE rec.trades ADD COLUMN slot INTEGER"); } catch {}
+
 const since = FULL ? 0 : Number((db.prepare("SELECT v FROM rec.meta WHERE k='watermark'").get() as any)?.v ?? 0);
 log(`carrying launches ${since ? `changed since ${new Date(since).toISOString()}` : "(full rebuild)"}…`);
 
@@ -119,6 +127,10 @@ try {
            snap30_buyers, bundled_buyers, graduated, graduated_at,
            pool, vault_sol, vault_at, last_price, rebuilt_at, rebuilt_complete, updated_at
     FROM main.tokens WHERE COALESCE(updated_at, 0) >= ${since}
+      -- The quote asset is not a launch. Wrapped SOL was copied into the record as one and served as a token page.
+      AND main.tokens.mint NOT IN ('So11111111111111111111111111111111111111112',
+                                   'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+                                   'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB')
     ON CONFLICT(mint) DO UPDATE SET
       name=excluded.name, symbol=excluded.symbol, creator=excluded.creator, created_at=excluded.created_at,
       late_discovery=excluded.late_discovery, dev_pct=excluded.dev_pct, dev_sold=excluded.dev_sold,
@@ -130,7 +142,15 @@ try {
   // Buyouts only. Rebuilt in full each time: it is small and cheap, and a partial buyout table would understate a
   // wallet's record, which is the one number the operator pages exist to state.
   db.exec("DELETE FROM rec.trades");
-  db.exec(`INSERT INTO rec.trades SELECT mint, wallet, side, sol, ts, venue, COALESCE(is_dev,0)
+  // `slot` is carried even though nothing reads it yet. A trade's `ts` is the moment the collector decoded it, not
+  // block time, so the gap between a launch and the buy that took its curve is only as fine as the batch they arrived
+  // in — 97% of buyouts record a gap of exactly zero. The slot is the one field that could settle it, and leaving it
+  // out of the published record meant nobody could check the claim, including us.
+  // Named columns, not positional. `slot` is new, and on a record database built before it existed the ALTER above
+  // appends it last — so a positional SELECT would quietly write the slot into `venue` on exactly the incremental
+  // runs the collector actually does. Naming them makes physical column order irrelevant.
+  db.exec(`INSERT INTO rec.trades (mint, wallet, side, sol, ts, slot, venue, is_dev)
+    SELECT mint, wallet, side, sol, ts, slot, venue, COALESCE(is_dev,0)
     FROM main.trades WHERE venue='curve' AND side='buy' AND sol >= ${BUYOUT_SOL}`);
   db.exec("DELETE FROM rec.hist_trades");
   db.exec(`INSERT INTO rec.hist_trades SELECT mint, sig, idx, ts, slot, wallet, side, sol, tokens, vsol, vtok, COALESCE(is_dev,0)

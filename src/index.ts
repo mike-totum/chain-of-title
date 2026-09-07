@@ -803,14 +803,19 @@ async function buildRecord(): Promise<void> {
       const child = spawn("npx", ["tsx", "--no-warnings=ExperimentalWarning", "src/servicedb.ts", "--out", RECORD_PATH, "--read-only"], {
         stdio: ["ignore", "pipe", "pipe"], env: process.env,
       });
+      // Keep enough to see the actual failure. The first version kept 400 chars and then logged only the last line,
+      // which for a Node crash is the version banner — the exception itself had already been trimmed away.
       let tail = "";
-      child.stdout?.on("data", (d) => { tail = (tail + d).slice(-400); });
-      child.stderr?.on("data", (d) => { tail = (tail + d).slice(-400); });
+      child.stdout?.on("data", (d) => { tail = (tail + d).slice(-4000); });
+      child.stderr?.on("data", (d) => { tail = (tail + d).slice(-4000); });
       child.on("error", (e) => { log(`[record] could not start build: ${e.message}`); resolve(); });
       child.on("exit", (code) => {
         const secs = ((Date.now() - started) / 1000).toFixed(0);
         if (code === 0) log(`[record] rebuilt ${RECORD_PATH} in ${secs}s — ${tail.trim().split("\n").pop() ?? ""}`);
-        else log(`[record] build FAILED (exit ${code}) after ${secs}s: ${tail.trim().split("\n").slice(-2).join(" | ")}`);
+        else {
+          const lines = tail.trim().split("\n").filter((l) => l.trim() && !/^Node\.js v/.test(l));
+          log(`[record] build FAILED (exit ${code}) after ${secs}s: ${lines.slice(-4).join(" | ").slice(0, 600)}`);
+        }
         resolve();
       });
     });

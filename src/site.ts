@@ -6,13 +6,15 @@
  * Every claim on a page carries the address and the number behind it, so a reader can verify it against the chain
  * themselves. That verifiability is the asset; the pages are evidence, not persuasion.
  */
-import { mkdirSync, writeFileSync, readFileSync, statSync, rmSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, statSync, rmSync, copyFileSync } from "node:fs";
 import { join } from "node:path";
 import { config } from "./config.ts";
 import { openDb } from "./db.ts";
 import { profile, verdictLine } from "./operator.ts";
 import { poolReservesPooled } from "./outcomes.ts";
-import { BRAND, CSS, FAVICON, SEARCH, page, tokenBody, walletBody, tokenPreview, esc, fmt, when, dur, ago, type Chrome, type Reading } from "./render.ts";
+import { rpcStats } from "./rpc-http.ts";
+import { tokenRecord, walletRecord, API_VERSION, PER_IP_PER_HOUR, type Coverage } from "./api.ts";
+import { BRAND, CANONICAL_HOST, CONTACT, CSS, FAVICON, SEARCH, page, tokenBody, walletBody, tokenPreview, esc, fmt, when, dur, ago, type Chrome, type Reading } from "./render.ts";
 import {
   assess, cleanAtBirth, coverageWindows, TOKEN_COLUMNS,
   BUYOUT_SOL, MAX_DEV_PCT, MIN_BUYERS, MIN_GRAD_MS, MIN_POOL_SOL,
@@ -41,6 +43,8 @@ const chrome: Chrome = {
   coverageFrom: win.length ? when(win[0].a) : "unknown",
   gapMin: win.slice(1).reduce((a, w, i) => a + Math.max(0, w.a - win[i].b), 0) / 60_000,
 };
+/** The same coverage statement the page footer makes, in the shape the JSON records carry. */
+const COV: Coverage = { from: win.length ? win[0].a : null, downtimeMinutes: chrome.gapMin };
 
 
 
@@ -49,8 +53,8 @@ mkdirSync(join(OUT, "api"), { recursive: true });
 if (PAGES) {
   mkdirSync(join(OUT, "t"), { recursive: true });
   mkdirSync(join(OUT, "w"), { recursive: true });
-  mkdirSync(join(OUT, "api", "t"), { recursive: true });
-  mkdirSync(join(OUT, "api", "w"), { recursive: true });
+  mkdirSync(join(OUT, "api", API_VERSION, "token"), { recursive: true });
+  mkdirSync(join(OUT, "api", API_VERSION, "wallet"), { recursive: true });
 }
 
 // ---------- data ----------
@@ -106,6 +110,33 @@ await Promise.all(Array.from({ length: POOL_CONCURRENCY }, async () => {
 for (const { t } of candidates) if (!readings.has(t.mint)) unverified.push(t);
 console.log(`  ${reread} answered, ${unverified.length} unreadable (cannot be certified)`);
 
+/**
+ * Refuse the build when too many pools could not be read.
+ *
+ * Certification already fails closed per token, which is right, but the aggregate did not: a run during an RPC
+ * brownout still produced a complete, publishable page whose only signal was a footnote beside the seven-day table.
+ * On 2026-09-07 a run read 54 of 279 pools and published "5 of 9,035 graduations" where a healthy run the night
+ * before had found 27 — and `clean24h` was 4 against 24 unverified, so the headline could have been out by seven
+ * times. The headline is also the og:title, which means it travels into every shared link on its own, with no
+ * footnote anywhere near it.
+ *
+ * So the failure belongs to the build, not the page. Writing nothing leaves yesterday's correct pages up and exits
+ * non-zero, which the GATE in daily.sh already treats as a stop — the same shape as `npm run labels`. A loud failure
+ * beats a quiet degradation, and this is a site whose entire claim is that it declines rather than guesses.
+ */
+const MAX_UNREADABLE = Number(process.env.MAX_UNREADABLE_PCT ?? 20) / 100;
+const unreadableFrac = candidates.length ? unverified.length / candidates.length : 0;
+if (unreadableFrac > MAX_UNREADABLE) {
+  console.error(`\nREFUSING TO BUILD: ${unverified.length} of ${candidates.length} pools unreadable ` +
+    `(${(100 * unreadableFrac).toFixed(0)}%, limit ${(100 * MAX_UNREADABLE).toFixed(0)}%).`);
+  console.error(`Every unreadable pool is a token that cannot be certified, so the clean counts this run would`);
+  console.error(`publish — including the headline, which is also the link preview — are understated by an unknown`);
+  console.error(`amount. Nothing has been written; the previous build's pages are still correct and still up.`);
+  console.error(`Re-run when the RPC endpoints answer. Override deliberately with MAX_UNREADABLE_PCT.`);
+  console.error(`  ${rpcStats()}`);
+  process.exit(1);
+}
+
 // Pass 3: write.
 for (const { t, a } of assessed) {
   const r = reading(t);
@@ -122,15 +153,10 @@ for (const { t, a } of assessed) {
     writeFileSync(join(OUT, "t", `${t.mint}.html`),
       page(pv.title, tokenBody(t, a, r, "observed", cleanTok, now), chrome, 1, pv.summary, `/t/${t.mint}.html`));
   }
-  if (PAGES) writeFileSync(join(OUT, "api", "t", `${t.mint}.json`), JSON.stringify({
-    mint: t.mint, symbol: t.symbol, observedAtLaunch: a.watched, clean: cleanTok,
-    createdAt: t.created_at, creator: t.creator, creatorSupplyPct: a.watched ? t.dev_pct : null,
-    curveBuyers: a.curveBuyers, graduatedAt: t.graduated_at,
-    creatorSold: a.watched ? !!t.dev_sold : null,
-    curveBuyout: a.buyout ? { wallet: a.buyout.wallet, sol: a.buyout.sol, at: a.buyout.ts } : null,
-    poolSol: r ? r.sol : null, poolReadAt: r ? r.at : null, poolReadFresh: r ? r.fresh : null,
-    flags: a.flags, coverageFrom: win.length ? win[0].a : null,
-  }, null, 2));
+  // Built by the same function the live service uses, so an offline copy of the tree cannot become a second API
+  // that answers slightly differently from the real one.
+  if (PAGES) writeFileSync(join(OUT, "api", API_VERSION, "token", `${t.mint}.json`),
+    JSON.stringify(tokenRecord(t, a, r, "observed", cleanTok, COV), null, 2));
 }
 
 // ---------- wallet pages ----------
@@ -140,7 +166,8 @@ for (const [w] of wallets) {
   const rows = p.buyouts.map((b) => `<tr><td>${when(b.ts)}</td><td><a href="../t/${esc(b.mint)}.html">${esc(b.symbol ?? "?")}</a></td>
     <td>${b.sol.toFixed(0)} SOL</td><td>${b.dormantH === null ? "unknown" : dur(b.dormantH * 3600_000)} after launch</td></tr>`).join("");
   if (PAGES) writeFileSync(join(OUT, "w", `${w}.html`), page(`Priors — ${w.slice(0, 8)}`, walletBody(w, p, line), chrome, 1, undefined, `/w/${w}.html`));
-  if (PAGES) writeFileSync(join(OUT, "api", "w", `${w}.json`), JSON.stringify({ wallet: w, ...p, summary: line }, null, 2));
+  if (PAGES) writeFileSync(join(OUT, "api", API_VERSION, "wallet", `${w}.json`),
+    JSON.stringify(walletRecord(w, p, line, COV), null, 2));
 }
 
 // ---------- front page ----------
@@ -184,12 +211,14 @@ writeFileSync(join(OUT, "index.html"), page(`${fmt(dayClean.length)} of ${fmt(da
     <p class="lede">Paste any mint. If we hold its launch, you get what happened. If we do not, we rebuild it from the
     chain, and if we cannot do that we say so rather than guess.</p>
     ${SEARCH}
+    ${proof ? `<p class="sub" style="margin:-18px 0 24px">Nothing to hand? Read <a href="t/${esc(proof.t.mint)}.html">${esc(proof.t.symbol ?? "?")}</a>, a launch this archive holds.</p>` : ""}
     <div style="margin:4px 0 0">
       <div class="stat"><span>graduated, last 24h</span><b class="big">${fmt(day.length)}</b></div>
       <div class="stat"><span>launched clean</span><b class="big">${fmt(dayClean.length)}</b></div>
       <div class="stat"><span>carrying a danger flag</span><b class="big">${fmt(dayDanger)}</b></div>
       <div class="stat"><span>launches on file</span><b class="big">${fmt((db.prepare("SELECT COUNT(*) c FROM tokens WHERE late_discovery=0").get() as any).c)}</b></div>
     </div>
+    <p class="sub" style="margin:6px 0 0">Counted over the 24 hours to ${when(now)}, when this page was built.</p>
   </div>
 
   ${proof ? `<div class="sec"><h2>Why a scanner cannot tell you this</h2></div>
@@ -225,11 +254,11 @@ writeFileSync(join(OUT, "index.html"), page(`${fmt(dayClean.length)} of ${fmt(da
   liquidity — correctly, and far too late to be worth anything. The launch record was true at every step, and it is
   the only thing here that could not be bought.</p>` : ""}
 
-  <div class="sec"><h2>Launched clean</h2><span class="cnt">last ${DAYS === 1 ? "24 hours" : `${DAYS} days`} · ${fmt(clean.length)} of ${fmt(toks.length)} graduations</span></div>
+  <div class="sec"><h2>Launched clean — last ${DAYS === 1 ? "24 hours" : `${DAYS} days`}</h2><span class="cnt">${fmt(clean.length)} of ${fmt(toks.length)} graduations</span></div>
   <p class="lede">Creator kept under ${MAX_DEV_PCT}% and has not sold, at least ${MIN_BUYERS} distinct buyers on the curve,
   the curve took over a minute to fill and was not taken by a single ${BUYOUT_SOL}+ SOL buy, and at least ${MIN_POOL_SOL} SOL
   in the pool right now. That means <b>not manufactured</b>. It is not a recommendation, and most of these will still lose money.</p>
-  <table><tr><th>Token</th><th class="num">Creator kept</th><th class="num">Buyers</th><th class="num">Time to fill</th><th class="num">Liquidity, read ${when(now)}</th></tr>${cleanRows}</table>
+  <table class="data"><tr><th>Token</th><th class="num">Creator kept</th><th class="num">Buyers</th><th class="num">Time to fill</th><th class="num">Liquidity, read ${when(now)}</th></tr>${cleanRows}</table>
   <p class="callout">Launch figures are permanent; a pool balance is not. Every pool above was read from the chain while
   this page was built, and a token whose pool could not be read is left off rather than carried on an old number.${unverified.length ? ` <b>${fmt(unverified.length)}</b> passed every launch test but could not be read just now — absent here means unchecked, not manufactured.` : ""}</p>
 
@@ -237,7 +266,7 @@ writeFileSync(join(OUT, "index.html"), page(`${fmt(dayClean.length)} of ${fmt(da
   <p class="lede">A single large buy that completes a bonding curve is not demand, it is a purchase of the float. These
   are the wallets doing it, what they spent, and what they did with the tokens afterwards. This is the part no
   contract scanner can produce, because it needs a wallet's history across many tokens rather than one token's state.</p>
-  <table><tr><th>Wallet</th><th class="num">Curves taken</th><th class="num">Spent</th><th class="num">Sold after</th><th class="num">Bought back</th></tr>${opRows}</table>`,
+  <table class="data"><tr><th>Wallet</th><th class="num">Curves taken</th><th class="num">Spent</th><th class="num">Sold after</th><th class="num">Bought back</th></tr>${opRows}</table>`,
   chrome, 0,
   `Of ${fmt(day.length)} pump.fun tokens that finished their bonding curve in the last 24 hours, ${fmt(dayClean.length)} launched clean and ${fmt(dayDanger)} carry a danger flag. We watch every launch and keep the record, because the evidence only exists while it happens.`));
 
@@ -345,6 +374,7 @@ writeFileSync(join(OUT, "method.html"), page("How this is decided", `
     <tr><td>The labelled set is drawn from this archive, so it cannot contain a factory that uses a fresh ticker every time. It is a precision test, not a census.</td></tr>
     <tr><td>Thresholds are judgements. They are set where the labelled set shows no false certification, not where some theory says they belong.</td></tr>
     <tr><td>Operator attribution describes wallets' behaviour inside this archive only, and says nothing about intent or identity.</td></tr>
+    <tr><td>A trade is timestamped when we decode it, not by block time, so the interval between a launch and the buy that completed its curve is only as fine as the batch both arrived in. Where that interval reads as zero we say the events arrived together, rather than quoting a duration. The slot is published in <span class="mono">trades</span> for anyone who wants to settle it exactly.</td></tr>
     <tr><td>Coverage of pump.fun begins ${chrome.coverageFrom}. Other launchpads are not yet recorded at all.</td></tr>
   </table>`, chrome, 0,
   `How Chain of Title decides what to say about a token launch: what is recorded live, how "launched clean" is defined, the labelled-set test behind it, and the four situations where we refuse to answer.`, "/method.html"));
@@ -376,8 +406,13 @@ writeFileSync(join(OUT, "data.html"), page("The data", `
 
   <div class="sec"><h2>Live JSON</h2></div>
   <table>
+    <tr><td class="k"><a href="api/${API_VERSION}/token/{mint}" class="mono">api/${API_VERSION}/token/{mint}</a></td><td>one launch record — free, keyless, CORS-open. <a href="api.html">How to read it</a>, and the one rule that matters.</td></tr>
+    <tr><td class="k"><a href="api/${API_VERSION}/status" class="mono">api/${API_VERSION}/status</a></td><td>what the archive holds and what it was awake for</td></tr>
     <tr><td class="k"><a href="api/summary.json" class="mono">api/summary.json</a></td><td>yesterday's counts, coverage, and the current clean list</td></tr>
   </table>
+  <p class="callout">Walking the API for bulk work is the slow way round and costs us RPC reads we would rather spend
+  rebuilding launches nobody has asked for yet. Take <a href="data/record.db">record.db</a> instead — it is the same
+  data, in one file, and you can join across it.</p>
 
   <div class="sec"><h2>Reading it</h2></div>
   <p class="lede">Any SQLite client. The counts on the front page are these queries, and disagreeing with us is the
@@ -394,10 +429,93 @@ ORDER BY amm_sell DESC LIMIT 20;</td><td>who sold the most into buyers after tak
   </table>`, chrome, 0,
   `The whole Chain of Title archive as one CC0 SQLite file: ${fmt((db.prepare("SELECT COUNT(*) c FROM tokens").get() as any).c)} Solana launch records, one row each, no key or sign-up.`, "/data.html"));
 
+/**
+ * The API page. It documents one thing above everything else — that a null is not a clean result — because the whole
+ * value of an integration is that someone else's users see our UNKNOWN as an UNKNOWN, and the integrator's code is
+ * the only place we cannot inspect.
+ */
+const H = CANONICAL_HOST || "https://chainoftitle.org";
+writeFileSync(join(OUT, "api.html"), page("The API", `
+  <h1 class="headline">A launch record, as JSON</h1>
+  <p class="lede">Every record on this site is also a JSON document. No key, no account, no rate limit on reads, no
+  attribution required — the archive is public domain and so is everything served from it. If you run a wallet, a
+  terminal, a scanner or a bot, you are meant to read this without asking us.</p>
+  <p class="lede">There is one thing you have to get right, and it is the next section.</p>
+
+  <div class="sec"><h2>Absence of a record is not a clean record</h2></div>
+  <p class="lede">The field to branch on is <span class="mono">verdict.level</span>, which is one of
+  <span class="mono">OK</span>, <span class="mono">DANGER</span>, <span class="mono">CAUTION</span> or
+  <span class="mono">UNKNOWN</span>. <span class="mono">cleanAtBirth</span> is a convenience and it has three states,
+  not two:</p>
+  <table>
+    <tr><td class="k mono">true</td><td>we watched this launch (or rebuilt its complete history) and it shows no sign of manufacture</td></tr>
+    <tr><td class="k mono">false</td><td>we watched it and it failed at least one test — see <span class="mono">verdict</span> and <span class="mono">flags</span> for which. Not necessarily an accusation: a token whose pool we could not read just now is <span class="mono">false</span> and <span class="mono">UNKNOWN</span>, not <span class="mono">DANGER</span>.</td></tr>
+    <tr><td class="k mono">null</td><td><b>we do not know.</b> We did not observe the launch and have not rebuilt it. <b>Do not render this as clean, safe, or "no issues found."</b></td></tr>
+  </table>
+  <p class="callout">Once a token's float has been spread across wallets, a manufactured launch is indistinguishable
+  from a real one by present-tense inspection — that is the entire reason this archive exists. A null means the
+  evidence is gone, which is the opposite of reassuring. Every refusal and every error we return also carries
+  <span class="mono">verdict.level = "UNKNOWN"</span>, so code that reads only that field is safe even when it ignores
+  the HTTP status.</p>
+
+  <div class="sec"><h2>Endpoints</h2></div>
+  <table>
+    <tr><td class="k mono">GET /api/${API_VERSION}/token/{mint}</td><td>one launch record: what the creator took in the first block, how many outside wallets bought its curve, how it graduated, who took it, and the pool right now</td></tr>
+    <tr><td class="k mono">GET /api/${API_VERSION}/wallet/{address}</td><td>a wallet's priors: every bonding curve it has bought outright in this archive, and what it did with the tokens afterwards. A wallet we have never seen returns <span class="mono">inArchive: false</span> and nulls — <b>not zeros</b>, because "we hold nothing on it" is not "it has done nothing". In <span class="mono">buyouts</span>, <span class="mono">sameBatchAsLaunch: true</span> means the buy arrived in the same batch of chain events as the launch itself — <span class="mono">hoursAfterLaunch</span> is then <span class="mono">null</span> rather than <span class="mono">0</span>, because our timestamps cannot resolve it further. Don't render it as zero.</td></tr>
+    <tr><td class="k mono">GET /api/${API_VERSION}/status</td><td>what the archive holds and what it was awake for</td></tr>
+    <tr><td class="k mono">GET /data/record.db</td><td>the whole archive as one SQLite file, CC0. If you are going to query it in bulk, take this instead of walking the API.</td></tr>
+  </table>
+  <p class="lede mono" style="white-space:pre-wrap">curl ${H}/api/${API_VERSION}/token/&lt;mint&gt;</p>
+
+  <div class="sec"><h2>Tokens we have never seen</h2></div>
+  <p class="lede">Coverage begins ${chrome.coverageFrom}. Ask for an older launch and we reconstruct it from the
+  bonding curve's complete transaction history — thousands of archival RPC reads, which is a background job, not a
+  request. You get <span class="mono">202</span> with <span class="mono">verdict.level = "UNKNOWN"</span> and a
+  <span class="mono">rebuild</span> object; poll the same URL. A finished record is permanent, so the second call is
+  usually the last one you ever make for that mint.</p>
+  <p class="lede">Reads are unmetered. Rebuilds are not: they cost real money, so each caller can start
+  ${PER_IP_PER_HOUR} an hour and the service has a daily ceiling. When that is reached you get
+  <span class="mono">503 rebuild_budget_exhausted</span> — the archive is unaffected, only new reconstruction is
+  paused. If you need bulk historical coverage, <a href="mailto:${esc(CONTACT)}">say so</a>; that is a conversation
+  about who pays for the RPC, not about a licence.</p>
+
+  <div class="sec"><h2>Statuses</h2></div>
+  <table>
+    <tr><td class="k mono">200</td><td>a record. It may still be an <span class="mono">UNKNOWN</span> one.</td></tr>
+    <tr><td class="k mono">202</td><td>accepted; a rebuild is queued or running. Retry-After is set.</td></tr>
+    <tr><td class="k mono">400 not_an_address</td><td>not base58, or not 32–44 characters</td></tr>
+    <tr><td class="k mono">404 not_a_pump_launch</td><td>no pump.fun bonding curve exists for this address. A finding, not a failure.</td></tr>
+    <tr><td class="k mono">404 rebuild_failed</td><td>we tried to read the chain and could not. <b>Our failure, not a finding</b> — it says nothing about the token.</td></tr>
+    <tr><td class="k mono">429 rate_limited</td><td>too many rebuilds started from one address this hour</td></tr>
+    <tr><td class="k mono">503 rebuild_budget_exhausted / busy</td><td>we cannot pay for or keep up with more rebuilds right now</td></tr>
+  </table>
+
+  <div class="sec"><h2>Terms, such as they are</h2></div>
+  <table>
+    <tr><td class="k">Cost</td><td>nothing, and there is no paid tier of this data. If you need an SLA, webhooks at creation, or bulk history, that is a separate conversation — the free endpoint does not get worse to make it happen.</td></tr>
+    <tr><td class="k">Licence</td><td>CC0 1.0. Republish it, cache it, resell it. We would rather you linked the record so a reader can check it.</td></tr>
+    <tr><td class="k">CORS</td><td>open to every origin. Call it from your own front end.</td></tr>
+    <tr><td class="k">Caching</td><td>a settled record is immutable and served <span class="mono">max-age=3600, stale-while-revalidate=86400</span>. Anything unsettled is <span class="mono">no-store</span>.</td></tr>
+    <tr><td class="k">Stability</td><td>fields are added, never repurposed. A breaking change gets a new version prefix and the old one keeps answering.</td></tr>
+    <tr><td class="k">What it is not</td><td>not a price feed, not a signal, not advice. A clean record means a launch was <b>not manufactured</b> — nothing about what it will do. Of 19,412 bonding-curve positions measured, none reached 5x.</td></tr>
+  </table>
+  <p class="callout">If you ship this in front of users and find a record you think is wrong, tell us — a false
+  warning on an honest launch costs us more than a missed one. <a href="mailto:${esc(CONTACT)}">${esc(CONTACT)}</a></p>
+  `, chrome, 0,
+  `The Chain of Title launch record as JSON: free, keyless and unmetered, CC0. One rule — an unknown launch is never a clean one.`, "/api.html"));
+
 writeFileSync(join(OUT, "favicon.svg"), FAVICON);
+
+// The link-preview card. A committed asset rather than a build product: it needs a real browser to render (see
+// `scripts/ogcard.mjs`), which the container has not got, and it changes only when the mark or the wording does.
+try { copyFileSync("assets/og.png", join(OUT, "og.png")); }
+catch { console.log("  assets/og.png missing — link previews will have no image"); }
 
 writeFileSync(join(OUT, "api", "summary.json"), JSON.stringify({
   generatedAt: now, coverageFrom: win.length ? win[0].a : null, downtimeMinutes: Math.round(chrome.gapMin),
+  // What the clean counts below are worth. A consumer reading this instead of the page needs the same caveat.
+  poolsRead: reread, poolsUnreadable: unverified.length,
+  unreadableFraction: Number(unreadableFrac.toFixed(4)), degraded: unreadableFrac > 0.05,
   graduated24h: day.length, clean24h: dayClean.length, unverified24h: dayUnverified.length,
   archivedLaunches: (db.prepare("SELECT COUNT(*) c FROM tokens WHERE late_discovery=0").get() as any).c,
   clean: clean.map((t) => ({
@@ -411,4 +529,4 @@ console.log(PAGES
   ? `  ${toks.length.toLocaleString()} token pages + ${wallets.size} wallet pages written (--pages)`
   : `  ${toks.length.toLocaleString()} graduations and ${wallets.size} curve-taking wallets assessed; their pages are rendered on request by \`npm run serve\` (pass --pages to write them)`);
 console.log(`  ${clean.length} launched clean; ${dayClean.length} in the last 24 h of ${day.length} graduations`);
-console.log(`  index.html, api/summary.json, api/t/<mint>.json, api/w/<wallet>.json`);
+console.log(`  index.html, api.html, api/summary.json` + (PAGES ? `, api/${API_VERSION}/token/<mint>.json, api/${API_VERSION}/wallet/<wallet>.json` : ""));

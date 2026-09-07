@@ -126,7 +126,22 @@ export function openDb(path: string): DatabaseSync {
   return db;
 }
 
+/**
+ * Mints that are not launches and must never become rows.
+ *
+ * Wrapped SOL reached the tokens table as a launch — symbol "?", graduated, with a pool address attached — and the
+ * service then served it as a record, under a DANGER flag about liquidity. A detector that mistakes the quote asset
+ * for the asset being traded is an easy mistake to make repeatedly, so the exclusion lives here, at the only door
+ * into the table, rather than in whichever detector made it this time.
+ */
+const NOT_LAUNCHES = new Set([
+  "So11111111111111111111111111111111111111112",  // wrapped SOL
+  "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", // USDC
+  "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", // USDT
+]);
+
 export function upsertToken(db: DatabaseSync, t: TokenState): void {
+  if (NOT_LAUNCHES.has(t.mint)) return;
   db.prepare(`
     INSERT INTO tokens (mint, name, symbol, uri, creator, created_at, late_discovery, launch_price, last_price, peak_price, peak_at,
       dev_pct, dev_sold, dev_sold_at, buys, sells, buy_vol_sol, sell_vol_sol, unique_buyers, unique_sellers, bundled_buyers,

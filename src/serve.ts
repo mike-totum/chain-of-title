@@ -17,11 +17,13 @@ import { readFileSync, existsSync } from "node:fs";
 import { join, normalize } from "node:path";
 import { config } from "./config.ts";
 import { openDb } from "./db.ts";
-import { assess, cleanAtBirth, coverageWindows, TOKEN_COLUMNS, MIN_POOL_SOL } from "./provenance.ts";
+import { type Assessment, assess, cleanAtBirth, coverageWindows, TOKEN_COLUMNS, MIN_POOL_SOL } from "./provenance.ts";
 import { profile, verdictLine } from "./operator.ts";
 import { poolReservesPooled } from "./outcomes.ts";
 import { rebuild, store, curveExists } from "./backfill.ts";
 import { page, tokenBody, walletBody, tokenPreview, SEARCH, when, fmt, type Chrome, type Reading } from "./render.ts";
+import { tokenRecord, walletRecord, statusRecord, unknownRecord, errorRecord,
+  API_VERSION, PER_IP_PER_HOUR, GLOBAL_PER_HOUR, GLOBAL_PER_DAY, type Coverage } from "./api.ts";
 
 const arg = (k: string, d: string) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : d; };
 const PORT = Number(arg("--port", process.env.PORT ?? "8899"));
@@ -38,10 +40,10 @@ const RETRY_FAILED_AFTER = 3600_000;  // a failed rebuild may be retried after a
  * the request comes from the open internet. Without a bound, one visitor can occupy the single worker indefinitely
  * and exhaust the RPC quota that the collector also depends on. Refusing is safe; the visitor is told plainly why and
  * when to come back. These are deliberately generous for a human and useless for a script.
+ *
+ * The per-caller and global ceilings are in `api.ts`, with the rest of the published contract, because the API page
+ * quotes them. Reads are not limited at all — an unmetered read is the whole strategy.
  */
-const PER_IP_PER_HOUR = 5;
-const GLOBAL_PER_HOUR = 60;
-const GLOBAL_PER_DAY = 400;
 /** Signature cap for a rebuild nobody asked us to pay for. The CLI has no cap. */
 const MAX_SIGS_ON_DEMAND = 8_000;
 const JOB_TTL = 6 * 3600_000;
@@ -127,6 +129,8 @@ const chrome: Chrome = {
   coverageFrom: win.length ? when(win[0].a) : "unknown",
   gapMin: win.slice(1).reduce((a, w, i) => a + Math.max(0, w.a - win[i].b), 0) / 60_000,
 };
+/** The same coverage statement the page footer makes, in the shape the JSON records carry. */
+const COV: Coverage = { from: win.length ? win[0].a : null, downtimeMinutes: chrome.gapMin };
 
 /**
  * Refuse to serve an empty archive. `openDb` creates its tables when the file is missing, so a database that failed to
@@ -198,21 +202,109 @@ async function work(): Promise<void> {
 }
 
 // ---------- rendering ----------
-async function renderToken(t: any): Promise<string> {
+/**
+ * `judgeable` is not decoration. A thin pool is only evidence about a token whose launch we actually hold: for a row
+ * we merely happen to have — a mint named by a detector, or one that leaked in from somewhere else entirely — the
+ * stored `pool` may not be that token's pool at all, and reading it produced a confident red DANGER about liquidity.
+ * Wrapped SOL was served exactly this way: title "?", a DANGER telling the reader a position could not be sold. On a
+ * site whose whole claim is that it says UNKNOWN rather than guess, that is the worst sentence it could emit.
+ */
+type TokenRead = { a: Assessment; reading: Reading | null; origin: "observed" | "rebuilt"; clean: boolean };
+
+/**
+ * Everything we are prepared to say about one launch, computed once. The HTML page and the JSON record are both built
+ * from this — they must never be able to disagree about the same token, and the JSON is the copy nobody proof-reads.
+ *
+ * The pool is read from chain on every judgeable record rather than quoted from storage, and a read we could not make
+ * costs the token its clean certificate: `clean` requires a *fresh* reading above the threshold. That is deliberately
+ * fail-closed. It means a stretch of RPC trouble downgrades good tokens to "not certified" (UNKNOWN), which is a cost
+ * we accept — the opposite error, certifying on a balance we could not confirm, is the one that ends the project.
+ */
+async function readRecord(t: any, judgeable: boolean): Promise<TokenRead> {
   const a = assess(db, t, covered);
-  // `assess` already treats a complete rebuild as judgeable; the flag only decides how the page describes its source.
+  // `assess` already treats a complete rebuild as judgeable; the flag only decides how the record describes its source.
   const rebuilt = !!t.rebuilt_at && !!t.rebuilt_complete;
-  let reading: Reading | null = t.vault_sol != null && t.vault_at != null ? { sol: t.vault_sol, at: t.vault_at, fresh: false } : null;
-  if (t.pool) {
+  let reading: Reading | null = judgeable && t.vault_sol != null && t.vault_at != null ? { sol: t.vault_sol, at: t.vault_at, fresh: false } : null;
+  if (judgeable && t.pool) {
     const fresh = await poolReservesPooled(t.pool, t.mint);
     if (fresh) reading = { sol: fresh.quoteSol, at: Date.now(), fresh: true };
   }
   if (reading && reading.sol < MIN_POOL_SOL)
     a.flags.push({ level: "DANGER", text: `Only ${reading.sol.toFixed(1)} SOL of liquidity was in the pool ${reading.fresh ? "just now" : "when it was last read"}; a position cannot be sold near the quoted price.` });
   const clean = cleanAtBirth(t, a) && !!reading?.fresh && reading.sol >= MIN_POOL_SOL;
-  const pv = tokenPreview(t, a, clean);
-  return page(pv.title, tokenBody(t, a, reading, rebuilt ? "rebuilt" : "observed", clean, Date.now()), chrome, 1, pv.summary,
+  return { a, reading, origin: rebuilt ? "rebuilt" : "observed", clean };
+}
+
+async function renderToken(t: any, judgeable: boolean): Promise<string> {
+  const r = await readRecord(t, judgeable);
+  const pv = tokenPreview(t, r.a, r.clean);
+  return page(pv.title, tokenBody(t, r.a, r.reading, r.origin, r.clean, Date.now()), chrome, 1, pv.summary,
     `/t/${t.mint}.html`);
+}
+
+/**
+ * What we can say about a mint right now, decided once for both surfaces.
+ *
+ * This ladder — do we hold it, is a rebuild already running, can we afford to start one, is it even a pump.fun launch
+ * — used to live inline in the HTML route. Copying it into the API route would let the two drift, and they would
+ * drift in the direction that matters: a budget refusal that the JSON reported as an ordinary empty answer is
+ * indistinguishable, to an integrator, from "we looked and found nothing wrong". Each surface now only chooses how to
+ * *say* the decision, never what it is.
+ *
+ * `htmlStatus` is the status the page has always returned for each outcome, kept as-is; the API maps the same codes to
+ * more conventional ones in API_STATUS.
+ */
+type Decision =
+  | { kind: "record"; t: any; judgeable: boolean }
+  | { kind: "rebuilding"; job: Job }
+  | { kind: "unknown"; code: string; why: string; htmlStatus: number };
+
+async function decide(mint: string, ip: string): Promise<Decision> {
+  const t = tokenQ.get(mint) as any;
+  // Holding a *row* for a mint is not the same as holding its launch: tokens discovered late (named by a post, found
+  // by a detector) have no curve history, and treating their presence as an answer meant the most useful thing we
+  // could do for them — rebuild the launch from chain — was never attempted.
+  const judgeable = !!t && (!!t.rebuilt_complete || (!t.late_discovery && covered(t.created_at)));
+  if (judgeable) return { kind: "record", t, judgeable: true };
+
+  // An existing job is reported without spending anything, so a poll or a reload is always free.
+  const j = jobs.get(mint);
+  if (j && (j.state === "queued" || j.state === "running")) return { kind: "rebuilding", job: j };
+  if (j && j.state === "failed" && Date.now() - j.at < RETRY_FAILED_AFTER)
+    return { kind: "unknown", code: "rebuild_failed", htmlStatus: 200,
+      why: `We tried to rebuild this launch from chain history and could not: ${j.error ?? "unknown"}.` };
+
+  /** Fall back to whatever we do hold, which is honest about knowing nothing, rather than a bare refusal. */
+  if (NO_REBUILD)
+    return t ? { kind: "record", t, judgeable: false }
+      : { kind: "unknown", code: "no_record", htmlStatus: 200, why: "This server does not rebuild records on demand." };
+
+  // Budgets are checked before the cheap probe, and the probe before the queue, so the cheapest refusal wins.
+  if (peek("global:day", 86400_000) >= GLOBAL_PER_DAY || peek("global:hour", 3600_000) >= GLOBAL_PER_HOUR)
+    return { kind: "unknown", code: "rebuild_budget_exhausted", htmlStatus: 503,
+      why: "We have rebuilt as many records as we can pay for in this period. The archive itself is unaffected — only new rebuilds are paused. Try again later." };
+  if (!allow(`ip:${ip}`, PER_IP_PER_HOUR, 3600_000))
+    return { kind: "unknown", code: "rate_limited", htmlStatus: 429,
+      why: `Rebuilding a record reads thousands of transactions from the chain, so each visitor can start ${PER_IP_PER_HOUR} an hour. Records already in the archive are always free to read.` };
+
+  /**
+   * One RPC call: a mint with no bonding curve is not a pump.fun token, and refusing here costs nothing.
+   *
+   * This says so even when we hold a row for the mint. Falling through to the record instead dressed a mint that is
+   * nothing to do with pump.fun in the furniture of a launch record, which is how wrapped SOL came to be served under
+   * a DANGER flag.
+   */
+  if (!(await curveExists(mint)))
+    return { kind: "unknown", code: "not_a_pump_launch", htmlStatus: 200,
+      why: "No pump.fun bonding curve exists for this address, so there is no launch of ours to rebuild. It may be an SPL token launched elsewhere, a wallet address, or a typo." };
+
+  const started = enqueue(mint);
+  if (started.error === "busy")
+    return { kind: "unknown", code: "busy", htmlStatus: 503,
+      why: "We are rebuilding as many records as we can keep up with right now, so this one has not started. Try again in a few minutes." };
+  allow("global:hour", GLOBAL_PER_HOUR, 3600_000);
+  allow("global:day", GLOBAL_PER_DAY, 86400_000);
+  return { kind: "rebuilding", job: started };
 }
 
 /** Shown while a rebuild is queued or running. It polls, so the visitor does not have to. */
@@ -280,6 +372,108 @@ const server = createServer(async (req, res) => {
       return send(200, JSON.stringify(j ?? { state: "unknown" }), TYPES[".json"]);
     }
 
+    /**
+     * ---------- the machine-readable record: /api/v1 ----------
+     *
+     * Free, keyless and unmetered for reads, because the whole strategy depends on being cited rather than bought:
+     * a wallet or a terminal that has to sign up will use whatever is already embedded in its page instead. Only the
+     * expensive path — reconstructing a launch we never watched, which costs thousands of archival RPC calls — carries
+     * the same budget a human visitor gets.
+     *
+     * Matched before the static tree, so `/api/v1/...` is always answered by this code even if a file of that name
+     * were ever written into `site/`.
+     */
+    if (safe.startsWith(`/api/${API_VERSION}/`) || safe === `/api/${API_VERSION}`) {
+      /**
+       * Every response is CORS-open. The integrations that matter most — a warning shown inside a wallet or a terminal
+       * — are browser code on someone else's origin, and a missing header makes the whole API unusable to them while
+       * looking perfectly fine to us. It costs nothing: the data is public domain and there is no session to steal.
+       */
+      const cors = {
+        "access-control-allow-origin": "*",
+        "access-control-allow-methods": "GET, OPTIONS",
+        "access-control-allow-headers": "content-type",
+        "access-control-max-age": "86400",
+      };
+      if (req.method === "OPTIONS") { res.writeHead(204, cors); return res.end(); }
+      const j = (code: number, body: object, cache: "immutable" | "short" | "none" = "none", extra: Record<string, string> = {}) => {
+        res.writeHead(code, {
+          "content-type": "application/json; charset=utf-8",
+          ...cors,
+          // A settled launch record is immutable, so it caches hard at the edge; anything still moving must not.
+          "cache-control": code !== 200 ? "no-store"
+            : cache === "immutable" ? "public, max-age=3600, stale-while-revalidate=86400"
+            : cache === "short" ? "public, max-age=60" : "no-store",
+          ...extra,
+        });
+        res.end(JSON.stringify(body, null, 2));
+      };
+      /** The HTTP status each refusal deserves. The body says the same thing either way, and carries an UNKNOWN verdict. */
+      const API_STATUS: Record<string, number> = {
+        not_a_pump_launch: 404, no_record: 404, rebuild_failed: 404,
+        rate_limited: 429, rebuild_budget_exhausted: 503, busy: 503,
+      };
+      const rest = safe.slice(`/api/${API_VERSION}`.length).replace(/^\/+/, "");
+
+      if (rest === "" || rest === "status")
+        return j(200, statusRecord(COV, held, {
+          docs: "/api.html",
+          bulk: "/data/record.db",
+          endpoints: [`/api/${API_VERSION}/token/{mint}`, `/api/${API_VERSION}/wallet/{address}`, `/api/${API_VERSION}/status`],
+          rebuildsPerIpPerHour: PER_IP_PER_HOUR,
+        }), "short");
+
+      const tj = rest.match(/^token\/([1-9A-HJ-NP-Za-km-z]{32,44})$/);
+      if (tj) {
+        const mint = tj[1];
+        const d = await decide(mint, clientIp(req));
+        if (d.kind === "record") {
+          const r = await readRecord(d.t, d.judgeable);
+          return j(200, tokenRecord(d.t, r.a, r.reading, r.origin, r.clean, COV), d.judgeable ? "immutable" : "none");
+        }
+        if (d.kind === "rebuilding")
+          // 202: we have accepted the work and there is no answer yet. Poll the same URL; a finished rebuild is
+          // permanent, so the second call is the last one a caller ever needs to make for this mint.
+          return j(202, {
+            ...unknownRecord(mint, "We have no record of this launch, so we are reading its bonding curve's entire transaction history from the chain and rebuilding what happened.", COV),
+            rebuild: { state: d.job.state, queued: queue.length, poll: `/api/${API_VERSION}/token/${mint}` },
+          }, "none", { "retry-after": "30" });
+        return j(API_STATUS[d.code] ?? 200, { ...unknownRecord(mint, d.why, COV), error: d.code },
+          "none", d.code === "busy" || d.code === "rebuild_budget_exhausted" ? { "retry-after": "300" } : {});
+      }
+
+      const wj = rest.match(/^wallet\/([1-9A-HJ-NP-Za-km-z]{32,44})$/);
+      if (wj) {
+        const p = profile(db, wj[1]);
+        // No buyouts is not a clean bill of health for a wallet, and the record says so rather than returning an
+        // empty object a caller would read as "nothing on file".
+        return j(200, walletRecord(wj[1], p, verdictLine(p), COV), "short");
+      }
+
+      if (/^(token|wallet)\//.test(rest))
+        return j(400, errorRecord("not_an_address",
+          "A Solana address is 32 to 44 characters of base58 — no 0, O, I or l.", COV, `/api/${API_VERSION}`));
+
+      const jj = rest.match(/^job\/([1-9A-HJ-NP-Za-km-z]{32,44})$/);
+      if (jj) return j(200, { ...(jobs.get(jj[1]) ?? { state: "unknown" }), apiVersion: API_VERSION });
+
+      return j(404, errorRecord("unknown_endpoint",
+        `No such endpoint. This API serves /api/${API_VERSION}/token/{mint}, /api/${API_VERSION}/wallet/{address} and /api/${API_VERSION}/status.`,
+        COV, `/api/${API_VERSION}`));
+    }
+
+    /**
+     * The search form's target. The box used to be an onsubmit handler with no action, so with scripting off it did
+     * nothing — the site's only interactive element was decorative for anyone on a locked-down browser, a text-mode
+     * client or a broken script load. A plain GET lands here and is redirected to the record.
+     */
+    if (safe === "/lookup") {
+      const q = (url.searchParams.get("mint") ?? "").trim();
+      if (MINT.test(q)) { res.writeHead(302, { location: `/t/${q}.html`, "cache-control": "no-store" }); return res.end(); }
+      return send(400, page("Not an address", `<h1>That is not a Solana address</h1>
+        <p class="sub">A mint address is 32 to 44 characters of base58 — no 0, O, I or l.</p>${SEARCH}`, chrome, 0));
+    }
+
     const file = join(DIR, safe);
     if (existsSync(file) && !file.endsWith("/")) return send(200, readFileSync(file), TYPES[safe.slice(safe.lastIndexOf("."))] ?? "application/octet-stream", "short");
 
@@ -315,39 +509,11 @@ const server = createServer(async (req, res) => {
     const m = safe.match(/^\/t\/([1-9A-HJ-NP-Za-km-z]{32,44})\.html$/);
     if (m) {
       const mint = m[1];
-      const t = tokenQ.get(mint) as any;
-      // Only a record we can actually judge short-circuits the rebuild. Holding a *row* for a mint is not the same as
-      // holding its launch: tokens discovered late (named by a post, found by a detector) have no curve history, and
-      // treating their presence as an answer meant the most useful thing we could do for them — rebuild the launch
-      // from chain — was never attempted.
-      const judgeable = !!t && (!!t.rebuilt_complete || (!t.late_discovery && covered(t.created_at)));
-      if (judgeable) return send(200, await renderToken(t), "text/html; charset=utf-8", "immutable");
-      /** Fall back to whatever we do hold, which is honest about knowing nothing, rather than a bare refusal. */
-      const existing = async (why: string) => t ? send(200, await renderToken(t)) : send(200, noRecord(mint, why));
-      const j = jobs.get(mint);
-      // an existing job is reported without spending anything, so a poll or a reload is always free
-      if (j && (j.state === "queued" || j.state === "running")) return send(200, waiting(mint, j));
-      if (j && j.state === "failed" && Date.now() - j.at < RETRY_FAILED_AFTER)
-        return send(200, noRecord(mint, `We tried to rebuild this launch from chain history and could not: ${esc2(j.error ?? "unknown")}.`));
-
-      if (NO_REBUILD) return existing("This server does not rebuild records on demand.");
-      // Budgets are checked before the cheap probe, and the probe before the queue, so the cheapest refusal wins.
-      if (peek("global:day", 86400_000) >= GLOBAL_PER_DAY || peek("global:hour", 3600_000) >= GLOBAL_PER_HOUR)
-        return send(503, noRecord(mint, "We have rebuilt as many records as we can pay for in this period. The archive itself is unaffected — only new rebuilds are paused. Try again later."));
-      const ip = clientIp(req);
-      if (!allow(`ip:${ip}`, PER_IP_PER_HOUR, 3600_000))
-        return send(429, noRecord(mint, `Rebuilding a record reads thousands of transactions from the chain, so each visitor can start ${PER_IP_PER_HOUR} an hour. Records already in the archive are always free to read.`));
-
-      // One RPC call: a mint with no bonding curve is not a pump.fun token, and refusing here costs nothing.
-      if (!(await curveExists(mint)))
-        return existing("No pump.fun bonding curve exists for this address, so there is no launch of ours to rebuild. It may be an SPL token launched elsewhere, a wallet address, or a typo.");
-
-      const started = enqueue(mint);
-      if (started.error === "busy")
-        return send(503, noRecord(mint, "We are rebuilding as many records as we can keep up with right now, so this one has not started. Try again in a few minutes."));
-      allow("global:hour", GLOBAL_PER_HOUR, 3600_000);
-      allow("global:day", GLOBAL_PER_DAY, 86400_000);
-      return send(200, waiting(mint, started));
+      const d = await decide(mint, clientIp(req));
+      if (d.kind === "record")
+        return send(200, await renderToken(d.t, d.judgeable), "text/html; charset=utf-8", d.judgeable ? "immutable" : "none");
+      if (d.kind === "rebuilding") return send(200, waiting(mint, d.job));
+      return send(d.htmlStatus, noRecord(mint, esc2(d.why)));
     }
 
     // anything else
