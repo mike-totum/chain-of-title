@@ -134,7 +134,7 @@ for (const [w] of wallets) {
   const line = verdictLine(p);
   const rows = p.buyouts.map((b) => `<tr><td>${when(b.ts)}</td><td><a href="../t/${esc(b.mint)}.html">${esc(b.symbol ?? "?")}</a></td>
     <td>${b.sol.toFixed(0)} SOL</td><td>${b.dormantH === null ? "unknown" : dur(b.dormantH * 3600_000)} after launch</td></tr>`).join("");
-  if (PAGES) writeFileSync(join(OUT, "w", `${w}.html`), page(`Priors — ${w.slice(0, 8)}`, walletBody(w, p, line), chrome, 1, undefined, `/w/${w}.html`));
+  if (PAGES) writeFileSync(join(OUT, "w", `${w}.html`), page(`Priors: ${w.slice(0, 8)}`, walletBody(w, p, line), chrome, 1, undefined, `/w/${w}.html`));
   if (PAGES) writeFileSync(join(OUT, "api", API_VERSION, "wallet", `${w}.json`),
     JSON.stringify(walletRecord(w, p, line, COV), null, 2));
 }
@@ -167,7 +167,7 @@ writeFileSync(join(OUT, "404.html"), page("No record", `
   Coverage begins ${chrome.coverageFrom}.</div>
   <div class="flag UNKNOWN"><span class="tag UNKNOWN">unknown</span>This is <b>not</b> a clean result.
   Once a token's float has been spread across wallets, a manufactured launch is indistinguishable from a real one by
-  present-tense inspection — which is why the record has to be kept at the time, and why we will not guess.</div>
+  present-tense inspection, which is why the record has to be kept at the time, and why we will not guess.</div>
   ${SEARCH}`, chrome, 0, undefined, "/404.html"));
 
 // ---------- method ----------
@@ -195,7 +195,7 @@ const labelled = (() => {
 writeFileSync(join(OUT, "method.html"), page("How this is decided", `
   <h1 class="headline">How a claim on this site is decided</h1>
   <p class="lede">Everything here is read from the Solana chain and can be checked against it. This page states what is
-  recorded, how the one judgement we make is defined, what was done to test it, and — the part that matters most —
+  recorded, how the one judgement we make is defined, what was done to test it, and, the part that matters most,
   what we refuse to say.</p>
 
   <div class="sec"><h2>What is recorded, and when</h2></div>
@@ -209,7 +209,7 @@ writeFileSync(join(OUT, "method.html"), page("How this is decided", `
 
   <div class="sec"><h2>The one judgement: "launched clean"</h2></div>
   <p class="lede">It means <b>not manufactured</b>. It is not a prediction, not a recommendation, and not a statement
-  that the token will hold its value — most tokens lose money regardless. A launch is called clean only when every one
+  that the token will hold its value; most tokens lose money regardless. A launch is called clean only when every one
   of these is true of the record:</p>
   <table>
     <tr><th>Test</th><th>Threshold</th><th>Why</th></tr>
@@ -226,10 +226,10 @@ writeFileSync(join(OUT, "method.html"), page("How this is decided", `
 
   ${labelled ? `<div class="sec"><h2>Has it been tested?</h2><span class="cnt">${fmt(labelled.checked)} known-manufactured tokens</span></div>
   <p class="lede">Yes, and the test is one-sided on purpose. A missed warning costs a reader nothing; a wrong
-  all-clear costs them everything. So the gate is that <b>no known-manufactured token may be certified clean</b> —
-  failing to flag one is reported and tolerated.</p>
+  all-clear costs them everything. So the gate is that <b>no known-manufactured token may be certified clean</b>.
+  Failing to flag one is reported and tolerated.</p>
   <p class="lede">The labelled set cannot be built from the rules being tested, or it proves nothing. It comes from
-  creator-wallet reuse instead — an axis none of the criteria above read: a ticker relaunched at least 15 times, each
+  creator-wallet reuse instead, an axis none of the criteria above read: a ticker relaunched at least 15 times, each
   time from a fresh creator wallet. No project relaunches its own ticker under a new wallet a hundred times; an
   operation burning identities does.</p>
   <table>
@@ -247,7 +247,7 @@ writeFileSync(join(OUT, "method.html"), page("How this is decided", `
   <table>
     <tr><th>Situation</th><th>What you get</th></tr>
     <tr><td>The launch happened before coverage, or while the collector was down</td><td>UNKNOWN, with an offer to rebuild the record from chain history</td></tr>
-    <tr><td>A rebuild could not read every transaction</td><td>UNKNOWN — a truncated history looks exactly like a quiet launch</td></tr>
+    <tr><td>A rebuild could not read every transaction</td><td>UNKNOWN, because a truncated history looks exactly like a quiet launch</td></tr>
     <tr><td>The pool balance could not be read</td><td>no clean certificate, and no liquidity figure quoted</td></tr>
     <tr><td>We hold no record and the address has no pump.fun bonding curve</td><td>we say so, rather than guess</td></tr>
   </table>
@@ -255,7 +255,7 @@ writeFileSync(join(OUT, "method.html"), page("How this is decided", `
   <div class="sec"><h2>Rebuilt records</h2></div>
   <p class="lede">A launch we did not watch can often be reconstructed: a bonding curve is a single account whose whole
   transaction history is readable, so the same on-chain events can be decoded later. Those pages are marked
-  <b>rebuilt</b>. The figures are the same events read afterwards, and are judged the same way — but a rebuild cannot
+  <b>rebuilt</b>. The figures are the same events read afterwards, and are judged the same way, but a rebuild cannot
   tell you what a token <i>claimed</i> to be at launch, because the name, image and links live off-chain behind a URI
   the operator can repoint. That, and only that, is genuinely unrecoverable.</p>
 
@@ -276,15 +276,15 @@ writeFileSync(join(OUT, "method.html"), page("How this is decided", `
 const recStat = (() => { try { return statSync("data/record.db"); } catch { return null; } })();
 writeFileSync(join(OUT, "data.html"), page("The data", `
   <h1 class="headline">Take the whole archive</h1>
-  <p class="lede">Everything this site knows is one file. It is the same database the service reads — not an export,
+  <p class="lede">Everything this site knows is one file. It is the same database the service reads, not an export,
   not a sample, and not a subset chosen to look good. Public domain, no attribution required, no key, no sign-up.</p>
 
   <div class="sec"><h2>The record database</h2>${recStat ? `<span class="cnt">${(recStat.size / 1048576).toFixed(1)} MB</span>` : ""}</div>
   <table>
-    <tr><td class="k">Download</td><td><a href="data/record.db"><b>record.db</b></a> — SQLite, ${recStat ? `${(recStat.size / 1048576).toFixed(1)} MB` : "~40 MB"}, one row per launch</td></tr>
+    <tr><td class="k">Download</td><td><a href="data/record.db"><b>record.db</b></a>: SQLite, ${recStat ? `${(recStat.size / 1048576).toFixed(1)} MB` : "~40 MB"}, one row per launch</td></tr>
     <tr><td class="k">Launches</td><td>${fmt((db.prepare("SELECT COUNT(*) c FROM tokens").get() as any).c)}</td></tr>
     <tr><td class="k">Coverage</td><td>from ${chrome.coverageFrom}${chrome.gapMin >= 1 ? `, ${fmt(chrome.gapMin)} min of recorded downtime` : ", no recorded downtime"}</td></tr>
-    <tr><td class="k">Licence</td><td>CC0 1.0 — public domain. It is a record of public facts; nobody should have to ask us for it.</td></tr>
+    <tr><td class="k">Licence</td><td>CC0 1.0, public domain. It is a record of public facts; nobody should have to ask us for it.</td></tr>
     <tr><td class="k">Rebuilt</td><td>on each deploy, by <span class="mono">npm run servicedb</span></td></tr>
   </table>
   <p class="lede">Tables: <span class="mono">tokens</span> (the launch record), <span class="mono">trades</span> and
@@ -297,12 +297,12 @@ writeFileSync(join(OUT, "data.html"), page("The data", `
 
   <div class="sec"><h2>Live JSON</h2></div>
   <table>
-    <tr><td class="k"><a href="api/${API_VERSION}/token/{mint}" class="mono">api/${API_VERSION}/token/{mint}</a></td><td>one launch record — free, keyless, CORS-open. <a href="api.html">How to read it</a>, and the one rule that matters.</td></tr>
+    <tr><td class="k"><a href="api/${API_VERSION}/token/{mint}" class="mono">api/${API_VERSION}/token/{mint}</a></td><td>one launch record: free, keyless, CORS-open. <a href="api.html">How to read it</a>, and the one rule that matters.</td></tr>
     <tr><td class="k"><a href="api/${API_VERSION}/status" class="mono">api/${API_VERSION}/status</a></td><td>what the archive holds and what it was awake for</td></tr>
     <tr><td class="k"><a href="api/summary.json" class="mono">api/summary.json</a></td><td>yesterday's counts, coverage, and the current clean list</td></tr>
   </table>
   <p class="callout">Walking the API for bulk work is the slow way round and costs us RPC reads we would rather spend
-  rebuilding launches nobody has asked for yet. Take <a href="data/record.db">record.db</a> instead — it is the same
+  rebuilding launches nobody has asked for yet. Take <a href="data/record.db">record.db</a> instead: it is the same
   data, in one file, and you can join across it.</p>
 
   <div class="sec"><h2>Reading it</h2></div>
@@ -329,7 +329,7 @@ const H = CANONICAL_HOST || "https://chainoftitle.org";
 writeFileSync(join(OUT, "api.html"), page("The API", `
   <h1 class="headline">A launch record, as JSON</h1>
   <p class="lede">Every record on this site is also a JSON document. No key, no account, no rate limit on reads, no
-  attribution required — the archive is public domain and so is everything served from it. If you run a wallet, a
+  attribution required: the archive is public domain and so is everything served from it. If you run a wallet, a
   terminal, a scanner or a bot, you are meant to read this without asking us.</p>
   <p class="lede">There is one thing you have to get right, and it is the next section.</p>
 
@@ -340,11 +340,11 @@ writeFileSync(join(OUT, "api.html"), page("The API", `
   not two:</p>
   <table>
     <tr><td class="k mono">true</td><td>we watched this launch (or rebuilt its complete history) and it shows no sign of manufacture</td></tr>
-    <tr><td class="k mono">false</td><td>we watched it and it failed at least one test — see <span class="mono">verdict</span> and <span class="mono">flags</span> for which. Not necessarily an accusation: a token whose pool we could not read just now is <span class="mono">false</span> and <span class="mono">UNKNOWN</span>, not <span class="mono">DANGER</span>.</td></tr>
+    <tr><td class="k mono">false</td><td>we watched it and it failed at least one test: see <span class="mono">verdict</span> and <span class="mono">flags</span> for which. Not necessarily an accusation: a token whose pool we could not read just now is <span class="mono">false</span> and <span class="mono">UNKNOWN</span>, not <span class="mono">DANGER</span>.</td></tr>
     <tr><td class="k mono">null</td><td><b>we do not know.</b> We did not observe the launch and have not rebuilt it. <b>Do not render this as clean, safe, or "no issues found."</b></td></tr>
   </table>
   <p class="callout">Once a token's float has been spread across wallets, a manufactured launch is indistinguishable
-  from a real one by present-tense inspection — that is the entire reason this archive exists. A null means the
+  from a real one by present-tense inspection, and that is the entire reason this archive exists. A null means the
   evidence is gone, which is the opposite of reassuring. Every refusal and every error we return also carries
   <span class="mono">verdict.level = "UNKNOWN"</span>, so code that reads only that field is safe even when it ignores
   the HTTP status.</p>
@@ -352,7 +352,7 @@ writeFileSync(join(OUT, "api.html"), page("The API", `
   <div class="sec"><h2>Endpoints</h2></div>
   <table>
     <tr><td class="k mono">GET /api/${API_VERSION}/token/{mint}</td><td>one launch record: what the creator took in the first block, how many outside wallets bought its curve, how it graduated, who took it, and the pool right now</td></tr>
-    <tr><td class="k mono">GET /api/${API_VERSION}/wallet/{address}</td><td>a wallet's priors: every bonding curve it has bought outright in this archive, and what it did with the tokens afterwards. A wallet we have never seen returns <span class="mono">inArchive: false</span> and nulls — <b>not zeros</b>, because "we hold nothing on it" is not "it has done nothing". In <span class="mono">buyouts</span>, <span class="mono">sameBatchAsLaunch: true</span> means the buy arrived in the same batch of chain events as the launch itself — <span class="mono">hoursAfterLaunch</span> is then <span class="mono">null</span> rather than <span class="mono">0</span>, because our timestamps cannot resolve it further. Don't render it as zero.</td></tr>
+    <tr><td class="k mono">GET /api/${API_VERSION}/wallet/{address}</td><td>a wallet's priors: every bonding curve it has bought outright in this archive, and what it did with the tokens afterwards. A wallet we have never seen returns <span class="mono">inArchive: false</span> and nulls, <b>not zeros</b>, because "we hold nothing on it" is not "it has done nothing". In <span class="mono">buyouts</span>, <span class="mono">sameBatchAsLaunch: true</span> means the buy arrived in the same batch of chain events as the launch itself, <span class="mono">hoursAfterLaunch</span> is then <span class="mono">null</span> rather than <span class="mono">0</span>, because our timestamps cannot resolve it further. Don't render it as zero.</td></tr>
     <tr><td class="k mono">GET /api/${API_VERSION}/status</td><td>what the archive holds and what it was awake for</td></tr>
     <tr><td class="k mono">GET /data/record.db</td><td>the whole archive as one SQLite file, CC0. If you are going to query it in bulk, take this instead of walking the API.</td></tr>
   </table>
@@ -360,13 +360,13 @@ writeFileSync(join(OUT, "api.html"), page("The API", `
 
   <div class="sec"><h2>Tokens we have never seen</h2></div>
   <p class="lede">Coverage begins ${chrome.coverageFrom}. Ask for an older launch and we reconstruct it from the
-  bonding curve's complete transaction history — thousands of archival RPC reads, which is a background job, not a
+  bonding curve's complete transaction history: thousands of archival RPC reads, which is a background job, not a
   request. You get <span class="mono">202</span> with <span class="mono">verdict.level = "UNKNOWN"</span> and a
   <span class="mono">rebuild</span> object; poll the same URL. A finished record is permanent, so the second call is
   usually the last one you ever make for that mint.</p>
   <p class="lede">Reads are unmetered. Rebuilds are not: they cost real money, so each caller can start
   ${PER_IP_PER_HOUR} an hour and the service has a daily ceiling. When that is reached you get
-  <span class="mono">503 rebuild_budget_exhausted</span> — the archive is unaffected, only new reconstruction is
+  <span class="mono">503 rebuild_budget_exhausted</span>: the archive is unaffected, only new reconstruction is
   paused. If you need bulk historical coverage, <a href="mailto:${esc(CONTACT)}">say so</a>; that is a conversation
   about who pays for the RPC, not about a licence.</p>
 
@@ -376,24 +376,24 @@ writeFileSync(join(OUT, "api.html"), page("The API", `
     <tr><td class="k mono">202</td><td>accepted; a rebuild is queued or running. Retry-After is set.</td></tr>
     <tr><td class="k mono">400 not_an_address</td><td>not base58, or not 32–44 characters</td></tr>
     <tr><td class="k mono">404 not_a_pump_launch</td><td>no pump.fun bonding curve exists for this address. A finding, not a failure.</td></tr>
-    <tr><td class="k mono">404 rebuild_failed</td><td>we tried to read the chain and could not. <b>Our failure, not a finding</b> — it says nothing about the token.</td></tr>
+    <tr><td class="k mono">404 rebuild_failed</td><td>we tried to read the chain and could not. <b>Our failure, not a finding</b>. It says nothing about the token.</td></tr>
     <tr><td class="k mono">429 rate_limited</td><td>too many rebuilds started from one address this hour</td></tr>
     <tr><td class="k mono">503 rebuild_budget_exhausted / busy</td><td>we cannot pay for or keep up with more rebuilds right now</td></tr>
   </table>
 
   <div class="sec"><h2>Terms, such as they are</h2></div>
   <table>
-    <tr><td class="k">Cost</td><td>nothing, and there is no paid tier of this data. If you need an SLA, webhooks at creation, or bulk history, that is a separate conversation — the free endpoint does not get worse to make it happen.</td></tr>
+    <tr><td class="k">Cost</td><td>nothing, and there is no paid tier of this data. If you need an SLA, webhooks at creation, or bulk history, that is a separate conversation; the free endpoint does not get worse to make it happen.</td></tr>
     <tr><td class="k">Licence</td><td>CC0 1.0. Republish it, cache it, resell it. We would rather you linked the record so a reader can check it.</td></tr>
     <tr><td class="k">CORS</td><td>open to every origin. Call it from your own front end.</td></tr>
     <tr><td class="k">Caching</td><td>a settled record is immutable and served <span class="mono">max-age=3600, stale-while-revalidate=86400</span>. Anything unsettled is <span class="mono">no-store</span>.</td></tr>
     <tr><td class="k">Stability</td><td>fields are added, never repurposed. A breaking change gets a new version prefix and the old one keeps answering.</td></tr>
-    <tr><td class="k">What it is not</td><td>not a price feed, not a signal, not advice. A clean record means a launch was <b>not manufactured</b> — nothing about what it will do. Of 19,412 bonding-curve positions measured, none reached 5x.</td></tr>
+    <tr><td class="k">What it is not</td><td>not a price feed, not a signal, not advice. A clean record means a launch was <b>not manufactured</b>, and says nothing about what it will do. Of 19,412 bonding-curve positions measured, none reached 5x.</td></tr>
   </table>
-  <p class="callout">If you ship this in front of users and find a record you think is wrong, tell us — a false
+  <p class="callout">If you ship this in front of users and find a record you think is wrong, tell us: a false
   warning on an honest launch costs us more than a missed one. <a href="mailto:${esc(CONTACT)}">${esc(CONTACT)}</a></p>
   `, chrome, 0,
-  `The Chain of Title launch record as JSON: free, keyless and unmetered, CC0. One rule — an unknown launch is never a clean one.`, "/api.html"));
+  `The Chain of Title launch record as JSON: free, keyless and unmetered, CC0. One rule: an unknown launch is never a clean one.`, "/api.html"));
 
 /**
  * The pledge and the corrections route.
@@ -484,7 +484,7 @@ writeFileSync(join(OUT, "favicon.svg"), FAVICON);
 // The link-preview card. A committed asset rather than a build product: it needs a real browser to render (see
 // `scripts/ogcard.mjs`), which the container has not got, and it changes only when the mark or the wording does.
 try { copyFileSync("assets/og.png", join(OUT, "og.png")); }
-catch { console.log("  assets/og.png missing — link previews will have no image"); }
+catch { console.log("  assets/og.png missing, link previews will have no image"); }
 
 writeFileSync(join(OUT, "api", "summary.json"), JSON.stringify({
   generatedAt: now, coverageFrom: win.length ? win[0].a : null, downtimeMinutes: Math.round(chrome.gapMin),

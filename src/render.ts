@@ -91,7 +91,7 @@ form.find button{padding:11px 18px;font:600 13px/1.4 inherit;color:var(--bg);bac
 .sec h2{margin:0;border:0;padding:0}
 .sec .cnt{margin-left:auto;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--mut)}
 /* The contrast that is the whole argument: what is measurable now, against what was true at birth.
-   Three panels in a two-column grid put step 3 — the step that lands the argument — alone on a second row with an
+   Three panels in a two-column grid put step 3, the step that lands the argument, alone on a second row with an
    empty cell beside it, directly under a sentence telling the reader to read left to right. It is a sequence, so it
    gets a column each. */
 .proof{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border:1px solid var(--line);background:var(--card);margin:22px 0 0}
@@ -186,7 +186,7 @@ export function page(title: string, body: string, c: Chrome, depth = 0, summary?
   const canonical = CANONICAL_HOST && path ? `${CANONICAL_HOST}${path.startsWith("/") ? path : `/${path}`}` : "";
   const desc = summary ?? "The documented history of a Solana token from its first block: who created it, what they took, and who actually bought.";
   const head = [
-    `<title>${esc(title)} — ${BRAND}</title>`,
+    `<title>${esc(title)} · ${BRAND}</title>`,
     ...(canonical ? [`<link rel="canonical" href="${esc(canonical)}">`, `<meta property="og:url" content="${esc(canonical)}">`] : []),
     `<meta name="description" content="${esc(desc)}">`,
     `<meta property="og:site_name" content="${BRAND}">`,
@@ -197,7 +197,7 @@ export function page(title: string, body: string, c: Chrome, depth = 0, summary?
       `<meta property="og:image" content="${esc(CANONICAL_HOST + OG_IMAGE)}">`,
       `<meta property="og:image:width" content="1200">`,
       `<meta property="og:image:height" content="630">`,
-      `<meta property="og:image:alt" content="${esc(BRAND)} — Solana launch records">`,
+      `<meta property="og:image:alt" content="${esc(BRAND)}: Solana launch records">`,
     ] : []),
     // The large card is what makes the headline legible in a chat client; `summary` renders it at thumbnail size.
     `<meta name="twitter:card" content="${CANONICAL_HOST ? "summary_large_image" : "summary"}">`,
@@ -209,16 +209,16 @@ export function page(title: string, body: string, c: Chrome, depth = 0, summary?
 <link rel="icon" href="${root}favicon.svg" type="image/svg+xml">
 ${head}<style>${CSS}</style></head>
 <body><div class="wrap">
-<div class="mast"><a class="brand serif" href="${root}index.html">${MARK}<span>${BRAND}</span></a><span class="tag2">Solana launch records</span><span class="what">In property law, the chain of title is the unbroken documented history of ownership from origin — what you establish before you believe a claim about what something is.</span></div>
+<div class="mast"><a class="brand serif" href="${root}index.html">${MARK}<span>${BRAND}</span></a><span class="tag2">Solana launch records</span><span class="what">In property law, the chain of title is the unbroken documented history of ownership from origin: what you establish before you believe a claim about what something is.</span></div>
 ${body}
 <div class="note"><a href="${root}method.html">How this is decided</a> · <a href="${root}corrections.html">Tell us we are wrong</a> · <a href="${root}data.html">Take the data</a> · <a href="${root}api.html">API</a> · <a href="${root}pledge.html">Pledge</a> · <a href="${root}index.html">${BRAND}</a><br>
 The documented history of a token from its first block. Coverage begins ${c.coverageFrom}${c.gapMin >= 1 ? `, with ${fmt(c.gapMin)} min of recorded downtime` : ", no recorded downtime"}.
-Everything here is read from the Solana chain and can be checked against it. A clean record means a launch was <b>not manufactured</b> — it is not a prediction and not advice.
+Everything here is read from the Solana chain and can be checked against it. A clean record means a launch was <b>not manufactured</b>. It is not a prediction and not advice.
 Most tokens lose money regardless: of 19,412 bonding-curve positions measured, none reached 5x.
 <div class="who">Kept by <b>${esc(KEEPER)}</b> · <a href="mailto:${esc(CONTACT)}">${esc(CONTACT)}</a>${SOURCE_URL ? ` · <a href="${esc(SOURCE_URL)}">Source</a>` : ""}<br>
 Free to use, with no account and no wallet connection. The archive is public domain (<a href="${root}data.html">CC0</a>) and
 downloadable in full, so nothing here depends on trusting us to keep publishing it. Funded by grants and by the
-services that read it — never by the projects it reports on, and never by sending you into a trade.</div></div>
+services that read it, never by the projects it reports on, and never by sending you into a trade.</div></div>
 </div></body></html>`;
 }
 
@@ -279,16 +279,16 @@ export type Reading = { sol: number; at: number; fresh: boolean };
 export function tokenPreview(t: any, a: Assessment, clean: boolean): { title: string; summary: string } {
   const sym = t.symbol ?? "This token";
   if (!a.watched)
-    return { title: `${sym} — launch not observed`,
+    return { title: `${sym}: launch not observed`,
       summary: `We have no record of this launch, so we cannot tell you what it was at birth. That is not a clean result: once a token's float has been spread, a manufactured launch is indistinguishable from a real one.` };
   const bits: string[] = [];
   if (t.dev_pct != null) bits.push(`the creator took ${t.dev_pct.toFixed(1)}% of supply in the first block`);
   if (a.curveBuyers != null) bits.push(`${fmt(a.curveBuyers)} outside wallet${a.curveBuyers === 1 ? "" : "s"} bought on the bonding curve`);
   if (t.graduated_at && t.created_at) bits.push(`the curve filled in ${dur(t.graduated_at - t.created_at)}`);
   const evidence = bits.join(", ") + ".";
-  if (clean) return { title: `${sym} — launched clean`, summary: `Recorded live at launch: ${evidence} Not manufactured — which is not a prediction, and most tokens lose money regardless.` };
+  if (clean) return { title: `${sym}: launched clean`, summary: `Recorded live at launch: ${evidence} Not manufactured, which is not a prediction, and most tokens lose money regardless.` };
   const headline = manufactureHeadline(t, a);
-  return { title: headline ? `${sym} — ${headline}` : `${sym} — launch record`, summary: `Recorded live at launch: ${evidence}` };
+  return { title: headline ? `${sym}: ${headline}` : `${sym}: launch record`, summary: `Recorded live at launch: ${evidence}` };
 }
 
 /**
@@ -333,7 +333,7 @@ export type Verdict = { level: "OK" | "DANGER" | "CAUTION" | "UNKNOWN"; label: s
  */
 export function verdict(t: any, a: Assessment, clean: boolean): Verdict {
   if (!a.watched) return { level: "UNKNOWN", label: "Launch not observed",
-    why: "We have no record of this launch, so we cannot say what it was at birth. That is not a clean result — once the float has been spread, a manufactured launch is indistinguishable from a real one." };
+    why: "We have no record of this launch, so we cannot say what it was at birth. That is not a clean result. Once the float has been spread, a manufactured launch is indistinguishable from a real one." };
   if (clean) return { level: "OK", label: "Launched clean",
     why: "The launch record shows no sign of manufacture. That is not a prediction and not advice; most tokens lose money regardless." };
   const headline = manufactureHeadline(t, a);
@@ -355,7 +355,7 @@ export function tokenBody(
     <tr><td class="k">Created</td><td>${when(t.created_at)}</td></tr>
     <tr><td class="k">Creator</td><td class="mono">${esc(t.creator || "unknown")}</td></tr>
     <tr><td class="k">Creator took</td><td><b>${t.dev_pct?.toFixed(1) ?? "?"}%</b> of supply in the first block</td></tr>
-    <tr><td class="k">Outside buyers</td><td><b>${a.curveBuyers === null ? "unknown" : fmt(a.curveBuyers)}</b> distinct wallets bought on the bonding curve before it graduated${origin === "observed" ? ` — ${fmt(t.snap30_buyers ?? 0)} within the first 30s, ${fmt(t.bundled_buyers ?? 0)} bundled into the creation block.` : "."}</td></tr>
+    <tr><td class="k">Outside buyers</td><td><b>${a.curveBuyers === null ? "unknown" : fmt(a.curveBuyers)}</b> distinct wallets bought on the bonding curve before it graduated${origin === "observed" ? `: ${fmt(t.snap30_buyers ?? 0)} within the first 30s, ${fmt(t.bundled_buyers ?? 0)} bundled into the creation block.` : "."}</td></tr>
     <tr><td class="k">Graduated</td><td>${t.graduated_at ? `${dur(t.graduated_at - t.created_at)} after launch` : "yes"}</td></tr>
     <tr><td class="k">Creator sold</td><td>${t.dev_sold ? "yes" : origin === "observed" ? "not while we watched" : "no"}</td></tr>`
     : `<tr><td class="k">Launch</td><td>Not observed. ${t.late_discovery ? "Found only after it was already trading." : "The collector was down when it launched."}</td></tr>`;
@@ -367,7 +367,7 @@ export function tokenBody(
 
   const nowBlock = r ? `<h2>Pool</h2><table>
     <tr><td class="k">Liquidity</td><td>${r.sol.toFixed(1)} SOL</td></tr>
-    <tr><td class="k">Read from chain</td><td>${when(r.at)} — ${ago(now - r.at)}${r.fresh ? "" : ". Pool balances move; treat an old reading as an old reading."}</td></tr></table>`
+    <tr><td class="k">Read from chain</td><td>${when(r.at)}, ${ago(now - r.at)}${r.fresh ? "" : ". Pool balances move; treat an old reading as an old reading."}</td></tr></table>`
     : t.vault_sol != null ? `<h2>Pool</h2><p class="sub">A balance of ${t.vault_sol.toFixed(1)} SOL is on file but we cannot say when it was read, so it is not quoted here.</p>` : "";
 
   // How the record was obtained is part of the record. A rebuild is the same transactions, read later — but it cannot
@@ -375,7 +375,7 @@ export function tokenBody(
   const provenance = origin === "rebuilt" ? `<div class="flag UNKNOWN"><span class="tag UNKNOWN">rebuilt</span>
     We did not watch this launch. Its record was reconstructed from the bonding curve's complete transaction history,
     so the figures below are the same on-chain events, read later. What it cannot tell you is what the token
-    <i>claimed</i> to be at launch — the name, image and links live off-chain and can be changed since.</div>` : "";
+    <i>claimed</i> to be at launch: the name, image and links live off-chain and can be changed since.</div>` : "";
 
   const v = verdict(t, a, clean);
   return `
@@ -436,7 +436,7 @@ export function homeBody(h: Home): string {
     <h1 class="headline">In the last 24 hours ${fmt(h.graduated24h)} tokens finished their bonding curve.
     <b>${fmt(h.clean24h)}</b> of them launched clean.</h1>
     <p class="lede">Most were manufactured. The creator took the supply, or a single wallet bought the whole curve and
-    called it demand. That evidence exists for about thirty seconds and is unrecoverable afterwards — so we watch every
+    called it demand. That evidence exists for about thirty seconds and is unrecoverable afterwards, so we watch every
     launch on pump.fun and keep the record.</p>
     <p class="lede">Paste any mint. If we hold its launch, you get what happened. If we do not, we rebuild it from the
     chain, and if we cannot do that we say so rather than guess.</p>
@@ -448,12 +448,12 @@ export function homeBody(h: Home): string {
       <div class="stat"><span>carrying a danger flag</span><b class="big">${fmt(h.danger24h)}</b></div>
       <div class="stat"><span>launches on file</span><b class="big">${fmt(h.onFile)}</b></div>
     </div>
-    <p class="sub" style="margin:6px 0 0">Launch counts as of ${h.builtAt ? `${when(h.builtAt)} — ${ago(h.now - h.builtAt)}` : "an unrecorded time"}, the age of the archive this reads.
+    <p class="sub" style="margin:6px 0 0">Launch counts as of ${h.builtAt ? `${when(h.builtAt)}, ${ago(h.now - h.builtAt)}` : "an unrecorded time"}, the age of the archive this reads.
     Pool balances are read separately and continuously; each carries its own age below.</p>
   </div>
 
   ${p ? `<div class="sec"><h2>Why a scanner cannot tell you this</h2></div>
-  <p class="lede">One launch from this archive — <a href="t/${esc(p.mint)}.html">${esc(p.symbol ?? "?")}</a> — and several hundred like it. Read left to right.</p>
+  <p class="lede">One launch from this archive, <a href="t/${esc(p.mint)}.html">${esc(p.symbol ?? "?")}</a>, and several hundred like it. Read left to right.</p>
   <div class="proof">
     <div class="birth">
       <h3>1 · At birth, recorded live</h3>
@@ -482,16 +482,16 @@ export function homeBody(h: Home): string {
   </div>
   <p class="verdictline">A checker run at step 2 finds nothing wrong, because at step 2 there is nothing left to find:
   the operator bought the float, then paid for the appearance of a market. A checker run at step 3 reports thin
-  liquidity — correctly, and far too late to be worth anything. The launch record was true at every step, and it is
+  liquidity: correctly, and far too late to be worth anything. The launch record was true at every step, and it is
   the only thing here that could not be bought.</p>` : ""}
 
-  <div class="sec"><h2>Launched clean — last ${h.windowDays === 1 ? "24 hours" : `${h.windowDays} days`}</h2><span class="cnt">${fmt(h.cleanRows.length)} of ${fmt(h.gradWindow)} graduations${h.unchecked ? ` · ${fmt(h.unchecked)} unchecked` : ""}</span></div>
+  <div class="sec"><h2>Launched clean, last ${h.windowDays === 1 ? "24 hours" : `${h.windowDays} days`}</h2><span class="cnt">${fmt(h.cleanRows.length)} of ${fmt(h.gradWindow)} graduations${h.unchecked ? ` · ${fmt(h.unchecked)} unchecked` : ""}</span></div>
   <p class="lede">Creator kept under ${h.maxDevPct}% and has not sold, at least ${h.minBuyers} distinct buyers on the curve,
   the curve took over a minute to fill and was not taken by a single ${h.buyoutSol}+ SOL buy, and at least ${h.minPoolSol} SOL
   in the pool on a reading no older than five minutes. That means <b>not manufactured</b>. It is not a recommendation, and most of these will still lose money.</p>
   <table class="data"><tr><th>Token</th><th class="num">Creator kept</th><th class="num">Buyers</th><th class="num">Time to fill</th><th class="num">Liquidity</th><th class="num">Read</th></tr>${rows}</table>
   <p class="callout">Launch figures are permanent; a pool balance is not. Every balance above carries the moment it was
-  taken, and a token whose pool has not been read recently enough is left off rather than carried on an old number.${h.unchecked ? ` <b>${fmt(h.unchecked)}</b> passed every launch test but have no reading fresh enough to certify — absent here means unchecked, not manufactured.` : ""}</p>
+  taken, and a token whose pool has not been read recently enough is left off rather than carried on an old number.${h.unchecked ? ` <b>${fmt(h.unchecked)}</b> passed every launch test but have no reading fresh enough to certify. Absent here means unchecked, not manufactured.` : ""}</p>
 
   <div class="sec"><h2>Who takes the curves</h2><span class="cnt">${fmt(h.wallets)} wallets on file</span></div>
   <p class="lede">A single large buy that completes a bonding curve is not demand, it is a purchase of the float. These

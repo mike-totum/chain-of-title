@@ -143,7 +143,7 @@ export function walletRecord(w: string, p: Profile, line: string | null, cov: Co
     wallet: w,
     inArchive,
     note: inArchive ? null
-      : "This wallet does not appear in our archive: it has not bought out a bonding curve or traded a token we tracked inside our coverage window. That is not a statement about the wallet — the figures below are unknown, not zero.",
+      : "This wallet does not appear in our archive: it has not bought out a bonding curve or traded a token we tracked inside our coverage window. That is not a statement about the wallet: the figures below are unknown, not zero.",
     // The plain sentence the page leads with, or null when the wallet has no pattern worth stating. Never invented:
     // `verdictLine` returns null rather than reaching for something to say.
     summary: line,

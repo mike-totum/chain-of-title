@@ -98,7 +98,7 @@ async function pullRecord(first: boolean): Promise<void> {
     const res = await fetch(RECORD_URL, { signal: AbortSignal.timeout(300_000) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.length < 1_000_000) throw new Error(`only ${buf.length} bytes — not a real archive`);
+    if (buf.length < 1_000_000) throw new Error(`only ${buf.length} bytes, not a real archive`);
     const { writeFileSync, renameSync, mkdirSync } = await import("node:fs");
     const { dirname } = await import("node:path");
     mkdirSync(dirname(tmp), { recursive: true });
@@ -135,7 +135,7 @@ async function pullRecord(first: boolean): Promise<void> {
       } catch { return 0; }
     })();
     if (process.env.RECORD_ALLOW_SHRINK !== "1" && n < holding * 0.9)
-      throw new Error(`downloaded archive holds ${n.toLocaleString()} launches against the ${holding.toLocaleString()} already here — ` +
+      throw new Error(`downloaded archive holds ${n.toLocaleString()} launches against the ${holding.toLocaleString()} already here, ` +
         `refusing to shrink the record. If this is intended, set RECORD_ALLOW_SHRINK=1.`);
     renameSync(tmp, DB_FILE);
     console.log(`[record] pulled ${(buf.length / 1048576).toFixed(1)} MB, ${n.toLocaleString()} launches`);
@@ -446,7 +446,7 @@ async function decide(mint: string, ip: string): Promise<Decision> {
   // Budgets are checked before the cheap probe, and the probe before the queue, so the cheapest refusal wins.
   if (peek("global:day", 86400_000) >= GLOBAL_PER_DAY || peek("global:hour", 3600_000) >= GLOBAL_PER_HOUR)
     return { kind: "unknown", code: "rebuild_budget_exhausted", htmlStatus: 503,
-      why: "We have rebuilt as many records as we can pay for in this period. The archive itself is unaffected — only new rebuilds are paused. Try again later." };
+      why: "We have rebuilt as many records as we can pay for in this period. The archive itself is unaffected: only new rebuilds are paused. Try again later." };
   if (!allow(`ip:${ip}`, PER_IP_PER_HOUR, 3600_000))
     return { kind: "unknown", code: "rate_limited", htmlStatus: 429,
       why: `Rebuilding a record reads thousands of transactions from the chain, so each visitor can start ${PER_IP_PER_HOUR} an hour. Records already in the archive are always free to read.` };
@@ -479,7 +479,7 @@ const waiting = (mint: string, j: Job) => page("Rebuilding", `
   <p>We have no record of this launch, so we are reading its bonding curve's entire transaction history from the chain
   and rebuilding what happened: who created it, what they took in the first block, every wallet that bought on the
   curve, and how it graduated.</p>
-  <p class="sub">${j.state === "queued" ? `Queued${queue.indexOf(mint) > 0 ? `, ${queue.indexOf(mint)} ahead of it` : ""}.` : "Running."} A busy curve can take several minutes — there can be
+  <p class="sub">${j.state === "queued" ? `Queued${queue.indexOf(mint) > 0 ? `, ${queue.indexOf(mint)} ahead of it` : ""}.` : "Running."} A busy curve can take several minutes; there can be
   thousands of transactions. This page checks every few seconds and will show the record when it is ready. Once built,
   it is permanent: a launch record never changes.</p>
   <script>
@@ -492,15 +492,15 @@ const waiting = (mint: string, j: Job) => page("Rebuilding", `
   }, 5000);
   </script>
   <div class="flag DANGER" id="err" style="display:none"><span class="tag DANGER">failed</span>
-  The rebuild could not be completed: <span id="errtext"></span>. That is a failure to read, not a finding —
-  it says nothing about this token.</div>`, chrome, 1);
+  The rebuild could not be completed: <span id="errtext"></span>. That is a failure to read, not a finding.
+  It says nothing about this token.</div>`, chrome, 1);
 
 const noRecord = (mint: string, why: string) => page("No record", `
   <h1>We have no record of this launch</h1>
   <div class="sub mono">${mint}</div>
   <div class="flag UNKNOWN"><span class="tag UNKNOWN">unknown</span>${why}
   This is <b>not</b> a clean result. Once a token's float has been spread across wallets, a manufactured launch is
-  indistinguishable from a real one by present-tense inspection — which is why the record has to be kept at the time,
+  indistinguishable from a real one by present-tense inspection, which is why the record has to be kept at the time,
   and why we will not guess.</div>
   ${SEARCH}`, chrome, 1);
 
@@ -696,7 +696,7 @@ const server = createServer(async (req, res) => {
 
       if (/^(token|wallet)\//.test(rest))
         return j(400, errorRecord("not_an_address",
-          "A Solana address is 32 to 44 characters of base58 — no 0, O, I or l.", COV, `/api/${API_VERSION}`));
+          "A Solana address is 32 to 44 characters of base58, with no 0, O, I or l.", COV, `/api/${API_VERSION}`));
 
       const jj = rest.match(/^job\/([1-9A-HJ-NP-Za-km-z]{32,44})$/);
       if (jj) return j(200, { ...(jobs.get(jj[1]) ?? { state: "unknown" }), apiVersion: API_VERSION });
@@ -715,7 +715,7 @@ const server = createServer(async (req, res) => {
       const q = (url.searchParams.get("mint") ?? "").trim();
       if (MINT.test(q)) { res.writeHead(302, { location: `/t/${q}.html`, "cache-control": "no-store" }); return res.end(); }
       return send(400, page("Not an address", `<h1>That is not a Solana address</h1>
-        <p class="sub">A mint address is 32 to 44 characters of base58 — no 0, O, I or l.</p>${SEARCH}`, chrome, 0));
+        <p class="sub">A mint address is 32 to 44 characters of base58, with no 0, O, I or l.</p>${SEARCH}`, chrome, 0));
     }
 
     // The front page is rendered, not served from disk. It must come before the static handler, which would
@@ -752,9 +752,9 @@ const server = createServer(async (req, res) => {
       if (!p.buyouts.length)
         return send(200, page("No record", `<h1>No curve buyouts on record</h1><div class="sub mono">${wm[1]}</div>
           <div class="flag UNKNOWN"><span class="tag UNKNOWN">unknown</span>This wallet has not bought out a bonding
-          curve in our archive. That is not a statement about the wallet — only that it does not appear here.</div>`, chrome, 1));
+          curve in our archive. That is not a statement about the wallet: only that it does not appear here.</div>`, chrome, 1));
       const line = verdictLine(p);
-      return send(200, page(`Priors — ${wm[1].slice(0, 8)}`, walletBody(wm[1], p, line), chrome, 1,
+      return send(200, page(`Priors: ${wm[1].slice(0, 8)}`, walletBody(wm[1], p, line), chrome, 1,
         line ?? `A wallet that has bought out ${p.buyouts.length} bonding curve${p.buyouts.length === 1 ? "" : "s"} in this archive.`,
         `/w/${wm[1]}.html`), "text/html; charset=utf-8", "short");
     }
