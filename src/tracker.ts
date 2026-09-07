@@ -15,6 +15,11 @@ export interface TokenState {
   createdSlot: number;
   /** Launchpad slug, e.g. "pumpfun". Omitted by the pump.fun collector, which is the default in `upsertToken`. */
   venue?: string;
+  /**
+   * How we know the curve completed: "pool" or "curve_complete". Left undefined when `graduated` was inferred from
+   * decoded trade events reaching the threshold, which is not proof — see `graduated_confirmed_by` in db.ts.
+   */
+  graduatedConfirmedBy?: string;
   /** per-token override of the max watch window (operator-cluster tokens get 24 h) */
   watchCapMs?: number;
   /** most recent trade, for strategies that react to who is buying */

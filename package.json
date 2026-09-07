@@ -1,9 +1,9 @@
 {
-  "name": "pump-monitor",
+  "name": "chain-of-title",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Real-time pump.fun launch monitor with KOL Twitter signals and paper trading",
+  "description": "Chain of Title — a public archive of launch-time provenance for Solana tokens",
   "scripts": {
     "start": "tsx --no-warnings=ExperimentalWarning src/index.ts",
     "report": "tsx --no-warnings=ExperimentalWarning src/report.ts",

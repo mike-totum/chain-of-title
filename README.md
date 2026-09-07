@@ -1,12 +1,19 @@
-# pump-monitor — Chain of Title
+# Chain of Title
 
-The public face is **Chain of Title** (`chainoftitle.org`): in property law, the unbroken documented history of
-ownership from origin — what you establish before believing a claim about what something is. Token pages carry that
-history; wallet pages are headed **Priors**, the operator's own record. `BRAND` in `src/site.ts` is the single place
-the name appears.
+**A public archive of launch-time provenance for Solana tokens** — `chainoftitle.org`, free and CC0.
 
+In property law, a chain of title is the unbroken documented history of ownership from origin: what you establish
+before believing a claim about what something is. The facts that identify a manufactured token — what share of supply
+the creator took in the first block, how many outside wallets actually bought, how the curve filled — are visible only
+while it happens, and present-tense inspection cannot recover them once the float has been spread. So this records
+them as they occur, and answers questions against that record.
 
-Real-time pump.fun launch monitor with paper trading. It answers two questions:
+Token pages carry that history; wallet pages are headed **Priors**, the operator's own record. `BRAND` in
+`src/site.ts` is the single place the name appears.
+
+The collector began as a real-time launch monitor with paper trading, and the sections below still describe that
+machinery — the trading thesis was tested against 139 entry/exit rules and is dead (`ASSUMPTIONS.md`), but the
+instrument that measured it is the same one that now records provenance. It answers two questions:
 
 1. **Can it find tokens?** Every pump.fun launch is picked up within ~1 s by decoding
    the pump.fun program's own events from a Solana RPC websocket (free public endpoint by

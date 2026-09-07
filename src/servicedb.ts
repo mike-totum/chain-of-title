@@ -75,7 +75,10 @@ db.exec(`
     rebuilt_at INTEGER, rebuilt_complete INTEGER, updated_at INTEGER,
     -- Last, matching main.tokens and the ALTER below, because the copy below is a positional INSERT ... SELECT.
     -- NOT NULL so the published archive can never carry a row whose venue reads as unknown when it is not.
-    venue TEXT NOT NULL DEFAULT 'pumpfun'
+    venue TEXT NOT NULL DEFAULT 'pumpfun',
+    -- Nullable on purpose: NULL means the graduation was inferred and never confirmed, which is a real third state
+    -- and must not be collapsed into a boolean. See db.ts.
+    graduated_confirmed_by TEXT
   );
   CREATE INDEX IF NOT EXISTS rec.tokens_created ON tokens(created_at);
   CREATE INDEX IF NOT EXISTS rec.tokens_creator ON tokens(creator);
@@ -125,6 +128,24 @@ try { db.exec("ALTER TABLE rec.trades ADD COLUMN slot INTEGER"); } catch {}
  * what it is. Every row in this file came from the pump.fun collector, so the default states a recorded fact.
  */
 try { db.exec("ALTER TABLE rec.tokens ADD COLUMN venue TEXT NOT NULL DEFAULT 'pumpfun'"); } catch {}
+/**
+ * Graduation confirmation. No backfilling default here, unlike venue: an unconfirmed graduation is genuinely unknown,
+ * and stamping existing rows would invent evidence. The copy below carries whatever the collector actually recorded,
+ * and `openDb` has already upgraded rows there that have an observed pool.
+ */
+try { db.exec("ALTER TABLE rec.tokens ADD COLUMN graduated_confirmed_by TEXT"); } catch {}
+/**
+ * Upgrade the rows already in the file from evidence they already carry.
+ *
+ * The ALTER above only widens the table; an incremental run re-copies nothing behind the watermark, so without this
+ * the column arrives NULL on every historical row and stays that way — 4,021 launches with a pool address we
+ * observed, reported as unconfirmed. That is the same trap the venue column hit, and it is worth stating once more:
+ * a migration that adds a column does not reach the rows a watermark excludes.
+ *
+ * This invents nothing. A pool on the row is an observation we made, and a pool cannot exist unless the curve
+ * completed, so it is exactly the evidence the column is for. Rows without one stay NULL.
+ */
+try { db.exec("UPDATE rec.tokens SET graduated_confirmed_by = 'pool' WHERE graduated = 1 AND pool IS NOT NULL AND graduated_confirmed_by IS NULL"); } catch {}
 
 const since = FULL ? 0 : Number((db.prepare("SELECT v FROM rec.meta WHERE k='watermark'").get() as any)?.v ?? 0);
 log(`carrying launches ${since ? `changed since ${new Date(since).toISOString()}` : "(full rebuild)"}…`);
@@ -141,13 +162,17 @@ try {
            pool, vault_sol, vault_at, last_price, rebuilt_at, rebuilt_complete, updated_at,
            -- Last, matching both schemas. COALESCE because a collector database migrated mid-run can hold rows
            -- written before the default applied; an unstamped launch is pump.fun for the same recorded reason.
-           COALESCE(venue, 'pumpfun')
+           COALESCE(venue, 'pumpfun'),
+           -- No COALESCE: NULL here means "inferred, never confirmed" and must survive the copy as NULL. A pool we
+           -- observed is confirmation, so upgrade on the way through rather than losing it.
+           COALESCE(graduated_confirmed_by, CASE WHEN graduated = 1 AND pool IS NOT NULL THEN 'pool' END)
     FROM main.tokens WHERE COALESCE(updated_at, 0) >= ${since}
       -- The quote asset is not a launch. Wrapped SOL was copied into the record as one and served as a token page.
       AND main.tokens.mint NOT IN ('So11111111111111111111111111111111111111112',
                                    'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
                                    'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB')
     ON CONFLICT(mint) DO UPDATE SET
+      graduated_confirmed_by=COALESCE(excluded.graduated_confirmed_by, rec.tokens.graduated_confirmed_by),
       name=excluded.name, symbol=excluded.symbol, creator=excluded.creator, created_at=excluded.created_at,
       late_discovery=excluded.late_discovery, dev_pct=excluded.dev_pct, dev_sold=excluded.dev_sold,
       unique_buyers=excluded.unique_buyers, curve_buyers=excluded.curve_buyers, snap30_buyers=excluded.snap30_buyers,

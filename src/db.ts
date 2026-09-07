@@ -29,7 +29,10 @@ export function openDb(path: string): DatabaseSync {
       -- created fresh and one migrated in place have identical column order: servicedb copies this table with a
       -- positional INSERT ... SELECT, where a column-order difference between two live databases would silently
       -- write each value into its neighbour's field.
-      venue TEXT NOT NULL DEFAULT 'pumpfun'
+      venue TEXT NOT NULL DEFAULT 'pumpfun',
+      -- How we know the curve actually completed. See the ALTER below for why this is a nullable source rather than
+      -- a boolean. Appended last for the same positional-copy reason as venue.
+      graduated_confirmed_by TEXT
     );
     CREATE INDEX IF NOT EXISTS tokens_created ON tokens(created_at);
     CREATE TABLE IF NOT EXISTS positions (
@@ -138,6 +141,32 @@ export function openDb(path: string): DatabaseSync {
    * recorded it for, which is precisely the move this project refuses to make about anyone else.
    */
   try { db.exec("ALTER TABLE tokens ADD COLUMN venue TEXT NOT NULL DEFAULT 'pumpfun'"); } catch {}
+  /**
+   * How we know a curve completed: 'pool', 'curve_complete', or NULL.
+   *
+   * `graduated` is set by inference — decoded curve trade events reaching the graduation threshold in vSOL — and was
+   * never checked against anything. Measured on 2026-09-07 over the days when pool discovery was working, that
+   * inference is confirmed by an actual pool 87% of the time for curves that took 10-60 minutes to fill and only 38%
+   * of the time for curves flagged as completing within 60 seconds. Detection quality cannot explain a gradient that
+   * tracks fill speed, so the threshold is firing spuriously on fast curves — and `instant-graduation` is the largest
+   * DANGER category on the site. Of 628 recent fast-flagged launches with no pool, exactly one had a creator holding
+   * 50% or more: we were accusing launches whose creators kept nothing.
+   *
+   * Nullable source rather than a boolean, because the relationship is asymmetric and the asymmetry is the point. A
+   * PumpSwap pool cannot exist unless the curve completed, so a pool IS confirmation; the absence of one is NOT
+   * disconfirmation, only the absence of evidence. A boolean would collapse "we never confirmed it" into a 0 that
+   * reads as "we checked and it did not graduate", which is the exact substitution this project exists to refuse.
+   *
+   * Confirmation is monotonic, like the provenance counters below: NULL may become a source when evidence arrives
+   * later — a pool discovered hours afterwards is still proof — and a source is never cleared.
+   */
+  try { db.exec("ALTER TABLE tokens ADD COLUMN graduated_confirmed_by TEXT"); } catch {}
+  /**
+   * Backfill from evidence already on the row. This is not a guess about history: every one of these rows has a pool
+   * address we observed, and that observation is what confirmation means. Rows without one stay NULL — unconfirmed,
+   * which is the honest state and the one the flag logic must now require against.
+   */
+  try { db.exec("UPDATE tokens SET graduated_confirmed_by = 'pool' WHERE graduated = 1 AND pool IS NOT NULL AND graduated_confirmed_by IS NULL"); } catch {}
   return db;
 }
 
@@ -161,8 +190,8 @@ export function upsertToken(db: DatabaseSync, t: TokenState): void {
     INSERT INTO tokens (mint, name, symbol, uri, creator, created_at, late_discovery, launch_price, last_price, peak_price, peak_at,
       dev_pct, dev_sold, dev_sold_at, buys, sells, buy_vol_sol, sell_vol_sol, unique_buyers, unique_sellers, bundled_buyers,
       snap30_buyers, snap30_buys, snap30_sells, snap30_vol, graduated, graduated_at, p_1m, p_5m, p_15m, p_60m,
-      twitter, telegram, website, kol_signals, pool, amm_trusted, vault_sol, vault_at, finalized, updated_at, venue)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      twitter, telegram, website, kol_signals, pool, amm_trusted, vault_sol, vault_at, finalized, updated_at, venue, graduated_confirmed_by)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(mint) DO UPDATE SET
       name=excluded.name, symbol=excluded.symbol, launch_price=excluded.launch_price, last_price=excluded.last_price,
       peak_price=excluded.peak_price, peak_at=excluded.peak_at, dev_sold=excluded.dev_sold, dev_sold_at=excluded.dev_sold_at,
@@ -182,6 +211,9 @@ export function upsertToken(db: DatabaseSync, t: TokenState): void {
       snap30_sells=COALESCE(tokens.snap30_sells, excluded.snap30_sells),
       snap30_vol=COALESCE(tokens.snap30_vol, excluded.snap30_vol),
       graduated=excluded.graduated, graduated_at=excluded.graduated_at,
+      -- Monotonic: confirmation can arrive late (a pool found hours afterwards is still proof) but never un-arrives.
+      -- A writer that has not confirmed anything must not erase a confirmation another path already earned.
+      graduated_confirmed_by=COALESCE(excluded.graduated_confirmed_by, tokens.graduated_confirmed_by),
       p_1m=excluded.p_1m, p_5m=excluded.p_5m, p_15m=excluded.p_15m, p_60m=excluded.p_60m,
       twitter=COALESCE(excluded.twitter, tokens.twitter), telegram=COALESCE(excluded.telegram, tokens.telegram), website=COALESCE(excluded.website, tokens.website),
       kol_signals=excluded.kol_signals, pool=COALESCE(excluded.pool, tokens.pool), amm_trusted=COALESCE(excluded.amm_trusted, tokens.amm_trusted),
@@ -200,6 +232,7 @@ export function upsertToken(db: DatabaseSync, t: TokenState): void {
     // Not in the ON CONFLICT clause above: where a token launched is a launch fact and cannot change, the same reason
     // `created_at` is never updated. Defaulted here as well as in the schema so a second collector sets one field.
     t.venue ?? "pumpfun",
+    t.graduatedConfirmedBy ?? null,
   );
 }
 

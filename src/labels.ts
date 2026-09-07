@@ -120,9 +120,40 @@ if (silent.length) {
   console.log(`  These are recall gaps, not correctness failures — we stay silent rather than certify.\n`);
 }
 
+/**
+ * The second gate: does the pipeline still certify anything at all?
+ *
+ * Everything above is one-sided by design — it fails only on a false clean. That makes it vacuous in exactly the
+ * situation it is least able to notice: a pipeline that certifies *nothing* passes it perfectly, with a triumphant
+ * "0 false cleans" on a criteria set that has silently stopped answering. That is not hypothetical. When the record
+ * database carried no pool reading for any of its 143,102 rows, the site's clean list fell to four and this validator
+ * would have reported a flawless run throughout, because zero certificates cannot contain a wrong one.
+ *
+ * So the check is two-sided from here: no known-manufactured token may be certified, AND the criteria must still
+ * certify somebody. A recall collapse is a failure too — it just fails quietly, which is why it needs its own alarm.
+ * The count is taken over candidates that already pass the cheap birth filters, so this costs a few hundred assess()
+ * calls rather than a scan of the archive. The liquidity gate is deliberately not applied: freshness is the serving
+ * layer's job, and this asks whether the *criteria* still recognise a clean launch, not whether a pool was readable
+ * in the last five minutes.
+ */
+const MIN_CERTIFIED = Number(process.env.MIN_CERTIFIED ?? 1);
+const candidates = db.prepare(`SELECT ${TOKEN_COLUMNS} FROM tokens
+  WHERE graduated_at IS NOT NULL AND curve_buyers >= 30 AND dev_pct < 20 AND COALESCE(dev_sold, 0) = 0
+    AND COALESCE(late_discovery, 0) = 0`).all() as any[];
+let certified = 0;
+for (const t of candidates) if (cleanAtBirth(t, assess(db, t, covered))) certified++;
+console.log(`certifies clean ${certified} of ${candidates.length} candidates  <- must be at least ${MIN_CERTIFIED}`);
+
 if (falseClean) {
-  console.error(`FAIL: ${falseClean} known-manufactured token(s) pass the clean criteria.\n`);
+  console.error(`\nFAIL: ${falseClean} known-manufactured token(s) pass the clean criteria.\n`);
   for (const f of failures.slice(0, 25)) console.error(`  ${(f.symbol ?? "?").padEnd(12)} ${f.mint}\n    ${f.why}`);
   process.exit(1);
 }
-console.log("PASS: no known-manufactured token is certified clean.");
+if (certified < MIN_CERTIFIED) {
+  console.error(`\nFAIL: the criteria certify ${certified} launches out of ${candidates.length} candidates.`);
+  console.error(`  Nothing is being certified, so "no false cleans" above is vacuous rather than reassuring.`);
+  console.error(`  Look for a missing input before touching a threshold — the last time this happened the criteria`);
+  console.error(`  were fine and the pool readings were absent.\n`);
+  process.exit(1);
+}
+console.log("\nPASS: no known-manufactured token is certified clean, and the criteria still certify real launches.");

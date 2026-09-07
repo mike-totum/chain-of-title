@@ -98,6 +98,15 @@ export function tokenRecord(
       buyersFirst30s: origin === "observed" ? (t.snap30_buyers ?? null) : null,
       bundledBuyers: origin === "observed" ? (t.bundled_buyers ?? null) : null,
       graduated: !!t.graduated,
+      /**
+       * How we know the curve completed: "pool", "curve_complete", or null. **Null does not mean it did not
+       * graduate** — it means we inferred graduation from decoded trade events reaching the threshold and never
+       * confirmed it. A PumpSwap pool cannot exist unless the curve completed, so a pool is proof; its absence is
+       * only the absence of proof. Measured on the days our pool discovery was working, the inference is confirmed
+       * 87% of the time for curves that took 10-60 minutes and 38% of the time for curves flagged as completing
+       * inside 60 seconds, so treat an unconfirmed fast graduation as unknown rather than as a finding.
+       */
+      graduationConfirmedBy: t.graduated_confirmed_by ?? null,
       graduatedAt: at(t.graduated_at),
       secondsToGraduate: gradMs === null ? null : Math.round(gradMs / 1000),
     } : null,

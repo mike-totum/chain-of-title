@@ -62,11 +62,18 @@ export type Assessment = {
   buyout: ReturnType<typeof findBuyout>;
   /** distinct non-dev curve buyers, or null when no trade rows exist — null is unknown, not zero */
   curveBuyers: number | null;
+  /**
+   * Whether the curve is confirmed to have completed — a pool or the curve account's own `complete` bit, never the
+   * vSOL inference alone. Published on the assessment rather than left a local, because every consumer that states a
+   * manufacture conclusion needs the same gate, and a second derivation of it in the renderer is how the page came to
+   * assert "nobody bought its curve" about tokens that never graduated at all.
+   */
+  completed: boolean;
 };
 
 export const TOKEN_COLUMNS = `mint, symbol, name, creator, created_at, late_discovery, dev_pct, dev_sold, unique_buyers,
   snap30_buyers, bundled_buyers, graduated, graduated_at, pool, vault_sol, vault_at, last_price, updated_at,
-  rebuilt_at, rebuilt_complete, curve_buyers, venue`;
+  rebuilt_at, rebuilt_complete, curve_buyers, venue, graduated_confirmed_by`;
 
 /** Union of the collector's run intervals. A launch outside them happened while we were blind. */
 export function coverageWindows(db: DatabaseSync): { a: number; b: number }[] {
@@ -111,21 +118,50 @@ export function assess(db: DatabaseSync, t: any, covered: (ts: number) => boolea
   const curveBuyers = cb.rows > 0 ? cb.n : (t.rebuilt_complete ? (t.unique_buyers ?? null) : null);
   if (!watched) {
     flags.push({ level: "UNKNOWN", text: "We did not observe this launch, so its creator share and outside-buyer count are unknown. A manufactured token is indistinguishable from a real one once its float has been spread." });
-    return { flags, watched, buyout: bo, curveBuyers };
+    return { flags, watched, buyout: bo, curveBuyers, completed: false };
   }
   const gradS = t.graduated_at ? (t.graduated_at - t.created_at) / 1000 : null;
   if (t.dev_pct >= 50) flags.push({ level: "DANGER", text: `The creator took ${t.dev_pct.toFixed(1)}% of the entire supply in the first block. Nothing visible on-chain today shows this — the float has since been spread across wallets.` });
   else if (t.dev_pct >= MAX_DEV_PCT) flags.push({ level: "CAUTION", text: `The creator took ${t.dev_pct.toFixed(1)}% of supply at launch.` });
-  if (curveBuyers === 0) flags.push({ level: "DANGER", text: "It completed its bonding curve with zero outside buyers. The graduation was funded by the creator, not by demand." });
-  else if (curveBuyers !== null && curveBuyers < 10) flags.push({ level: "DANGER", text: `Only ${curveBuyers} outside buyer${curveBuyers === 1 ? "" : "s"} bought on the bonding curve before it graduated.` });
-  if (gradS !== null && gradS <= 60) flags.push({ level: "DANGER", text: `It left the curve ${Math.round(gradS)}s after launch — the float was taken before anyone could buy at a normal price.` });
+  // Every statement below asserts that the curve *completed*, so none of them may be made until that is confirmed.
+  //
+  // `tokens.graduated` is written from two sources the column cannot tell apart. `curvepoll` reads the bonding curve
+  // account and takes its own `complete` bit, which is authoritative. The tracker infers graduation from a decoded
+  // trade reaching ~115 vSOL (`tracker.ts`), which is not. `graduated_confirmed_by` records which of those we have:
+  // 'pool', 'curve_complete', or NULL for an inference nobody ever confirmed.
+  //
+  // The evidence that the inference fires spuriously is a speed gradient, not a raw count. Restricted to days when
+  // pool discovery was working well, confirmation rises monotonically with how long the curve took to fill — 38% for
+  // curves flagged at <=60 s, 46% at 1-10 min, 87% at 10-60 min. Detection improving over the week cannot explain
+  // that, because pool discovery does not know how fast a curve filled. Of 628 recent fast-flagged tokens without
+  // confirmation, exactly one had a creator holding >=50% of supply, so this category is not what it claims to be.
+  //
+  // The converse does not hold, and reading it that way would be the project's own besetting error. Pool discovery
+  // has its own coverage — it was nearly blind on 09-02 and good by 09-07 — so a missing pool is never evidence that
+  // a curve did not complete. Unconfirmed means we say less, never that we say the opposite. Invariant 1, turned
+  // around and pointed at our own inference, which is the direction it keeps being forgotten in.
+  const confirmedBy = t.graduated_confirmed_by ?? (t.pool ? "pool" : null);
+  const completed = gradS !== null && confirmedBy !== null;
+  if (completed) {
+    if (curveBuyers === 0) flags.push({ level: "DANGER", text: "It completed its bonding curve with zero outside buyers. The graduation was funded by the creator, not by demand." });
+    else if (curveBuyers !== null && curveBuyers < 10) flags.push({ level: "DANGER", text: `Only ${curveBuyers} outside buyer${curveBuyers === 1 ? "" : "s"} bought on the bonding curve before it graduated.` });
+    if (gradS <= 60) flags.push({ level: "DANGER", text: `It left the curve ${Math.round(gradS)}s after launch — the float was taken before anyone could buy at a normal price.` });
+  } else if (gradS !== null) {
+    // Recorded as graduating, not confirmed. Say exactly that and make no claim about how it filled.
+    flags.push({ level: "UNKNOWN", text: "Our feed recorded this curve reaching the graduation threshold, but we have not confirmed that against the curve account or a PumpSwap pool, so we do not state that it completed or how it filled." });
+  }
+  // A launch that never completed its curve and never found a buyer is the ordinary way a token dies, not evidence of
+  // manufacture — 34,242 rows in this archive read `curve_buyers = 0, graduated = 0` and were being told, on their
+  // own public page, that they "completed [their] bonding curve" and that "the graduation was funded by the creator",
+  // one of them about a creator holding 1.7% of supply. Never assert an event absent from the record, and never state
+  // a mechanism the record does not establish.
   if (t.dev_sold) flags.push({ level: "CAUTION", text: "The creator sold while we were watching." });
   if (bo) {
     const p = profile(db, bo.wallet);
     const line = verdictLine(p);
     if (line) flags.push({ level: p.ammSell > p.ammBuy * 3 && p.ammSell >= 20 ? "DANGER" : "CAUTION", text: line });
   }
-  return { flags, watched, buyout: bo, curveBuyers };
+  return { flags, watched, buyout: bo, curveBuyers, completed };
 }
 
 /**
@@ -135,5 +171,10 @@ export function assess(db: DatabaseSync, t: any, covered: (ts: number) => boolea
  */
 export const cleanAtBirth = (t: any, a: Assessment): boolean =>
   a.watched && !a.buyout && t.dev_pct < MAX_DEV_PCT && !t.dev_sold &&
-  a.curveBuyers !== null && a.curveBuyers >= MIN_BUYERS && !!t.graduated_at && (t.graduated_at - t.created_at) > MIN_GRAD_MS &&
+  // `a.completed`, not `t.graduated_at`: a certificate says a curve filled slowly from real demand, and that sentence
+  // cannot rest on the same unconfirmed inference the warnings are no longer allowed to rest on. In practice this
+  // removes nothing today — certification separately needs a pool balance read in the last five minutes, and a pool
+  // that can be read is itself the confirmation — but the two gates are independent and the weaker one must not be
+  // the only thing standing between an inference and a clean result.
+  a.curveBuyers !== null && a.curveBuyers >= MIN_BUYERS && a.completed && (t.graduated_at - t.created_at) > MIN_GRAD_MS &&
   !a.flags.some((f) => f.level === "DANGER");

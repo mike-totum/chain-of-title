@@ -299,12 +299,24 @@ export function tokenPreview(t: any, a: Assessment, clean: boolean): { title: st
  */
 function manufactureHeadline(t: any, a: Assessment): string | null {
   const gradS = t.graduated_at && t.created_at ? (t.graduated_at - t.created_at) / 1000 : null;
-  return t.dev_pct >= 50 ? `creator took ${t.dev_pct.toFixed(0)}% of supply at launch`
-    : a.curveBuyers === 0 ? "nobody bought its curve"
+  /**
+   * Each phrase is a complete clause carrying its own article, because the caller says "The record shows <phrase>."
+   * The prefix used to supply a "the", which read correctly for the creator-share phrases and produced "The record
+   * shows the nobody bought its curve." for the rest — on the single most-read line of the most-read page.
+   */
+  return t.dev_pct >= 50 ? `the creator took ${t.dev_pct.toFixed(0)}% of supply at launch`
+    /**
+     * These three assert the curve completed, so none may be said until that is confirmed. `a.completed` is decided
+     * once in provenance.ts and read here; deriving it again from t.graduated is what let this function label an
+     * ordinary dud — no buyers, never graduated — a "Manufactured launch". Not completing a curve is how most tokens
+     * die, and it is not evidence of anything.
+     */
+    : a.completed && a.curveBuyers === 0 ? "nobody bought its curve"
+    : a.completed && gradS !== null && gradS <= 60 ? `the curve was taken ${Math.round(gradS)}s after launch`
+    : a.completed && a.curveBuyers !== null && a.curveBuyers < 10 ? `only ${a.curveBuyers} outside buyer${a.curveBuyers === 1 ? "" : "s"} bought its curve`
+    // A buyout is an observed trade of 40+ SOL, true whether or not the curve went on to complete.
     : a.buyout ? `one wallet bought its curve for ${a.buyout.sol.toFixed(0)} SOL`
-    : gradS !== null && gradS <= 60 ? `curve taken ${Math.round(gradS)}s after launch`
-    : a.curveBuyers !== null && a.curveBuyers < 10 ? `only ${a.curveBuyers} outside buyer${a.curveBuyers === 1 ? "" : "s"}`
-    : t.dev_pct >= MAX_DEV_PCT ? `creator took ${t.dev_pct.toFixed(0)}% of supply at launch`
+    : t.dev_pct >= MAX_DEV_PCT ? `the creator took ${t.dev_pct.toFixed(0)}% of supply at launch`
     : null;
 }
 
@@ -325,7 +337,7 @@ export function verdict(t: any, a: Assessment, clean: boolean): Verdict {
   if (clean) return { level: "OK", label: "Launched clean",
     why: "The launch record shows no sign of manufacture. That is not a prediction and not advice; most tokens lose money regardless." };
   const headline = manufactureHeadline(t, a);
-  if (headline) return { level: "DANGER", label: "Manufactured launch", why: `The record shows the ${headline}.` };
+  if (headline) return { level: "DANGER", label: "Manufactured launch", why: `The record shows ${headline}.` };
   if (a.flags.some((f) => f.level === "DANGER")) return { level: "DANGER", label: "Carries a danger flag",
     why: "The launch itself does not show a manufacturing pattern, but something below is serious enough to warn about." };
   return { level: "UNKNOWN", label: "Not certified",

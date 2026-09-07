@@ -26,8 +26,11 @@ const priced1h = q("SELECT COUNT(*) c FROM tokens WHERE graduated=1 AND vault_so
 
 type Check = { name: string; ok: boolean; detail: string };
 const checks: Check[] = [
-  { name: "heartbeat", ok: heartbeatAgeS < 180,
-    detail: heartbeatAgeS === Infinity ? "never written — collector has not completed a minute of runtime" : `${heartbeatAgeS.toFixed(0)}s old (expected < 180s)` },
+  // Since the heartbeat is stamped with the last launch that actually arrived rather than with the wall clock
+  // (`index.ts`), this now measures ingestion, not liveness — a collector that is up and deaf fails it. That is the
+  // whole point: the check that used to pass hardest during the failure it was meant to catch.
+  { name: "coverage advancing", ok: heartbeatAgeS < 180,
+    detail: heartbeatAgeS === Infinity ? "never written — collector has not completed a minute of runtime" : `last observed launch ${heartbeatAgeS.toFixed(0)}s ago (expected < 180s)` },
   { name: "launches arriving", ok: launchAgeS < 300,
     detail: `last launch ${launchAgeS.toFixed(0)}s ago, ${launches1h} in the last hour (pump.fun runs ~900-1100/h)` },
   { name: "launch rate sane", ok: launches1h >= 100,

@@ -721,7 +721,15 @@ setInterval(() => {
   // NOT watching. stopped_at was only written on a clean shutdown, so a crash or a closed lid left a run open and its
   // downtime invisible. Refreshing it every minute makes coverage the union of run intervals and gaps everything else;
   // launch-time facts are unrecoverable, so an honest gap record is part of the archive, not an operational detail.
-  try { db.prepare("UPDATE runs SET stopped_at = ? WHERE id = ?").run(Date.now(), runId); } catch {}
+  //
+  // It is stamped with the last moment a launch actually arrived, never with the current time. A timer only proves the
+  // process is alive, and this project's characteristic failure is a process that is alive and deaf: on 2026-09-07
+  // both websockets errored continuously and ingestion stopped dead at launches=4093 while the process stayed up and
+  // looked healthy. An unconditional heartbeat records that window as observed, and a launch inside it is then
+  // answered as watched — a clean result about a token nobody saw, which is the one error here that cannot be walked
+  // back. Stamping the last arrival makes a deaf collector write a truthful gap by itself, with no detector to get
+  // right, and errs toward claiming less coverage than we had rather than more.
+  try { db.prepare("UPDATE runs SET stopped_at = ? WHERE id = ?").run(lastSeenChangeAt, runId); } catch {}
   const parts = [...realized].map(([k, v]) => `${k}: ${v.n} closed, ${v.wins}W, ${v.pnl >= 0 ? "+" : ""}${v.pnl.toFixed(3)} SOL`);
   log(`[status] launches=${seen} tracking=${tracker.tokens.size} amm=${ammMatched}/${amm?.stats.trades ?? 0} pools=${poolToMint.size} tradesStored=${trades.written} smartWallets=${broker.smartWallets.size} teamWallets=${broker.walletTeams.size}${st.subscriptions >= 0 ? ` subs=${st.subscriptions}` : ""} trades=${st.trades} reconnects=${st.reconnects} open=${broker.openPositions().length}${watcher ? ` kolPolls=${watcher.stats.polls} kolSignals=${watcher.stats.signals}` : ""}${street ? ` streetTweets=${street.stats.tweets} streetSignals=${street.stats.signals}` : ""}${tg ? ` tgEvents=${tg.stats.allEvents} tgPolls=${tg.stats.polls} tgMsgs=${tg.stats.messages} tgSignals=${tg.stats.signals}` : ""}`);
   for (const p of parts) log("   ", p);
