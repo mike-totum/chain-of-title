@@ -78,6 +78,48 @@ function clientIp(req: any): string {
   return req.socket?.remoteAddress ?? "unknown";
 }
 
+/**
+ * Fetch the record from the machine that builds it. A Railway volume attaches to one service, so `pump.db` — and
+ * therefore `servicedb` — lives on the collector; this service pulls the finished file over the private network.
+ * Removing the database from the image also removes the failure that took the site down twice: an ignore rule
+ * silently excluding a build product.
+ */
+const RECORD_URL = arg("--record-url", process.env.RECORD_URL ?? "");
+const REFRESH_MS = Number(process.env.RECORD_REFRESH_HOURS ?? 6) * 3600_000;
+
+async function pullRecord(first: boolean): Promise<void> {
+  if (!RECORD_URL) return;
+  const tmp = `${DB_FILE}.incoming`;
+  try {
+    const res = await fetch(RECORD_URL, { signal: AbortSignal.timeout(300_000) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length < 1_000_000) throw new Error(`only ${buf.length} bytes — not a real archive`);
+    const { writeFileSync, renameSync, mkdirSync } = await import("node:fs");
+    const { dirname } = await import("node:path");
+    mkdirSync(dirname(tmp), { recursive: true });
+    writeFileSync(tmp, buf);
+    // Verify before adopting it: a truncated or half-written database opens fine and simply reports fewer launches,
+    // which is the failure this project keeps meeting. Only swap it in once it reads as a real archive.
+    const { DatabaseSync } = await import("node:sqlite");
+    const probe = new DatabaseSync(tmp);
+    const n = (probe.prepare("SELECT COUNT(*) c FROM tokens").get() as any).c as number;
+    probe.close();
+    if (n < 1000) throw new Error(`downloaded archive holds only ${n} launches`);
+    renameSync(tmp, DB_FILE);
+    console.log(`[record] pulled ${(buf.length / 1048576).toFixed(1)} MB, ${n.toLocaleString()} launches`);
+    // Renaming swaps the file, but an already-open SQLite handle keeps reading the old inode — so a refresh would be
+    // downloaded, verified, and then quietly ignored for as long as the process lived. Exiting hands the platform a
+    // clean restart, which reopens the new file. The service is stateless; the queue holds nothing that is not in
+    // the database, and a rebuild in flight is cheap to redo.
+    if (!first) { console.log("[record] restarting to pick it up"); setTimeout(() => process.exit(0), 250); }
+  } catch (e) {
+    console.log(`[record] pull failed: ${(e as Error).message}${first ? " (starting on whatever is already here)" : ""}`);
+  }
+}
+await pullRecord(true);
+if (RECORD_URL) setInterval(() => void pullRecord(false), REFRESH_MS);
+
 const db = openDb(DB_FILE);
 const win = coverageWindows(db);
 const covered = (ts: number) => win.some((w) => ts >= w.a && ts <= w.b);

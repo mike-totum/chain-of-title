@@ -775,5 +775,77 @@ function shutdown() {
   db.close();
   process.exit(0);
 }
+/**
+ * Publishing the record from the machine that holds it.
+ *
+ * A Railway volume attaches to exactly one service, and `pump.db` lives on this one — so the record database has to
+ * be built here, and handed to the web service over the private network. Until now it was built on a laptop and baked
+ * into the image, which meant the published archive was only ever as fresh as the last manual deploy, and twice went
+ * missing entirely because an ignore file excluded it.
+ *
+ * Two rules this follows:
+ *   - The build runs in a **child process**. `servicedb` scans the trade table, and this process must not stop
+ *     decoding launches while it does: every second not listening is a permanent hole in the archive.
+ *   - It runs **before** retention. `servicedb` computes `curve_buyers` from trade rows that `pruneWorkingData`
+ *     deletes; a launch pruned before that number is computed can never have it computed again.
+ */
+const RECORD_PATH = (process.env.DB_PATH ?? "data/pump.db").replace(/pump\.db$/, "record.db");
+const RECORD_EVERY_MS = Number(process.env.RECORD_EVERY_HOURS ?? 6) * 3600_000;
+let buildingRecord = false;
+
+async function buildRecord(): Promise<void> {
+  if (buildingRecord) return;
+  buildingRecord = true;
+  const started = Date.now();
+  try {
+    const { spawn } = await import("node:child_process");
+    await new Promise<void>((resolve) => {
+      const child = spawn("npx", ["tsx", "--no-warnings=ExperimentalWarning", "src/servicedb.ts", "--out", RECORD_PATH], {
+        stdio: ["ignore", "pipe", "pipe"], env: process.env,
+      });
+      let tail = "";
+      child.stdout?.on("data", (d) => { tail = (tail + d).slice(-400); });
+      child.stderr?.on("data", (d) => { tail = (tail + d).slice(-400); });
+      child.on("error", (e) => { log(`[record] could not start build: ${e.message}`); resolve(); });
+      child.on("exit", (code) => {
+        const secs = ((Date.now() - started) / 1000).toFixed(0);
+        if (code === 0) log(`[record] rebuilt ${RECORD_PATH} in ${secs}s — ${tail.trim().split("\n").pop() ?? ""}`);
+        else log(`[record] build FAILED (exit ${code}) after ${secs}s: ${tail.trim().split("\n").slice(-2).join(" | ")}`);
+        resolve();
+      });
+    });
+  } finally { buildingRecord = false; }
+}
+
+// First build a few minutes after boot (let the feed settle), then on a schedule.
+setTimeout(() => void buildRecord(), 3 * 60_000);
+setInterval(() => void buildRecord(), RECORD_EVERY_MS);
+
+/**
+ * Hand the record to the web service. Private network only in normal operation — Railway routes
+ * `collector.railway.internal` between services without exposing anything publicly.
+ */
+if (process.env.RECORD_PORT) {
+  void (async () => {
+    const { createServer } = await import("node:http");
+    const { createReadStream, statSync } = await import("node:fs");
+    createServer((req, res) => {
+      if (req.url === "/health") {
+        let size = 0, mtime = 0;
+        try { const st = statSync(RECORD_PATH); size = st.size; mtime = st.mtimeMs; } catch {}
+        res.writeHead(200, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ record: RECORD_PATH, bytes: size, builtAt: mtime, building: buildingRecord }));
+      }
+      if (req.url !== "/record.db") { res.writeHead(404); return res.end("not found"); }
+      let st;
+      try { st = statSync(RECORD_PATH); } catch { res.writeHead(503); return res.end("record not built yet"); }
+      // A half-written database must never be served: a truncated archive reads as a real one with fewer launches.
+      if (buildingRecord) { res.writeHead(503); return res.end("a rebuild is in progress; try again shortly"); }
+      res.writeHead(200, { "content-type": "application/vnd.sqlite3", "content-length": String(st.size) });
+      createReadStream(RECORD_PATH).pipe(res);
+    }).listen(Number(process.env.RECORD_PORT), () => log(`[record] serving ${RECORD_PATH} on :${process.env.RECORD_PORT}`));
+  })();
+}
+
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
