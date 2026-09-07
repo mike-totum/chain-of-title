@@ -331,3 +331,27 @@ See **ASSUMPTIONS.md** for the full list of definitions, modelling choices and k
 - Graduated tokens are marked as exited at the graduation price. Real upside after
   graduation is not modelled, so `baseline-all` slightly understates big winners.
 - Paper results do not include your own buys' effect on other traders' behaviour.
+
+## Licence
+
+Two licences, because the code and the record are different things and should be
+reusable on different terms.
+
+**The code is AGPL-3.0-or-later** (`LICENSE`). Copyleft, including over a network:
+anyone who runs a modified version as a service owes their users the modified
+source. This is deliberate. The value of a verification tool rests entirely on
+whether its criteria can be inspected, and a closed fork of this code answering
+questions about tokens would be exactly the thing the project exists to argue
+against.
+
+**The record is CC0-1.0** (`LICENSE-DATA`): public domain, no conditions, no
+attribution required. Every launch record, the bulk database at
+`chainoftitle.org/data/record.db`, and `data/labels.json` are covered by it. Use
+them in a commercial product, a competing scanner, a paper, or a court filing
+without asking. Citation is welcome and never required; `CITATION.cff` has the
+form.
+
+The split is the point. Copyleft on the instrument keeps it honest. Public domain
+on the record means nobody has to depend on this project continuing to exist in
+order to keep what it has already published.
+

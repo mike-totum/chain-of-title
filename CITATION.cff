@@ -1,0 +1,35 @@
+cff-version: 1.2.0
+title: "Chain of Title: launch provenance for Solana"
+message: >-
+  If you use this archive or the code that produces it, please cite it. If you
+  cite a specific finding, cite the dated release you read rather than the
+  repository, because the record grows daily and coverage is part of the data.
+type: software
+authors:
+  - family-names: Bomhoff
+    given-names: Michael
+    email: hello@chainoftitle.org
+repository-code: "https://github.com/mike-totum/chain-of-title"
+url: "https://chainoftitle.org"
+version: "0.1.0"
+date-released: "2026-09-07"
+license: AGPL-3.0-or-later
+abstract: >-
+  A public archive of launch-time provenance for Solana tokens. For every launch
+  it records what the token was at birth: the share of supply the creator took in
+  the creation transaction, every distinct outside wallet that bought on the
+  bonding curve, how long the curve took to fill, whether a single buy completed
+  it, and whether the creator sold. These facts are observable only while a launch
+  happens and cannot be recovered by present-tense inspection once the float has
+  been spread across wallets, which is why they are recorded live rather than
+  inferred later. Coverage is published alongside the data: a launch that happened
+  while the collector was down is reported as unobserved rather than as anything
+  else. The record is released into the public domain under CC0; the code that
+  produces it is AGPL-3.0-or-later.
+keywords:
+  - Solana
+  - provenance
+  - token security
+  - open data
+  - public goods
+  - blockchain
