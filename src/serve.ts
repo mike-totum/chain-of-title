@@ -13,7 +13,7 @@
  * request. One worker runs at a time because the RPC endpoint, not the CPU, is the constraint.
  */
 import { createServer } from "node:http";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, statSync } from "node:fs";
 import { join, normalize } from "node:path";
 import { config } from "./config.ts";
 import { openDb } from "./db.ts";
@@ -340,6 +340,9 @@ const noRecord = (mint: string, why: string) => page("No record", `
   and why we will not guess.</div>
   ${SEARCH}`, chrome, 1);
 
+/** True only for a readable regular file: a directory exists but cannot be sent, and a broken path is not an error. */
+const isFile = (p: string): boolean => { try { return statSync(p).isFile(); } catch { return false; } };
+
 // ---------- server ----------
 const TYPES: Record<string, string> = { ".html": "text/html; charset=utf-8", ".json": "application/json; charset=utf-8", ".css": "text/css", ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon" };
 
@@ -475,7 +478,13 @@ const server = createServer(async (req, res) => {
     }
 
     const file = join(DIR, safe);
-    if (existsSync(file) && !file.endsWith("/")) return send(200, readFileSync(file), TYPES[safe.slice(safe.lastIndexOf("."))] ?? "application/octet-stream", "short");
+    /**
+     * A directory is not a file. `existsSync` is true for `site/api`, and the trailing-slash guard never fired because
+     * the request that reaches here is `/api` with no slash — so readFileSync was handed a directory and threw EISDIR,
+     * which the outer catch turned into a 500. Production logged a stack trace for every hit on a bare directory path.
+     * A path we do not serve is a 404, not an error on our side.
+     */
+    if (isFile(file)) return send(200, readFileSync(file), TYPES[safe.slice(safe.lastIndexOf("."))] ?? "application/octet-stream", "short");
 
     // The archive itself. Served from the image rather than copied into the static tree, and cached hard because it
     // is rebuilt on deploy — a public good nobody has to ask for.

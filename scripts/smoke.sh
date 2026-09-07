@@ -30,4 +30,5 @@ check "/api/v1/status"                200 "launches"
 check "/api/v1/token/$MINT"           200 "verdict"
 check "/api/v1/token/notanaddress"    400 "not_an_address"
 check "/api/v1/nope"                  404 "unknown_endpoint"
+check "/api"                 404   # a directory path is a 404, not an EISDIR 500
 [ $fail -eq 0 ] && echo "PASS" || { echo "FAIL — do not consider this deployed"; exit 1; }
