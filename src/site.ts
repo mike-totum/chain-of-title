@@ -486,21 +486,14 @@ writeFileSync(join(OUT, "favicon.svg"), FAVICON);
 try { copyFileSync("assets/og.png", join(OUT, "og.png")); }
 catch { console.log("  assets/og.png missing, link previews will have no image"); }
 
-writeFileSync(join(OUT, "api", "summary.json"), JSON.stringify({
-  generatedAt: now, coverageFrom: win.length ? win[0].a : null, downtimeMinutes: Math.round(chrome.gapMin),
-  // A certificate needs a reading no older than MAX_READING_AGE_MS, so this says how many candidates had one.
-  maxReadingAgeMs: MAX_READING_AGE_MS, uncertified: unverified.length,
-  graduated24h: day.length, clean24h: dayClean.length, unverified24h: dayUnverified.length,
-  archivedLaunches: (db.prepare("SELECT COUNT(*) c FROM tokens WHERE late_discovery=0").get() as any).c,
-  clean: clean.map((t) => ({
-    mint: t.mint, symbol: t.symbol, creatorSupplyPct: t.dev_pct, curveBuyers: cleanBuyers.get(t.mint) ?? null,
-    poolSol: t.vault_sol, poolReadAt: t.vault_at,
-  })),
-}, null, 2));
-
+/**
+ * `api/summary.json` is no longer written here. Its clean counts need a pool reading from the last five minutes, and
+ * those live only inside the running service - so a build could only ever publish zero and contradict the page. It
+ * is served by `serve.ts` from the same pass that renders the front page, which is why the two now agree.
+ */
 console.log(`\nwrote ${OUT}/`);
 console.log(PAGES
   ? `  ${toks.length.toLocaleString()} token pages + ${wallets.size} wallet pages written (--pages)`
   : `  ${toks.length.toLocaleString()} graduations and ${wallets.size} curve-taking wallets assessed; their pages are rendered on request by \`npm run serve\` (pass --pages to write them)`);
 console.log(`  ${clean.length} launched clean; ${dayClean.length} in the last 24 h of ${day.length} graduations`);
-console.log(`  method.html, data.html, 404.html, api.html, api/summary.json` + (PAGES ? `, api/${API_VERSION}/token/<mint>.json, api/${API_VERSION}/wallet/<wallet>.json` : ""));
+console.log(`  method.html, data.html, 404.html, api.html, pledge.html, corrections.html` + (PAGES ? `, api/${API_VERSION}/token/<mint>.json, api/${API_VERSION}/wallet/<wallet>.json` : ""));

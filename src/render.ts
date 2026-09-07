@@ -412,7 +412,7 @@ export interface OpRow { wallet: string; taken: number; spent: number; sold: num
 export interface Home {
   now: number; builtAt: number | null;
   graduated24h: number; clean24h: number; danger24h: number; onFile: number;
-  windowDays: number; gradWindow: number; unchecked: number;
+  windowDays: number; gradWindow: number; unchecked: number; unchecked24h: number;
   cleanRows: CleanRow[]; wallets: number; opRows: OpRow[];
   proof: null | { mint: string; symbol: string | null; devPct: number; gradMs: number | null; fundedSol: number; nowSol: number; nowAt: number };
   maxDevPct: number; minBuyers: number; buyoutSol: number; minPoolSol: number;

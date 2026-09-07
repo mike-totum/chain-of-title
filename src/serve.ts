@@ -523,7 +523,7 @@ const isFile = (p: string): boolean => { try { return statSync(p).isFile(); } ca
  */
 const HOME_TTL_MS = Number(process.env.HOME_TTL_SECONDS ?? 15) * 1000;
 const HOME_DAYS = Number(process.env.HOME_DAYS ?? 7);
-let homeCache: { at: number; html: string } | null = null;
+let homeCache: { at: number; h: Home; html: string } | null = null;
 
 function buildHome(now: number): Home {
   const since = now - HOME_DAYS * 86400_000;
@@ -531,7 +531,8 @@ function buildHome(now: number): Home {
   const assessed = toks.map((t) => ({ t, a: assess(db, t, covered) }));
 
   const certified = assessed.filter(({ t, a }) => cleanAtBirth(t, a) && readingCertifies(t.vault_at, t.vault_sol, now));
-  const unchecked = assessed.filter(({ t, a }) => cleanAtBirth(t, a) && !readingCertifies(t.vault_at, t.vault_sol, now)).length;
+  const uncertified = assessed.filter(({ t, a }) => cleanAtBirth(t, a) && !readingCertifies(t.vault_at, t.vault_sol, now));
+  const unchecked = uncertified.length;
 
   const inDay = (t: any) => t.created_at >= now - 86400_000;
   const day = assessed.filter(({ t }) => inDay(t));
@@ -551,6 +552,7 @@ function buildHome(now: number): Home {
     danger24h: day.filter(({ a }) => a.flags.some((f) => f.level === "DANGER")).length,
     onFile: (db.prepare("SELECT COUNT(*) c FROM tokens WHERE late_discovery=0").get() as any).c,
     windowDays: HOME_DAYS, gradWindow: toks.length, unchecked,
+    unchecked24h: uncertified.filter((x) => inDay(x.t)).length,
     cleanRows: certified.sort((x, y) => y.t.created_at - x.t.created_at).slice(0, 40).map(({ t, a }) => ({
       mint: t.mint, symbol: t.symbol, devPct: t.dev_pct, buyers: a.curveBuyers ?? 0,
       fillMs: t.graduated_at && t.created_at ? t.graduated_at - t.created_at : null,
@@ -567,13 +569,36 @@ function buildHome(now: number): Home {
   };
 }
 
-function renderHome(): string {
+function currentHome(): Home {
   const now = Date.now();
-  if (homeCache && now - homeCache.at < HOME_TTL_MS) return homeCache.html;
+  if (homeCache && now - homeCache.at < HOME_TTL_MS) return homeCache.h;
   const h = buildHome(now);
-  const html = page(homeTitle(h), homeBody(h), chrome, 0, undefined, "/");
-  homeCache = { at: now, html };
-  return html;
+  homeCache = { at: now, h, html: page(homeTitle(h), homeBody(h), chrome, 0, undefined, "/") };
+  return h;
+}
+function renderHome(): string { currentHome(); return homeCache!.html; }
+
+/**
+ * `api/summary.json`, from the same pass that renders the page.
+ *
+ * It used to be written by the generator, and it could not be right there: a certificate needs a pool reading from
+ * the last five minutes, and those readings only exist inside this process. So a build on a laptop, or in the image,
+ * published clean24h 0 while the live page said 3 - two numbers on the same site disagreeing about the same thing,
+ * which is the fault we spent the day removing everywhere else. Deriving it from `currentHome()` means they cannot
+ * differ, because they are one computation.
+ */
+function summaryJson(): string {
+  const h = currentHome();
+  return JSON.stringify({
+    generatedAt: Date.now(), asOf: h.builtAt, coverageFrom: COV.from, downtimeMinutes: Math.round(COV.downtimeMinutes),
+    maxReadingAgeMs: MAX_READING_AGE_MS,
+    graduated24h: h.graduated24h, clean24h: h.clean24h, uncertified24h: h.unchecked24h,
+    uncertified: h.unchecked, archivedLaunches: h.onFile,
+    clean: h.cleanRows.map((r) => ({
+      mint: r.mint, symbol: r.symbol, creatorSupplyPct: r.devPct, curveBuyers: r.buyers,
+      poolSol: r.poolSol, poolReadAt: r.readAt,
+    })),
+  }, null, 2);
 }
 
 // ---------- server ----------
@@ -721,6 +746,7 @@ const server = createServer(async (req, res) => {
     // The front page is rendered, not served from disk. It must come before the static handler, which would
     // otherwise keep answering with whatever index.html the last build left behind.
     if (safe === "/index.html") return send(200, renderHome(), "text/html; charset=utf-8", "short");
+    if (safe === "/api/summary.json") return send(200, summaryJson(), TYPES[".json"], "short");
 
     const file = join(DIR, safe);
     /**
