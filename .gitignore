@@ -18,3 +18,13 @@ data/reports/
 !data/labels.json
 !data/operator-clusters.json
 !data/x-mute.json
+
+# Caller lists. Local operating files, never published: they name identifiable X accounts and
+# Telegram channels alongside our own unverified characterisations of what those people were
+# doing ("caller network seen posting the CA at or just before launch"). Publishing an
+# unverified adverse claim about a named person is the exact thing every published sentence on
+# this site is written to avoid, and these belong to the trading thesis, which is dead.
+kols.txt
+channels.txt
+channels.candidates.txt
+
