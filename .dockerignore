@@ -1,0 +1,17 @@
+# Governs what COPY puts in the image. The heavy collector databases are named explicitly rather than excluding
+# `data`, because excluding the directory silently left out data/record.db and the web service deployed with an
+# empty archive.
+node_modules
+data/pump.db*
+data/seed.db*
+data/archive.db*
+data/reports
+data/telegram.session
+data/*.jsonl
+site/t
+site/w
+site/api/t
+site/api/w
+.env
+.env.bak.*
+*.log

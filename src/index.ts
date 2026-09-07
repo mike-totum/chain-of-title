@@ -1,0 +1,779 @@
+import { config } from "./config.ts";
+import { readFileSync, writeFileSync } from "node:fs";
+import { openDb, upsertToken, TradeWriter, finalizeTokenTrades, recoverOrphans } from "./db.ts";
+import { poolReserves } from "./outcomes.ts";
+import { price } from "./curve.ts";
+import { PumpPortalFeed } from "./feed/pumpportal.ts";
+import { RpcFeed } from "./feed/rpc.ts";
+import { PumpSwapFeed } from "./feed/pumpswap.ts";
+import { Tracker, fetchMeta } from "./tracker.ts";
+import { PaperBroker } from "./paper.ts";
+import { strategies, type OperatorActivity } from "./strategies/index.ts";
+import { rpc as rpcHttpCall } from "./rpc-http.ts";
+import { base58 } from "./feed/rpc.ts";
+import type { TokenState } from "./tracker.ts";
+import { KolWatcher, StreetListener, loadKols, parseTags, parseTweet, twitterApiIoProvider, xApiProvider } from "./signals/twitter.ts";
+import { BuzzTracker } from "./signals/buzz.ts";
+import { telegramNotifier } from "./signals/telegram-notify.ts";
+import { TelegramWatcher } from "./signals/telegram.ts";
+import { createClient, loadChannels, telegramConfigured } from "./signals/telegram-client.ts";
+import type { KolSignal } from "./signals/twitter.ts";
+
+const WSOL_MINT = "So11111111111111111111111111111111111111112";
+const log = (...a: unknown[]) => console.log(new Date().toISOString().slice(11, 19), ...a);
+const fmtX = (x: number) => `${x.toFixed(2)}x`;
+const short = (m: string) => `${m.slice(0, 4)}…${m.slice(-6)}`;
+
+const db = openDb(config.dbPath);
+const runId = (db.prepare("INSERT INTO runs (started_at) VALUES (?)").run(Date.now()) as any).lastInsertRowid;
+const feed = config.tradeSource === "pumpportal" ? new PumpPortalFeed(config.pumpportalApiKey) : new RpcFeed(config.solanaWsUrl);
+const tracker = new Tracker({ watchMinutes: config.watchMinutes, deadAfterSeconds: config.deadAfterSeconds, watchMaxMinutes: config.watchMaxMinutes });
+const broker = new PaperBroker(db, tracker, strategies, config);
+const botNotify = telegramNotifier(config.telegramBotToken, config.telegramChatId);
+let selfNotify: ((text: string) => void) | null = null;
+const notify = (text: string) => {
+  botNotify(text);
+  selfNotify?.(text);
+};
+const trades = new TradeWriter(db);
+for (const r of db.prepare("SELECT DISTINCT creator FROM tokens WHERE graduated=1 AND creator!='' AND created_at >= ?").all(Date.now() - 7 * 86400_000) as { creator: string }[])
+  tracker.gradCreators.add(r.creator);
+log(`[db] ${tracker.gradCreators.size} creator wallet(s) with a prior graduation loaded for momentum`);
+try {
+  const recovered = recoverOrphans(db);
+  if (recovered) log(`[db] recovered ${recovered} token(s) left unfinalized by a previous run`);
+} catch (e) {
+  log("[db] orphan recovery failed:", (e as Error).message);
+}
+
+function loadSmartWallets(): void {
+  const rows = db.prepare("SELECT wallet FROM smart_wallets ORDER BY score DESC LIMIT 100").all() as { wallet: string }[];
+  broker.smartWallets = new Set(rows.map((r) => r.wallet));
+  const teams = db.prepare("SELECT team_id, wallet FROM wallet_teams").all() as { team_id: number; wallet: string }[];
+  broker.walletTeams = new Map(teams.map((r) => [r.wallet, r.team_id]));
+}
+loadSmartWallets();
+setInterval(loadSmartWallets, 10 * 60_000);
+/** operator farms from `npm run clusters`: wallet -> cluster name */
+function loadOperatorWallets(): void {
+  try {
+    const rows = db.prepare("SELECT wallet, cluster FROM operator_wallets WHERE cluster IS NOT NULL").all() as { wallet: string; cluster: string }[];
+    broker.operatorWallets = new Map(rows.map((r) => [r.wallet, r.cluster]));
+    const pol = db.prepare("SELECT cluster, policy FROM operator_policy").all() as { cluster: string; policy: string }[];
+    broker.operatorPolicy = new Map(pol.map((r) => [r.cluster, r.policy]));
+  } catch { broker.operatorWallets = new Map(); }
+}
+loadOperatorWallets();
+setInterval(loadOperatorWallets, 10 * 60_000);
+
+/** Bring back a token the monitor dropped (or never saw) so operator activity on it can be followed. Aged from now: the tracker
+ *  finalizes anything older than the 6 h cap at the next tick, and the real creation time is kept in the database row. */
+function restoreToken(mint: string, now: number, symbol = "?"): TokenState {
+  let t = tracker.tokens.get(mint);
+  if (t && t.finalized) { tracker.tokens.delete(mint); t = undefined; }
+  if (t) return t;
+  const prior = db.prepare("SELECT name, symbol, created_at, late_discovery, graduated, graduated_at, pool, launch_price, dev_pct, unique_buyers, creator FROM tokens WHERE mint = ?").get(mint) as any;
+  t = tracker.ensureLate(mint, now, symbol !== "?" ? symbol : prior?.symbol ?? "?", prior ? { createdAt: now, graduated: !!prior.graduated, graduatedAt: prior.graduated_at ?? null, pool: prior.pool ?? null, launchPrice: prior.launch_price ?? 0, name: prior.name ?? undefined, pumpCreated: !prior.late_discovery } : undefined);
+  if (prior) {
+    // carry the curve-phase facts the organic gate needs: a restored token starts with an empty buyer set
+    if (typeof prior.dev_pct === "number") t.devPct = prior.dev_pct;
+    if (typeof prior.unique_buyers === "number" && t.buyersAtGrad === null) t.buyersAtGrad = prior.unique_buyers;
+    if (prior.creator && !t.creator) t.creator = prior.creator;
+  }
+  // a curve we never tracked can still have a known pool: its CreatePoolEvent was recorded when it graduated
+  if (!t.pool) {
+    const pm = db.prepare("SELECT pool FROM pool_map WHERE mint = ? ORDER BY created_at DESC LIMIT 1").get(mint) as { pool: string } | undefined;
+    if (pm) { t.pool = pm.pool; t.graduated = true; t.graduatedAt = t.graduatedAt ?? now; }
+  }
+  if (t.pool) { poolToMint.set(t.pool, mint); void checkVault(mint); }
+  if (t.decimals < 0) void lookupDecimals(mint);
+  if (!prior) void lookupMeta(mint);
+  return t;
+}
+
+/** Record what an operator-cluster wallet just did on a token; alert on the buyout and when the farm shows up in force. */
+function noteOperator(t: TokenState, wallet: string, cluster: string, side: "buy" | "sell", sol: number, venue: "curve" | "amm", px: number, now: number): void {
+  let a = broker.operatorActivity.get(t.mint);
+  if (!a) { a = { firstAt: now, priceAtFirst: px > 0 ? px : null, buyout: null, buys: new Map(), solIn: 0, solOut: 0, lastBuyAt: 0, clusters: new Set(), notified: false, recent: [] }; broker.operatorActivity.set(t.mint, a); }
+  a.clusters.add(cluster);
+  t.watchCapMs = 24 * 3600_000; // a hold farm sells hours after graduation (Simba: 7 h and counting); the default 6 h cap would close first
+  a.recent.push({ ts: now, side, sol });
+  while (a.recent.length && a.recent[0].ts < now - 2 * 3600_000) a.recent.shift();
+  if (a.priceAtFirst === null && px > 0) a.priceAtFirst = px;
+  let event: string | null = null;
+  if (side === "buy") {
+    const b = a.buys.get(wallet) ?? { sol: 0, first: now, last: now, cluster };
+    b.sol += sol; b.last = now; a.buys.set(wallet, b); a.solIn += sol; a.lastBuyAt = now;
+    if (venue === "curve" && sol >= 40 && !a.buyout) { a.buyout = { wallet, sol, ts: now, cluster }; event = `buyout ${sol.toFixed(1)} SOL on the curve`; }
+    else if (!a.notified && a.buys.size >= 3) { a.notified = true; event = `${a.buys.size} cluster wallets buying (${a.solIn.toFixed(1)} SOL)`; }
+  } else a.solOut += sol;
+  if (event) {
+    log(`[cluster] ${cluster} ${event} on ${t.symbol} ${short(t.mint)} (${venue}${t.graduated ? ", graduated" : ""})`);
+    notify(`🕸 operator cluster ${cluster}: ${event}\n${t.symbol} https://pump.fun/coin/${t.mint}`);
+    db.prepare("INSERT INTO signals (source, account, mint, symbol, kind, text, url, posted_at, seen_at) VALUES (?,?,?,?,?,?,?,?,?)").run("cluster", `cluster:${cluster}`, t.mint, t.symbol, a.buyout && event.startsWith("buyout") ? "buyout" : "amm-accumulation", `${event}; ${venue} price ${px}`, `https://pump.fun/coin/${t.mint}`, now, now);
+  }
+}
+/** a token operator wallets touched in the last 2 h counts as open interest: the pool can take minutes to start printing after a buyout,
+ *  and the dead-token rule deleted Simba (FC9BqG buyout 07:04 UTC 5 Sep, 46x seven hours later) before its first AMM trade */
+function operatorInterest(mint: string): boolean {
+  const a = broker.operatorActivity.get(mint);
+  return !!a && Date.now() - Math.max(a.firstAt, a.lastBuyAt) < 2 * 3600_000;
+}
+/** name a restored token we never saw launch (pump.fun API), so alerts and the report do not say "?" */
+async function lookupMeta(mint: string): Promise<void> {
+  try {
+    const res = await fetch(`https://frontend-api-v3.pump.fun/coins/${mint}`, { signal: AbortSignal.timeout(6000), headers: { accept: "application/json" } });
+    if (!res.ok) return;
+    const j: any = await res.json();
+    const t = tracker.tokens.get(mint);
+    if (!t || typeof j?.symbol !== "string") return;
+    if (t.symbol === "?" || !t.symbol) t.symbol = j.symbol;
+    if (t.name === "?" || !t.name) t.name = j.name ?? j.symbol;
+    if (!t.creator && typeof j.creator === "string") t.creator = j.creator;
+    if (!t.pool && typeof j.pump_swap_pool === "string") setPool(mint, j.pump_swap_pool);
+    upsertToken(db, t);
+  } catch {}
+}
+const poolMintCache = new Map<string, { mint: string | null; at: number }>();
+/** PumpSwap Pool account: base_mint at byte 43 (verified against the Squads pool). Rare: only for cluster-wallet trades on unknown pools. */
+async function poolMint(pool: string): Promise<string | null> {
+  const c = poolMintCache.get(pool);
+  if (c && (c.mint || Date.now() - c.at < 10 * 60_000)) return c.mint;
+  let mint: string | null = null;
+  try {
+    const r = await rpcHttpCall("getAccountInfo", [pool, { encoding: "base64" }], 10_000);
+    const b = r?.value?.data?.[0] ? Buffer.from(r.value.data[0], "base64") : null;
+    if (b && b.length >= 107) mint = base58(b.subarray(43, 75));
+  } catch {}
+  poolMintCache.set(pool, { mint, at: Date.now() });
+  return mint;
+}
+
+let seen = 0;
+/** Pre-launch heads-ups from watched accounts: "$TICKER" posted before any matching mint exists. */
+/**
+ * A single large buy on a curve we are NOT tracking is, by construction, a buyout of a dormant curve:
+ * every launch is tracked from creation, so an untracked mint is one we already dropped (>= 6 h old) or
+ * never saw (launched before this monitor, or days/weeks ago). This is the event the verified winners came
+ * from (Kshama, Squads, Simba, Axolotl, onoda) and until now it was only detected when the buyer's wallet
+ * happened to already be in operator_wallets — which, measured over 72 h, was 13 of 988 buyouts.
+ * The pump.fun feed already carries every trade on every curve; this stops throwing them away.
+ */
+const BUYOUT_MIN_SOL = Number(process.env.BUYOUT_MIN_SOL || 40);
+const seenBuyout = new Set<string>();
+/**
+ * Wallets caught doing a buyout without being in operator_wallets. They must keep being followed after the buy, or the
+ * `farm-sell` exit is blind: it fires on cluster wallets selling, and a wallet that is not in the loaded cluster map
+ * never reaches noteOperator again. Found 2026-09-06 on 8UfkYXd2… — five 85 SOL buyouts, 17.8 SOL bought on the AMM
+ * against 421.1 SOL sold, i.e. a pure distributor — while cluster-follow held two positions alongside it with no exit.
+ */
+const blindOperators = new Set<string>();
+/**
+ * The slow graduation. Of 19 reconstructed organic $1M+ winners, only 4 graduated through an 85 SOL buyout; the other
+ * 15 filled their curve gradually, and several took days (ZTH 6 d, SOL777 4 d, WSOLP 7.6 d). The tracker drops a token
+ * after 6 h, so a curve completing days after launch was invisible whatever its size. Any untracked curve within reach
+ * of graduation is therefore worth restoring: vSol >= this, against ~115 at completion.
+ */
+const LATE_GRAD_VSOL = Number(process.env.LATE_GRAD_VSOL || 100);
+/** Peak vSOL across reconstructed curves clusters hard at 110-120 (1,578 of them), so graduation is ~115 as modelled.
+ *  A curve reading far above that is a drained or non-standard one still trading, not a token about to graduate. */
+const LATE_GRAD_VSOL_MAX = Number(process.env.LATE_GRAD_VSOL_MAX || 140);
+const seenLateGrad = new Set<string>();
+
+const expectations = new Map<string, { account: string; url: string; postedAt: number }>();
+const EXPECTATION_TTL_MS = 6 * 3600_000;
+const watchedAccounts = new Set<string>();
+function recordKolSignal(t: import("./tracker.ts").TokenState, account: string, kind: string, url: string, postedAt: number, now: number) {
+  t.kolSignals++;
+  db.prepare("INSERT INTO signals (source, account, mint, symbol, kind, text, url, posted_at, seen_at) VALUES (?,?,?,?,?,?,?,?,?)").run(
+    "matcher", account, t.mint, t.symbol, kind, "", url, postedAt, now,
+  );
+  log(`[kol] @${account} ${kind} → ${t.symbol} ${short(t.mint)} (lead ${((now - postedAt) / 60000).toFixed(1)}m)`);
+  notify(`🎯 @${account} ${kind}: ${t.symbol} launched\nhttps://pump.fun/coin/${t.mint}`);
+  broker.evaluateEntries(t, now, true);
+  upsertToken(db, t);
+}
+const realized = new Map<string, { n: number; pnl: number; wins: number }>();
+for (const s of strategies) realized.set(s.name, { n: 0, pnl: 0, wins: 0 });
+
+// ---------- launches ----------
+feed.on("create", (e, now) => {
+  seen++;
+  const t = tracker.onCreate(e, now);
+  feed.subscribeTrades(e.mint);
+  broker.evaluateEntries(t, now);
+  upsertToken(db, t);
+  if (e.initialBuy > 0)
+    trades.push({ mint: e.mint, wallet: e.traderPublicKey, side: "buy", sol: e.solAmount, tokens: e.initialBuy, price: t.launchPrice, ts: now, slot: e.slot ?? 0, sig: e.signature, ageMs: 0, buyerRank: 0, isDev: true });
+  // 1) a watched account pre-announced this ticker
+  const exp = expectations.get(e.symbol.toUpperCase());
+  if (exp && now - exp.postedAt <= EXPECTATION_TTL_MS) {
+    expectations.delete(e.symbol.toUpperCase());
+    recordKolSignal(t, exp.account, "pre-announced", exp.url, exp.postedAt, now);
+  }
+  void fetchMeta(e.uri).then((meta) => {
+    if (!meta) return;
+    t.meta = meta;
+    if (t.finalized) return;
+    // 2) the token's own metadata links to a watched account's profile or tweet
+    const m = meta.twitter?.match(/(?:x|twitter)\.com\/(?:#!\/)?@?([A-Za-z0-9_]{1,15})/);
+    if (m && watchedAccounts.has(m[1].toLowerCase()) && t.kolSignals === 0) recordKolSignal(t, m[1], "metadata-link", meta.twitter!, now, Date.now());
+    else upsertToken(db, t);
+  });
+});
+
+feed.on("trade", (e, now) => {
+  const cluster = broker.operatorWallets.get(e.traderPublicKey) ?? (blindOperators.has(e.traderPublicKey) ? "unknown" : undefined);
+  const untracked = !tracker.tokens.has(e.mint);
+  // detect the operator by what it does, not by whether we already know its wallet: farms burn a fresh wallet per buyout
+  const blindBuyout = untracked && e.txType === "buy" && e.solAmount >= BUYOUT_MIN_SOL && !seenBuyout.has(e.mint);
+  const lateGrad = untracked && !blindBuyout && e.vSolInBondingCurve >= LATE_GRAD_VSOL && e.vSolInBondingCurve <= LATE_GRAD_VSOL_MAX && !seenLateGrad.has(e.mint);
+  if (cluster && untracked) restoreToken(e.mint, now); // a farm wallet touching a token we dropped: follow it again
+  else if (blindBuyout || lateGrad) restoreToken(e.mint, now);
+  const t = tracker.onTrade(e, now);
+  if (!t) return;
+  if (blindBuyout) {
+    seenBuyout.add(e.mint);
+    // restoreToken ages a token from discovery, so t.createdAt is "now"; the real launch time is the stored row
+    const born = (db.prepare("SELECT created_at FROM tokens WHERE mint = ?").get(e.mint) as { created_at: number } | undefined)?.created_at;
+    const ageH = born ? (now - born) / 3600_000 : null;
+    log(`[buyout] ${e.solAmount.toFixed(1)} SOL took the curve of ${t.symbol} ${short(e.mint)} by ${short(e.traderPublicKey)} (${ageH === null ? "age unknown, never seen" : `dormant ${ageH.toFixed(1)} h`}, restored)`);
+    notify(`💰 curve buyout ${e.solAmount.toFixed(0)} SOL — ${t.symbol}\nwallet ${e.traderPublicKey}\nhttps://pump.fun/coin/${e.mint}`);
+    db.prepare("INSERT INTO signals (source, account, mint, symbol, kind, text, url, posted_at, seen_at) VALUES (?,?,?,?,?,?,?,?,?)")
+      .run("buyout", `wallet:${e.traderPublicKey}`, e.mint, t.symbol, "curve-buyout", `${e.solAmount.toFixed(1)} SOL, ${ageH === null ? "age unknown" : `dormant ${ageH.toFixed(1)} h`}`, `https://pump.fun/coin/${e.mint}`, now, now);
+    blindOperators.add(e.traderPublicKey);
+    noteOperator(t, e.traderPublicKey, cluster ?? "unknown", "buy", e.solAmount, "curve", price(t.curve), now);
+  }
+  if (lateGrad) {
+    seenLateGrad.add(e.mint);
+    t.watchCapMs = Math.max(t.watchCapMs ?? 0, 12 * 3600_000);
+    log(`[lategrad] ${t.symbol} ${short(e.mint)} curve at ${e.vSolInBondingCurve.toFixed(0)} vSOL and not tracked — restored`);
+    db.prepare("INSERT INTO signals (source, account, mint, symbol, kind, text, url, posted_at, seen_at) VALUES (?,?,?,?,?,?,?,?,?)")
+      .run("lategrad", "curve-scan", e.mint, t.symbol, "late-graduation", `curve at ${e.vSolInBondingCurve.toFixed(1)} vSOL`, `https://pump.fun/coin/${e.mint}`, now, now);
+  }
+  if (cluster) noteOperator(t, e.traderPublicKey, cluster, e.txType === "buy" ? "buy" : "sell", e.solAmount, "curve", price(t.curve), now);
+  trades.push({
+    mint: e.mint, wallet: e.traderPublicKey, side: e.txType, sol: e.solAmount, tokens: e.tokenAmount, price: price(t.curve), ts: now,
+    slot: e.slot ?? 0, sig: e.signature, ageMs: now - t.createdAt, buyerRank: t.lastTrade?.buyerRank ?? null, isDev: e.traderPublicKey === t.creator,
+  });
+  broker.evaluateEntries(t, now, t.kolSignals > 0);
+  broker.update(t, now);
+});
+
+feed.on("status", (m) => log("[feed]", m));
+
+tracker.on("preannounced", (t, k) => {
+  log(`[kol] PRE-ANNOUNCED launch: ${t.symbol} ${short(t.mint)} was posted ${k}x before it existed — evaluating entry at creation`);
+  notify(`🚨 pre-announced launch: ${t.symbol} — mint was posted before launch\nhttps://pump.fun/coin/${t.mint}`);
+  db.prepare("INSERT INTO signals (source, account, mint, symbol, kind, text, url, posted_at, seen_at) VALUES (?,?,?,?,?,?,?,?,?)").run("matcher", "pre-announced", t.mint, t.symbol, "pre-announced-mint", "", "", Date.now(), Date.now());
+  broker.evaluateEntries(t, Date.now(), true);
+});
+tracker.on("checkpoint", (t) => {
+  upsertToken(db, t);
+  broker.onTokenCheckpoint(t);
+});
+tracker.on("finalize", (t) => {
+  broker.closeForToken(t, Date.now(), "watch-window-ended");
+  upsertToken(db, t);
+  feed.unsubscribeTrades(t.mint);
+  trades.flush();
+  const entered = broker.everEntered(t.mint, ["kol-signal", "smart-wallet", "team-wallet", "grad-runner", "survivor-trail", "early-momentum", "strict-momentum"]);
+  const interesting = t.kolSignals > 0 || entered || (t.graduated && t.lastPrice >= 2 * (t.gradPrice ?? Infinity));
+  try {
+    finalizeTokenTrades(db, t, { keepAll: interesting, keepCurve: t.graduated || t.buyers.size >= 8 || (t.launchPrice > 0 && t.peakPrice >= 2 * t.launchPrice) ? 400 : 100, keepAmm: t.graduated ? 6000 : 1500 }); // graduated tokens keep enough AMM trades for the post-graduation replay (npm run ammreplay)
+  } catch (e) {
+    log("[db] finalize failed for", t.mint, (e as Error).message);
+  }
+});
+
+// ---------- PumpSwap: post-graduation trades ----------
+const poolToMint = new Map<string, string>();
+const savePool = db.prepare("INSERT OR IGNORE INTO pool_map (pool, mint, created_at) VALUES (?,?,?)");
+// a restart used to lose every pool it had learned and re-discover them one per 400 ms through the lookup queue
+for (const r of db.prepare("SELECT pool, mint FROM pool_map").all() as { pool: string; mint: string }[]) poolToMint.set(r.pool, r.mint);
+for (const r of db.prepare("SELECT pool, mint FROM tokens WHERE pool IS NOT NULL").all() as { pool: string; mint: string }[]) poolToMint.set(r.pool, r.mint);
+log(`[amm] ${poolToMint.size} known pools preloaded`);
+const amm = config.pumpswapWsUrl ? new PumpSwapFeed(config.pumpswapWsUrl) : null;
+let ammMatched = 0;
+const poolLookupQueue: string[] = [];
+const rpcHttp = config.solanaWsUrl.replace(/^wss:/, "https:").replace(/^ws:/, "http:");
+async function lookupDecimals(mint: string): Promise<void> {
+  const t = tracker.tokens.get(mint);
+  if (!t || t.decimals >= 0) return;
+  try {
+    const res = await fetch(rpcHttp, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getTokenSupply", params: [mint] }), signal: AbortSignal.timeout(6000) });
+    const j: any = await res.json();
+    const d = j?.result?.value?.decimals;
+    if (typeof d === "number") t.decimals = d;
+  } catch {}
+}
+function setPool(mint: string, pool: string): void {
+  if (mint === WSOL_MINT) return;
+  poolToMint.set(pool, mint);
+  savePool.run(pool, mint, Date.now());
+  const t = tracker.tokens.get(mint);
+  if (!t || t.pool) return;
+  t.pool = pool;
+  void checkVault(mint);
+}
+async function lookupPool(mint: string): Promise<void> {
+  try {
+    const res = await fetch(`https://frontend-api-v3.pump.fun/coins/${mint}`, { signal: AbortSignal.timeout(6000), headers: { accept: "application/json" } });
+    if (res.ok) {
+      const j: any = await res.json();
+      if (typeof j?.pump_swap_pool === "string") { setPool(mint, j.pump_swap_pool); return; }
+    }
+  } catch {}
+  // pump.fun often omits pump_swap_pool for graduated tokens; DexScreener's pumpswap pair address is the pool
+  try {
+    const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${mint}`, { signal: AbortSignal.timeout(6000) });
+    if (!res.ok) return;
+    const j: any = await res.json();
+    const pair = (j?.pairs ?? []).find((p: any) => p?.dexId === "pumpswap" && typeof p?.pairAddress === "string" && p?.baseToken?.address === mint && p?.quoteToken?.address === WSOL_MINT);
+    if (pair) setPool(mint, pair.pairAddress);
+  } catch {}
+}
+const extPriceRejected = new Set<string>();
+/** Ground truth for a pool: its vault balances. Sets the reference price the decoded trades must reconcile with. */
+async function checkVault(mint: string): Promise<void> {
+  const t = tracker.tokens.get(mint);
+  if (!t?.pool) return;
+  const r = await poolReserves(t.pool, mint);
+  if (!r) return;
+  // a pool still being seeded (migration in progress) or drained to dust has meaningless reserves: a pump.fun migration deposits
+  // ~200M tokens and ~85 SOL, so anything under 1M tokens or 0.5 SOL is not a price. Also refuse a vault price above 1000x the
+  // graduation price unless live AMM trades agree (two kol-signal trades printed 800,000x from a freshly created pool on 4 Sep).
+  if (r.baseTokens < 1e6 || r.quoteSol < 0.5) return;
+  if (r.priceSol > 1000 * (115 / 279_900_000) && t.ammBuys + t.ammSells === 0) { if (!extPriceRejected.has(mint)) { extPriceRejected.add(mint); log(`[vault] rejected implausible vault price for ${t.symbol} ${short(mint)}: ${r.priceSol.toExponential(3)} (${r.quoteSol.toFixed(1)} SOL / ${r.baseTokens.toExponential(2)} tokens)`); } return; }
+  t.vaultPrice = r.priceSol;
+  t.vaultSol = r.quoteSol;
+  t.vaultAt = Date.now();
+  if (t.ammTrusted === false || t.ammBuys + t.ammSells === 0) {
+    // no trustworthy trade stream: price from the vault itself (a pool exists, so the token has graduated)
+    const now = Date.now();
+    const u = tracker.setExternalPrice(mint, r.priceSol, now);
+    if (u) { broker.evaluateEntries(u, now, u.kolSignals > 0); broker.update(u, now); }
+  }
+}
+/** a fast, dev-funded graduation with few buyers: the grad-runner strategy's candidate set, priced externally after graduation */
+const gradCandidate = (t: import("./tracker.ts").TokenState) =>
+  t.graduated && !t.lateDiscovery && t.graduatedAt !== null && t.graduatedAt - t.createdAt <= 120_000 && t.devInitialSol >= 5 && (t.buyersAtGrad ?? t.buyers.size) <= 40 && !t.devSold && Date.now() - t.graduatedAt <= 50 * 60_000;
+setInterval(() => {
+  for (const t of tracker.tokens.values()) {
+    if (t.finalized || !t.pool) continue;
+    // onAmmTrade discards every trade while vaultPrice or decimals are unknown, and both lookups were fire-and-forget:
+    // one failed RPC call left a token restored by a buyout or a movement silently mute for its whole watch. Retry them.
+    if (t.vaultPrice === null) { void checkVault(t.mint); continue; }
+    if (t.decimals < 0) { void lookupDecimals(t.mint); continue; }
+    if (t.ammTrusted === false || t.kolSignals > 0 || broker.hasOpenPosition(t.mint) || (t.ammBuys + t.ammSells === 0 && gradCandidate(t)) || (t.ammTrusted === true && t.lastPrice >= 2.5 * (115 / 279_900_000))) void checkVault(t.mint); // survivors in the band: keep vault SOL current for the liquidity gate
+  }
+}, 60_000);
+setInterval(() => {
+  const mint = poolLookupQueue.shift();
+  if (mint) void lookupPool(mint);
+}, 400);
+/**
+ * Movement detector over the WHOLE PumpSwap stream (2026-09-05).
+ * The AMM websocket delivers every trade on every pool — ~5.3 M events per run — but only trades on a token still in
+ * the tracker were used, about 2 % of them. A token we dropped (the 6 h cap) that starts running hours later was
+ * therefore invisible, which is precisely the shape of the verified winners: the run happens on PumpSwap, hours after
+ * the curve. This keeps a small rolling window per pool, with no database writes, and raises a signal when real buying
+ * lifts a price. On a hit the token is restored, so the pricing, vault and strategy machinery pick it up as usual.
+ */
+const MOVE_WINDOW_MS = 5 * 60_000;
+const MOVE_MIN_NET_SOL = Number(process.env.MOVE_MIN_NET_SOL || 25);
+const MOVE_MIN_BUYERS = Number(process.env.MOVE_MIN_BUYERS || 8);
+const MOVE_MIN_LIFT = Number(process.env.MOVE_MIN_LIFT || 1.5);
+/**
+ * Anti-wash gates. The pool-capital wash of 3 Sep defeats a price-and-volume test by design: the operator buys ~99 % of
+ * its own pool with thousands of its own SOL, so the print is enormous and nobody can sell into it. Its signature in the
+ * first live hour of this detector was unmistakable — TRUMPCARD 388x, HOOD 522x, PONS 333x, each "+1500-1900 SOL net
+ * from 8 buyers" (the factory tickers of `npm run buyouts`). Two gates kill it without touching a real run: nothing
+ * genuine moves 20x in five minutes, and a real move is not one wallet's money.
+ */
+const MOVE_MAX_LIFT = Number(process.env.MOVE_MAX_LIFT || 20);
+// Tightened from 0.6 on the first 19 graded signals, where the top-buyer share was cleanly bimodal with nothing
+// between them: crowd moves at 4-8 % (PILL, zolana, SOULANA, STONK) and single-wallet moves at 53-60 % (HODL 58 % on
+// 9 buyers, ZCAT 60 %, PONS 58 %). 0.6 sat at the top edge of the bad cluster; 0.4 sits in the empty gap.
+const MOVE_MAX_TOP_SHARE = Number(process.env.MOVE_MAX_TOP_SHARE || 0.4);
+const MOVE_COOLDOWN_MS = 60 * 60_000;
+type MoveTrade = { ts: number; sol: number; side: "buy" | "sell"; price: number; user: string };
+const movement = new Map<string, MoveTrade[]>();
+const movementFired = new Map<string, number>();
+
+function noteMovement(tr: { pool: string; user: string; side: "buy" | "sell"; quoteSol: number; price: number }, now: number): void {
+  if (!(tr.quoteSol > 0 && tr.quoteSol < 5000) || !(tr.price > 0)) return; // the misaligned event layout, not a trade
+  let w = movement.get(tr.pool);
+  if (!w) { w = []; movement.set(tr.pool, w); }
+  w.push({ ts: now, sol: tr.quoteSol, side: tr.side, price: tr.price, user: tr.user });
+  while (w.length && w[0].ts < now - MOVE_WINDOW_MS) w.shift();
+  if (w.length < MOVE_MIN_BUYERS) return;
+  const last = movementFired.get(tr.pool) ?? 0;
+  if (now - last < MOVE_COOLDOWN_MS) return;
+  let net = 0, buyVol = 0;
+  const buyers = new Set<string>();
+  const perBuyer = new Map<string, number>();
+  for (const t of w) {
+    net += t.side === "buy" ? t.sol : -t.sol;
+    if (t.side !== "buy") continue;
+    buyers.add(t.user); buyVol += t.sol;
+    perBuyer.set(t.user, (perBuyer.get(t.user) ?? 0) + t.sol);
+  }
+  if (net < MOVE_MIN_NET_SOL || buyers.size < MOVE_MIN_BUYERS) return;
+  const lift = w[0].price > 0 ? tr.price / w[0].price : 0;
+  if (lift < MOVE_MIN_LIFT || lift > MOVE_MAX_LIFT) return;
+  const topShare = buyVol > 0 ? Math.max(...perBuyer.values()) / buyVol : 1;
+  if (topShare > MOVE_MAX_TOP_SHARE) return; // one wallet buying its own pool
+  movementFired.set(tr.pool, now);
+  const known = poolToMint.get(tr.pool);
+  const act = (mint: string) => {
+    if (mint === WSOL_MINT) return; // the quote side of the pair, not a token
+    // a token can have more than one pool; the cooldown has to hold per token as well, or one run alerts repeatedly
+    const lastForMint = movementFired.get(mint) ?? 0;
+    if (now - lastForMint < MOVE_COOLDOWN_MS) return;
+    movementFired.set(mint, now);
+
+    const t = restoreToken(mint, now);
+    // always map the pool that is actually trading: a stale tokens.pool row would otherwise leave these trades unattributed
+    poolToMint.set(tr.pool, mint);
+    savePool.run(tr.pool, mint, now);
+    if (!t.pool) t.pool = tr.pool;
+    void checkVault(mint);
+    if (!t.graduated) { t.graduated = true; t.graduatedAt = t.graduatedAt ?? now; }
+    t.watchCapMs = Math.max(t.watchCapMs ?? 0, 12 * 3600_000);
+    log(`[movement] ${t.symbol} ${short(mint)} +${net.toFixed(0)} SOL net from ${buyers.size} buyers, ${lift.toFixed(1)}x in 5 min (top buyer ${(topShare * 100).toFixed(0)} %)`);
+    notify(`🚀 movement: ${t.symbol} ${lift.toFixed(1)}x in 5 min on +${net.toFixed(0)} SOL from ${buyers.size} buyers\nhttps://pump.fun/coin/${mint}`);
+    db.prepare("INSERT INTO signals (source, account, mint, symbol, kind, text, url, posted_at, seen_at) VALUES (?,?,?,?,?,?,?,?,?)")
+      .run("movement", "amm-scan", mint, t.symbol, "amm-movement", `+${net.toFixed(1)} SOL net, ${buyers.size} buyers, ${lift.toFixed(2)}x in 5 min, top buyer ${(topShare * 100).toFixed(0)}%`, `https://pump.fun/coin/${mint}`, now, now);
+    broker.evaluateEntries(t, now);
+  };
+  if (known) act(known);
+  else void poolMint(tr.pool).then((m) => { if (m) { poolToMint.set(tr.pool, m); savePool.run(tr.pool, m, now); act(m); } });
+}
+// the window map would otherwise hold every pool that ever traded
+setInterval(() => {
+  const cutoff = Date.now() - MOVE_WINDOW_MS * 3;
+  for (const [pool, w] of movement) if (!w.length || w[w.length - 1].ts < cutoff) movement.delete(pool);
+  for (const [pool, at] of movementFired) if (at < Date.now() - MOVE_COOLDOWN_MS * 2) movementFired.delete(pool);
+}, 5 * 60_000);
+
+if (amm) {
+  amm.on("status", (m) => log("[amm]", m));
+  amm.on("pool", (p) => {
+    // record every pool, tracked or not: this event is the only free, exact pool -> mint pair, and a token restored
+    // hours later (a dormant-curve buyout) then has a price immediately instead of waiting on the lookup queue
+    if (p.baseMint !== WSOL_MINT) { poolToMint.set(p.pool, p.baseMint); savePool.run(p.pool, p.baseMint, Date.now()); }
+    if (tracker.tokens.has(p.baseMint)) {
+      tracker.tokens.get(p.baseMint)!.pool = p.pool;
+      void checkVault(p.baseMint);
+    }
+  });
+  amm.on("trade", (tr, now, slot) => {
+    const cluster = broker.operatorWallets.get(tr.user) ?? (blindOperators.has(tr.user) ? "unknown" : undefined);
+    noteMovement(tr, now);
+    const mint = poolToMint.get(tr.pool);
+    if (!mint) {
+      if (!cluster) return;
+      if (!(tr.quoteSol > 0 && tr.quoteSol < 5000)) return; // one of the two PumpSwap event layouts misaligns amounts; a "958,397 SOL" buy is that, not a trade
+      // a farm wallet trading a pool we do not know: resolve the pool's mint, restore the token, and count this trade
+      void poolMint(tr.pool).then((m) => {
+        if (!m) return;
+        const t = restoreToken(m, now);
+        if (!t.pool) { t.pool = tr.pool; poolToMint.set(tr.pool, m); void checkVault(m); }
+        if (!t.graduated) { t.graduated = true; t.graduatedAt = t.graduatedAt ?? now; }
+        noteOperator(t, tr.user, cluster, tr.side, tr.quoteSol, "amm", tr.price, now);
+      });
+      return;
+    }
+    const t = tracker.onAmmTrade(mint, tr, now);
+    if (!t) return;
+    if (cluster) noteOperator(t, tr.user, cluster, tr.side, tr.quoteSol, "amm", tr.price, now);
+    ammMatched++;
+    trades.push({ mint, wallet: tr.user, side: tr.side, sol: tr.quoteSol, tokens: tr.baseTokens, price: tr.price, ts: now, slot, sig: "", ageMs: now - t.createdAt, buyerRank: null, isDev: tr.user === t.creator, venue: "amm" });
+    broker.evaluateEntries(t, now, t.kolSignals > 0);
+    broker.update(t, now);
+  });
+  amm.connect();
+}
+// when a token graduates (or is discovered late), find its pool so AMM trades can be attributed
+setInterval(() => {
+  for (const t of tracker.tokens.values()) {
+    if (t.finalized || t.pool !== null) continue;
+    if ((t.graduated || t.lateDiscovery) && !poolLookupQueue.includes(t.mint) && poolLookupQueue.length < 200) poolLookupQueue.push(t.mint);
+  }
+}, 5000);
+
+// ---------- paper broker ----------
+broker.on("open", (p, t) => {
+  log(`[${p.strategy}] BUY  ${t.symbol.padEnd(8)} ${short(t.mint)} age=${((p.openedAt - t.createdAt) / 1000).toFixed(0)}s mcap=${(t.curve.vSol / t.curve.vTokens * 1e9).toFixed(1)} SOL  ${p.reason}`);
+  upsertToken(db, t);
+  if (p.strategy !== "baseline-all") notify(`📈 [${p.strategy}] paper BUY ${t.symbol} (${t.name})\n${p.reason}\nhttps://pump.fun/coin/${t.mint}`);
+});
+broker.on("partial", (p, t, x) => {
+  log(`[${p.strategy}] BANK ${t.symbol.padEnd(8)} ${short(t.mint)} half out at ${fmtX(x.multiple)} (+${x.solOut.toFixed(4)} SOL realised), rest rides on flow`);
+  notify(`💰 [${p.strategy}] banked half of ${t.symbol} at ${fmtX(x.multiple)}`);
+});
+broker.on("close", (p, t, x) => {
+  const r = realized.get(p.strategy)!;
+  if (x.reason !== "shutdown") {
+    r.n++;
+    r.pnl += x.pnl;
+    if (x.pnl > 0) r.wins++;
+  }
+  log(`[${p.strategy}] SELL ${t.symbol.padEnd(8)} ${short(t.mint)} ${fmtX(x.multiple)} pnl=${x.pnl >= 0 ? "+" : ""}${x.pnl.toFixed(4)} SOL  ${x.reason}  held=${((Date.now() - p.openedAt) / 1000).toFixed(0)}s`);
+  upsertToken(db, t);
+  if (p.strategy !== "baseline-all") notify(`${x.pnl >= 0 ? "✅" : "❌"} [${p.strategy}] paper SELL ${t.symbol} ${fmtX(x.multiple)} (${x.reason})`);
+});
+
+// ---------- KOL twitter watcher ----------
+const kols = loadKols(config.kolFile);
+const provider =
+  config.twitterProvider === "twitterapi" && config.twitterApiIoKey
+    ? twitterApiIoProvider(config.twitterApiIoKey)
+    : config.twitterProvider === "x" && config.xBearerToken
+      ? xApiProvider(config.xBearerToken)
+      : null;
+let watcher: KolWatcher | null = null;
+for (const k of kols) watchedAccounts.add(k.toLowerCase());
+/** Shared handler for X and Telegram signals. */
+const recentSignal = new Map<string, number>(); // account|mint -> last seen, to collapse repeats
+function handleSignal(sourceName: string, s: KolSignal): void {
+  const now = Date.now();
+  const dedupeKey = `${s.account}|${s.mint ?? "$" + s.symbol}`;
+  if (now - (recentSignal.get(dedupeKey) ?? 0) < 30 * 60_000) return; // same account, same token, within 30 min
+  recentSignal.set(dedupeKey, now);
+  let mint = s.mint;
+  let symbol = s.symbol;
+  if (!mint && symbol) {
+    // match a $TICKER to a token launched recently; prefer the most-bought one
+    const cands = [...tracker.tokens.values()].filter((t) => t.symbol.toUpperCase() === symbol && !t.finalized);
+    cands.sort((a, b) => b.buyers.size - a.buyers.size);
+    if (cands.length) mint = cands[0].mint;
+  }
+  db.prepare("INSERT INTO signals (source, account, mint, symbol, kind, text, url, posted_at, seen_at) VALUES (?,?,?,?,?,?,?,?,?)").run(
+    sourceName, s.account, mint, symbol, s.kind, s.text.slice(0, 500), s.url, s.postedAt, now,
+  );
+  log(`[${sourceName}] ${s.account} ${s.kind} ${mint ? short(mint) : "$" + symbol} ${mint ? "" : "(no launch yet — will buy a matching launch within 6h)"}`);
+  notify(`🐦 ${s.account} posted ${s.kind}: ${mint ?? "$" + symbol}\n${s.url}`);
+  if (!mint) {
+    if (symbol) expectations.set(symbol, { account: s.account, url: s.url, postedAt: s.postedAt });
+    return;
+  }
+  let t = tracker.tokens.get(mint);
+  if (!t) {
+    // a mint we tracked before (finished watch, evicted): restore its real age and pool so the entry is judged as an old token, not a 10-second-old launch
+    const prior = db.prepare("SELECT name, symbol, created_at, late_discovery, graduated, graduated_at, pool, launch_price FROM tokens WHERE mint = ?").get(mint) as any;
+    t = tracker.ensureLate(mint, now, symbol ?? prior?.symbol ?? "?", prior ? { createdAt: prior.created_at, graduated: !!prior.graduated, graduatedAt: prior.graduated_at ?? null, pool: prior.pool ?? null, launchPrice: prior.launch_price ?? 0, name: prior.name ?? undefined, pumpCreated: !prior.late_discovery } : undefined);
+    if (prior) log(`[kol] ${short(mint)} was seen before (launched ${((now - prior.created_at) / 60_000).toFixed(0)} min ago${prior.graduated ? ", graduated" : ""}); restored`);
+    if (t.pool) { poolToMint.set(t.pool, mint); void checkVault(mint); }
+  }
+  if (t.decimals < 0) void lookupDecimals(mint);
+  t.kolSignals++;
+  if (t.lateDiscovery) feed.subscribeTrades(mint); // price arrives with the first trade, entry evaluated then
+  else broker.evaluateEntries(t, now, true);
+  upsertToken(db, t);
+}
+if (provider && kols.length) {
+  watcher = new KolWatcher(provider, kols, config.kolPollSeconds);
+  watcher.on("status", (m) => log("[kol]", m));
+  watcher.on("signal", (s) => handleSignal(provider.name, s));
+  watcher.start();
+} else {
+  log(`[kol] watcher disabled (${!provider ? "no TWITTER_PROVIDER/key configured" : "kols.txt is empty"})`);
+}
+let street: StreetListener | null = null;
+const buzz = new BuzzTracker({ windowMs: 10 * 60_000, baselineMs: 3 * 3600_000, minAuthors: config.buzzMinAuthors, minLift: config.buzzMinLift, cooldownMs: 60 * 60_000 });
+const insertTweet = db.prepare(
+  `INSERT OR IGNORE INTO tweets (id, author, followers, created_at, text, urls, query, mints, cashtags, hashtags, likes, retweets, views, fetched_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+);
+if (provider?.search && config.xListenQueries.length) {
+  street = new StreetListener(provider, config.xListenQueries, config.xListenSeconds, config.xListenPages);
+  street.on("status", (m) => log("[street]", m));
+  street.on("signal", (s) => handleSignal("x-street", s));
+  street.on("tweet", (t, query) => {
+    const { mints, cashtags } = parseTweet(t);
+    insertTweet.run(t.id, t.author, t.authorFollowers ?? null, t.createdAt, t.text.slice(0, 1000), t.urls.join(" "), query, mints.map((m) => m.mint).join(" "), cashtags.join(" "), parseTags(t.text).join(" "), t.likes ?? null, t.retweets ?? null, t.views ?? null, Date.now());
+    buzz.ingest(t);
+  });
+  const muteFile = "data/x-mute.json";
+  let muted: string[] = [];
+  try {
+    muted = JSON.parse(readFileSync(muteFile, "utf8"));
+  } catch {}
+  street.on("muted", () => writeFileSync(muteFile, JSON.stringify([...street!.muted], null, 1)));
+  street.start(muted);
+  if (muted.length) log(`[street] ${muted.length} account(s) muted from a previous run: ${muted.join(", ")}`);
+  setInterval(() => {
+    const now = Date.now();
+    for (const b of buzz.evaluate(now)) {
+      // a token with this symbol launched recently?  -> signal.  none yet? -> expectation (buy the first matching launch)
+      const cands = [...tracker.tokens.values()].filter((t) => t.symbol.toUpperCase() === b.term && !t.finalized);
+      cands.sort((x, y) => y.buyers.size - x.buyers.size);
+      const matched = cands[0]?.mint ?? null;
+      db.prepare(`INSERT INTO buzz (term, kind, authors, mentions, followers, prior_rate, matched_mint, sample_url, sample_text, seen_at) VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
+        b.term, b.kind, b.authors, b.mentions, b.followers, b.priorMentionsPerWindow, matched, b.sampleUrl, b.sampleText.slice(0, 500), now,
+      );
+      log(`[buzz] ${b.kind === "cashtag" ? "$" : "#"}${b.term}: ${b.mentions} mentions by ${b.authors} accounts in 10m (baseline ${b.priorMentionsPerWindow.toFixed(1)}/10m)${matched ? ` → matches launch ${short(matched)}` : " → no launch yet, watching for one"}`);
+      notify(`📣 buzz ${b.kind === "cashtag" ? "$" : "#"}${b.term}: ${b.mentions} mentions / ${b.authors} accounts in 10m${matched ? ` — token exists https://pump.fun/coin/${matched}` : " — no token yet"}\n${b.sampleUrl}`);
+      if (b.kind === "cashtag") handleSignal("x-buzz", { account: "x-buzz", kind: "cashtag", mint: matched, symbol: b.term, text: b.sampleText, url: b.sampleUrl, postedAt: now });
+    }
+  }, 60_000);
+}
+
+// ---------- external prices for tokens that trade on PumpSwap (graduated or called after graduation) ----------
+async function pollExternalPrices(): Promise<void> {
+  const want = [...tracker.tokens.values()].filter((t) => !t.finalized && (t.lateDiscovery || t.graduated) && (t.kolSignals > 0 || broker.hasOpenPosition(t.mint) || gradCandidate(t)));
+  if (!want.length) return;
+  for (let i = 0; i < want.length; i += 30) {
+    const batch = want.slice(i, i + 30);
+    try {
+      const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${batch.map((t) => t.mint).join(",")}`, { signal: AbortSignal.timeout(8000) });
+      if (!res.ok) continue;
+      const j: any = await res.json();
+      const best = new Map<string, { px: number; amm: boolean; implied: number | null; pool: string | null; symbol?: string; name?: string; pump: boolean }>();
+      for (const p of j?.pairs ?? []) {
+        const mint = p?.baseToken?.address;
+        const px = Number(p?.priceNative);
+        if (!mint || !(px > 0)) continue;
+        if (p?.quoteToken?.address && p.quoteToken.address !== WSOL_MINT) continue; // priceNative/reserves are in the quote token; only SOL pairs are usable
+        const amm = p.dexId !== "pumpfun";
+        // the pair's own reserves imply a price; a quoted price that disagrees with them is a wash print or a decimals slip
+        const liqBase = Number(p?.liquidity?.base), liqQuote = Number(p?.liquidity?.quote);
+        const implied = liqBase > 0 && liqQuote > 0 ? liqQuote / liqBase : null;
+        const pool = p.dexId === "pumpswap" && typeof p.pairAddress === "string" ? p.pairAddress : null;
+        const cur = best.get(mint);
+        const pump = (cur?.pump ?? false) || p.dexId === "pumpfun" || p.dexId === "pumpswap" || String(mint).endsWith("pump");
+        // prefer the AMM pair (pumpswap/raydium) over the stale bonding-curve pair
+        if (!cur || (amm && !cur.amm)) best.set(mint, { px, amm, implied, pool: pool ?? cur?.pool ?? null, symbol: p.baseToken?.symbol, name: p.baseToken?.name, pump });
+        else { cur.pump = pump; if (!cur.pool && pool) cur.pool = pool; }
+      }
+      const now = Date.now();
+      for (const [mint, b] of best) {
+        const cur = tracker.tokens.get(mint);
+        if (cur) {
+          // borrow symbol/origin, and the pool address so the vault balances can price the token on-chain
+          if (b.symbol && (cur.symbol === "?" || !cur.symbol)) cur.symbol = b.symbol;
+          if (cur.pumpOrigin === null) cur.pumpOrigin = b.pump;
+          if (!cur.pool && b.pool) setPool(mint, b.pool);
+          if (cur.ammBuys + cur.ammSells > 0) continue; // live AMM trades are the truth
+          if (cur.vaultPrice !== null) continue; // pool known: priced from its vault balances (checkVault), never from an indexer
+        }
+        if (!b.amm) continue; // still on the bonding curve: the curve feed prices it, and an indexer price must not mark it graduated
+        if (b.implied === null || b.px / b.implied > 5 || b.px / b.implied < 0.2) {
+          if (!extPriceRejected.has(mint)) { extPriceRejected.add(mint); log(`[ext] rejected DexScreener price for ${cur?.symbol ?? "?"} ${short(mint)}: ${b.px.toExponential(3)} vs liquidity-implied ${b.implied === null ? "unknown" : b.implied.toExponential(3)}`); }
+          continue;
+        }
+        const t = tracker.setExternalPrice(mint, b.px, now, { symbol: b.symbol, name: b.name, pumpOrigin: b.pump });
+        if (!t) continue;
+        broker.evaluateEntries(t, now, t.kolSignals > 0);
+        broker.update(t, now);
+      }
+      // tokens DexScreener does not know at all: mark as non-pump so they are not traded
+      for (const t of batch) if (!best.has(t.mint) && t.lateDiscovery && t.pumpOrigin === null && Date.now() - t.createdAt > 120_000) t.pumpOrigin = false;
+    } catch {}
+  }
+}
+setInterval(() => void pollExternalPrices(), config.extPriceSeconds * 1000);
+
+// ---------- Telegram channel watcher ----------
+const channels = loadChannels(config.telegramChannelsFile);
+let tg: TelegramWatcher | null = null;
+if (telegramConfigured(config.telegramApiId, config.telegramApiHash) && channels.length) {
+  for (const c of channels) watchedAccounts.add(`tg:${c.toLowerCase()}`);
+  const client = createClient(config.telegramApiId, config.telegramApiHash);
+  tg = new TelegramWatcher(client, channels);
+  tg.on("status", (m) => log("[tg]", m));
+  tg.on("signal", (s) => handleSignal("telegram", s));
+  const tgRef = tg;
+  tg.start()
+    .then(() => {
+      selfNotify = (text) => tgRef.sendSelf(text);
+      tgRef.sendSelf(`🟢 pump-monitor started — watching ${channels.length} Telegram channels, ${kols.length} X accounts, ${strategies.length} paper strategies`);
+    })
+    .catch((e) => log("[tg] failed to start:", e.message));
+} else {
+  log(`[tg] watcher disabled (${channels.length ? "run `npm run telegram:login` first" : "channels.txt is empty"})`);
+}
+
+// ---------- clock ----------
+setInterval(() => {
+  const now = Date.now();
+  broker.tick(now);
+  tracker.tick(now, (m) => broker.hasOpenPosition(m) || operatorInterest(m));
+}, 1000);
+
+let lastSeenCount = 0, lastSeenChangeAt = Date.now(), staleAlerted = false;
+setInterval(() => {
+  const st = feed.getStats();
+  if (seen !== lastSeenCount) {
+    lastSeenCount = seen;
+    lastSeenChangeAt = Date.now();
+    if (staleAlerted) {
+      staleAlerted = false;
+      notify("🟢 launch feed recovered");
+    }
+  } else if (Date.now() - lastSeenChangeAt > 5 * 60_000 && !staleAlerted) {
+    staleAlerted = true;
+    log("[health] no launches for 5 minutes — feed may be down");
+    notify("🔴 pump-monitor: no launches seen for 5 minutes (feed down?)");
+  }
+  // Heartbeat. The product's whole claim is "we watched this launch happen", so it has to be able to say when it was
+  // NOT watching. stopped_at was only written on a clean shutdown, so a crash or a closed lid left a run open and its
+  // downtime invisible. Refreshing it every minute makes coverage the union of run intervals and gaps everything else;
+  // launch-time facts are unrecoverable, so an honest gap record is part of the archive, not an operational detail.
+  try { db.prepare("UPDATE runs SET stopped_at = ? WHERE id = ?").run(Date.now(), runId); } catch {}
+  const parts = [...realized].map(([k, v]) => `${k}: ${v.n} closed, ${v.wins}W, ${v.pnl >= 0 ? "+" : ""}${v.pnl.toFixed(3)} SOL`);
+  log(`[status] launches=${seen} tracking=${tracker.tokens.size} amm=${ammMatched}/${amm?.stats.trades ?? 0} pools=${poolToMint.size} tradesStored=${trades.written} smartWallets=${broker.smartWallets.size} teamWallets=${broker.walletTeams.size}${st.subscriptions >= 0 ? ` subs=${st.subscriptions}` : ""} trades=${st.trades} reconnects=${st.reconnects} open=${broker.openPositions().length}${watcher ? ` kolPolls=${watcher.stats.polls} kolSignals=${watcher.stats.signals}` : ""}${street ? ` streetTweets=${street.stats.tweets} streetSignals=${street.stats.signals}` : ""}${tg ? ` tgEvents=${tg.stats.allEvents} tgPolls=${tg.stats.polls} tgMsgs=${tg.stats.messages} tgSignals=${tg.stats.signals}` : ""}`);
+  for (const p of parts) log("   ", p);
+}, 60_000);
+
+/**
+ * Self-pruning. On a server nothing else runs: the Dockerfile starts this process and the daily script that prunes
+ * never executes, so the database would grow ~1 GB/day into a fixed volume and stop the collector within days. Losing
+ * the collector loses coverage, and launch-time facts are unrecoverable, so retention has to be the process's own job.
+ * Only working data goes; tokens, signals, operator_* and pool_map are the archive and are never touched.
+ */
+const RETENTION_DAYS = Number(process.env.RETENTION_DAYS || 14);
+function pruneWorkingData(): void {
+  const cutoff = Date.now() - RETENTION_DAYS * 86400_000;
+  const batch = 50_000;
+  let removed = 0;
+  try {
+    for (const sql of [
+      `DELETE FROM trades WHERE rowid IN (SELECT rowid FROM trades WHERE ts < ? LIMIT ${batch})`,
+      `DELETE FROM curve_snapshots WHERE rowid IN (SELECT rowid FROM curve_snapshots WHERE ts < ? LIMIT ${batch})`,
+      `DELETE FROM tweets WHERE rowid IN (SELECT rowid FROM tweets WHERE fetched_at < ? LIMIT ${batch})`,
+    ]) {
+      for (let i = 0; i < 40; i++) { // bounded so a huge backlog is spread over several passes, never blocking the feed
+        const c = Number((db.prepare(sql).run(cutoff) as any).changes ?? 0);
+        removed += c;
+        if (c < batch) break;
+      }
+    }
+    if (removed) log(`[prune] removed ${removed.toLocaleString()} working-data rows older than ${RETENTION_DAYS} days`);
+  } catch (e) { log("[prune] failed:", (e as Error).message); }
+}
+setInterval(pruneWorkingData, 6 * 3600_000);
+setTimeout(pruneWorkingData, 10 * 60_000); // once shortly after start, not during boot
+
+feed.connect();
+log(`source=${config.tradeSource}${config.tradeSource === "rpc" ? ` (${config.solanaWsUrl.replace(/\?.*$/, "")})` : ""}`);
+log(`paper trading ${strategies.length} strategies, ${config.buySol} SOL per buy, ${config.fillLatencyMs}ms fill latency, ${config.watchMinutes}m watch window → ${config.dbPath}`);
+for (const s of strategies) log(`   ${s.name.padEnd(16)} ${s.description}`);
+
+function shutdown() {
+  log("shutting down: closing open paper positions at last price");
+  broker.closeAll(Date.now(), "shutdown");
+  for (const t of tracker.tokens.values()) upsertToken(db, t);
+  trades.close();
+  db.prepare("UPDATE runs SET stopped_at=? WHERE id=?").run(Date.now(), runId);
+  watcher?.stop();
+  street?.stop();
+  tg?.stop();
+  amm?.close();
+  feed.close();
+  db.close();
+  process.exit(0);
+}
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);

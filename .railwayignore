@@ -1,0 +1,14 @@
+# The collector's databases are gigabytes and live on a volume, never in the image. Named explicitly rather than
+# excluding data/ and re-including one file: the first deploy relied on a negation pattern, data/record.db was
+# silently left out, and the web service came up serving an empty archive.
+data/pump.db*
+data/seed.db*
+data/archive.db*
+data/reports
+data/run.log
+data/telegram.session
+data/*.jsonl
+node_modules
+*.log
+.env
+.env.bak.*

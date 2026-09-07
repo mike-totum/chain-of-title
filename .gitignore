@@ -1,0 +1,20 @@
+node_modules
+
+# Databases are build products, not source. The collector's is 7 GB; the record is rebuilt by `npm run servicedb`.
+data/*.db
+data/*.db-*
+
+# Secrets and session material.
+.env
+.env.bak.*
+data/telegram.session
+
+# Generated output and run artifacts.
+site/
+data/reports/
+*.log
+
+# Small derived data that IS worth versioning, because it is how claims are checked and reproduced:
+!data/labels.json
+!data/operator-clusters.json
+!data/x-mute.json
