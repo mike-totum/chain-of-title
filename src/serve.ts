@@ -217,6 +217,127 @@ async function work(): Promise<void> {
   } finally { working = false; }
 }
 
+// ---------- pool refresher ----------
+/**
+ * Keeps `vault_sol` / `vault_at` current for the launches that could carry a certificate.
+ *
+ * Certification needs a pool balance read within MAX_READING_AGE_MS, and there are only two places that could come
+ * from. Reading per request hands any visitor an RPC amplifier and makes the front page cost a chain round-trip per
+ * row. Reading on the collector does not work either: the web service answers from a record file it pulls every few
+ * hours, so a balance written there would be stale by hours before it ever arrived — a five-minute window fed by a
+ * six-hour pipe is not a guarantee, it is a decoration.
+ *
+ * So it runs here, in the service that serves it. That is `provenance.ts`'s second invariant applied to the
+ * architecture: launch facts are permanent and travel fine in a file pulled every six hours, because those rows never
+ * change; pool balances are not permanent and should never have been travelling that way at all. Each kind of fact
+ * gets a channel matched to how fast it moves.
+ *
+ * Three properties this must keep, all of them the difference between a guarantee and a decoration:
+ *
+ *   1. **`vault_sol` and `vault_at` move together or not at all.** A read that failed leaves both alone, so the
+ *      reading ages out and the token quietly loses its certificate. Bumping the timestamp on an unchanged balance is
+ *      the exact bug that caused `vault_at` to be introduced in the first place (see `db.ts`), and doing it here
+ *      would reintroduce it on the freshest surface we have.
+ *   2. **Newest first, and let the tail age out.** The candidate set runs to a few hundred over seven days. If the
+ *      refresher cannot cover all of it, the right outcome is that older rows go uncertified — which the page already
+ *      expresses as an unchecked count — not that the window widens to make the list look fuller.
+ *   3. **It is a background job on our schedule.** Nothing a visitor does can make it run faster or more often, so
+ *      traffic cannot be converted into RPC spend.
+ */
+const NO_REFRESH = process.argv.includes("--no-refresh");
+/** Concurrent pool reads. Deliberately small: the rebuild worker and the per-request reads share this RPC budget. */
+const REFRESH_CONCURRENCY = 3;
+/** How often to look for work. Well inside the window, so a due reading is replaced rather than expiring first. */
+const REFRESH_TICK_MS = 30_000;
+/**
+ * Refresh at half the certificate window rather than at its edge. Waiting for expiry would make every token flicker
+ * between certified and uncertified once a cycle, which reads to a visitor as the site changing its mind.
+ */
+const REFRESH_DUE_MS = MAX_READING_AGE_MS / 2;
+/** A pool we cannot read repeatedly (closed, migrated, never really there) must not crowd out ones we can. */
+const REFRESH_MAX_FAILS = 3;
+const REFRESH_FAIL_COOLDOWN_MS = 30 * 60_000;
+/**
+ * Reads per cycle. This is what makes "newest first, let the tail age out" real rather than aspirational.
+ *
+ * Without it a cycle works the whole due list, which during an RPC brownout means hundreds of reads that each take
+ * ten to twenty seconds to fail — one cycle running for many minutes, grinding through a list ordered when it started
+ * while newer launches it should be prioritising go stale behind it. Capping the cycle means the refresher always
+ * finishes promptly and always re-sorts, so the newest candidates are re-read first every time and the oldest are
+ * what gets dropped. Sixty per 30s tick keeps the ~150-token 24-hour set inside the certificate window with headroom.
+ */
+const REFRESH_MAX_PER_CYCLE = 60;
+
+const refreshFails = new Map<string, { n: number; until: number }>();
+const refresher = { cycles: 0, read: 0, failed: 0, lastCycleAt: 0, lastCycleMs: 0, due: 0 };
+
+/**
+ * The launches that could carry a certificate — the same rule the front page applies, evaluated by the same code.
+ * Deriving the candidate set independently (a hand-written SQL approximation of `cleanAtBirth`, say) would let the
+ * refresher and the page disagree about who matters, and the failure would be silent: tokens the page wants to
+ * certify but nothing ever refreshes.
+ */
+function refreshCandidates(now: number): any[] {
+  const since = now - HOME_DAYS * 86400_000;
+  const toks = db.prepare(`SELECT ${TOKEN_COLUMNS} FROM tokens WHERE graduated = 1 AND created_at >= ? AND pool IS NOT NULL`)
+    .all(since) as any[];
+  return toks
+    .filter((t) => cleanAtBirth(t, assess(db, t, covered)))
+    .sort((a, b) => b.created_at - a.created_at);   // newest first: the tail is what we are willing to lose
+}
+
+const setReading = db.prepare("UPDATE tokens SET vault_sol = ?, vault_at = ? WHERE mint = ?");
+
+/**
+ * A cycle can outlast its tick when the chain is slow to answer, and `setInterval` does not care — it would start a
+ * second cycle on top of the first, then a third, multiplying exactly the RPC pressure that made them slow. The guard
+ * makes a tick a no-op while one is already running.
+ */
+let refreshing = false;
+
+async function refreshCycle(): Promise<void> {
+  if (refreshing) return;
+  refreshing = true;
+  try { await runRefreshCycle(); } finally { refreshing = false; }
+}
+
+async function runRefreshCycle(): Promise<void> {
+  const now = Date.now();
+  const started = now;
+  const due = refreshCandidates(now).filter((t) => {
+    const f = refreshFails.get(t.mint);
+    if (f && f.n >= REFRESH_MAX_FAILS && now < f.until) return false;
+    return t.vault_at == null || now - t.vault_at >= REFRESH_DUE_MS;
+  });
+  refresher.due = due.length;
+  if (!due.length) { refresher.cycles++; refresher.lastCycleAt = started; refresher.lastCycleMs = Date.now() - started; return; }
+
+  // Newest-first was applied by refreshCandidates; the cap is what actually spends the budget on them.
+  const batch = due.slice(0, REFRESH_MAX_PER_CYCLE);
+  let next = 0;
+  await Promise.all(Array.from({ length: REFRESH_CONCURRENCY }, async () => {
+    for (let i = next++; i < batch.length; i = next++) {
+      const t = batch[i];
+      const r = await poolReservesPooled(t.pool, t.mint);
+      if (r) {
+        // Both columns, one statement, one moment. A balance and the time it was read are a single observation.
+        setReading.run(r.quoteSol, Date.now(), t.mint);
+        refresher.read++;
+        refreshFails.delete(t.mint);
+      } else {
+        refresher.failed++;
+        const f = refreshFails.get(t.mint) ?? { n: 0, until: 0 };
+        f.n++;
+        if (f.n >= REFRESH_MAX_FAILS) f.until = Date.now() + REFRESH_FAIL_COOLDOWN_MS;
+        refreshFails.set(t.mint, f);
+      }
+    }
+  }));
+  refresher.cycles++;
+  refresher.lastCycleAt = started;
+  refresher.lastCycleMs = Date.now() - started;
+}
+
 // ---------- rendering ----------
 /**
  * `judgeable` is not decoration. A thin pool is only evidence about a token whose launch we actually hold: for a row
@@ -509,6 +630,14 @@ const server = createServer(async (req, res) => {
           bulk: "/data/record.db",
           endpoints: [`/api/${API_VERSION}/token/{mint}`, `/api/${API_VERSION}/wallet/{address}`, `/api/${API_VERSION}/status`],
           rebuildsPerIpPerHour: PER_IP_PER_HOUR,
+          // What the certificate actually rests on, published rather than implied: how fresh a pool reading has to be,
+          // and whether the job keeping them fresh is currently keeping up.
+          readingMaxAgeSeconds: MAX_READING_AGE_MS / 1000,
+          liquidityRefresh: NO_REFRESH ? null : {
+            cycles: refresher.cycles, read: refresher.read, failed: refresher.failed,
+            dueLastCycle: refresher.due, lastCycleMs: refresher.lastCycleMs,
+            lastCycleAt: refresher.lastCycleAt ? new Date(refresher.lastCycleAt).toISOString() : null,
+          },
         }), "short");
 
       const tj = rest.match(/^token\/([1-9A-HJ-NP-Za-km-z]{32,44})$/);
@@ -624,6 +753,21 @@ const server = createServer(async (req, res) => {
 });
 
 const esc2 = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
+
+/**
+ * Started here rather than beside its own functions because `refreshCandidates` reads HOME_DAYS, which is declared
+ * with the home-page section further down — running a cycle at that point would hit its temporal dead zone. Starting
+ * after the module has finished evaluating also means the first read cannot race the server coming up.
+ */
+if (!NO_REFRESH) {
+  // Kick off immediately so a restart does not leave the page uncertified for a whole tick, then settle into the loop.
+  void refreshCycle().catch((e) => console.log(`[refresh] ${(e as Error).message}`));
+  setInterval(() => void refreshCycle().catch((e) => console.log(`[refresh] ${(e as Error).message}`)), REFRESH_TICK_MS);
+  setInterval(() => {
+    if (!refresher.cycles) return;
+    console.log(`[refresh] ${refresher.cycles} cycles, ${refresher.read} read, ${refresher.failed} failed, ${refresher.due} due last cycle (${refresher.lastCycleMs} ms)`);
+  }, 10 * 60_000);
+}
 
 server.listen(PORT, () => {
   console.log(`serving ${DIR} from ${DB_FILE} (${held.toLocaleString()} launches) on http://localhost:${PORT}`);
