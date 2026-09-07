@@ -17,11 +17,13 @@ import { readFileSync, existsSync, statSync } from "node:fs";
 import { join, normalize } from "node:path";
 import { config } from "./config.ts";
 import { openDb } from "./db.ts";
-import { type Assessment, assess, cleanAtBirth, coverageWindows, TOKEN_COLUMNS, MIN_POOL_SOL } from "./provenance.ts";
+import { type Assessment, assess, cleanAtBirth, coverageWindows, TOKEN_COLUMNS, MIN_POOL_SOL,
+  readingCertifies, MAX_READING_AGE_MS, MAX_DEV_PCT, MIN_BUYERS, BUYOUT_SOL } from "./provenance.ts";
 import { profile, verdictLine } from "./operator.ts";
 import { poolReservesPooled } from "./outcomes.ts";
 import { rebuild, store, curveExists } from "./backfill.ts";
-import { page, tokenBody, walletBody, tokenPreview, SEARCH, when, fmt, type Chrome, type Reading } from "./render.ts";
+import { page, tokenBody, walletBody, tokenPreview, SEARCH, when, fmt, homeBody, homeTitle,
+  type Home, type Chrome, type Reading } from "./render.ts";
 import { tokenRecord, walletRecord, statusRecord, unknownRecord, errorRecord,
   API_VERSION, PER_IP_PER_HOUR, GLOBAL_PER_HOUR, GLOBAL_PER_DAY, type Coverage } from "./api.ts";
 
@@ -130,7 +132,21 @@ const chrome: Chrome = {
   gapMin: win.slice(1).reduce((a, w, i) => a + Math.max(0, w.a - win[i].b), 0) / 60_000,
 };
 /** The same coverage statement the page footer makes, in the shape the JSON records carry. */
-const COV: Coverage = { from: win.length ? win[0].a : null, downtimeMinutes: chrome.gapMin };
+/**
+ * When the archive we are serving was actually built. The web service reads a file the collector produced and pulled
+ * across, so "now" is never the right answer for how current the data is — the two 6-hour intervals in front of it
+ * (RECORD_EVERY_HOURS, RECORD_REFRESH_HOURS) can put twelve hours between the chain and this process. `meta.built_at`
+ * is written by servicedb; the newest row it holds is the fallback for a record built before that field existed.
+ */
+const recordBuiltAt = (() => {
+  try {
+    const m = db.prepare("SELECT v FROM meta WHERE k='built_at'").get() as any;
+    if (m?.v) return Number(m.v);
+  } catch {}
+  try { return (db.prepare("SELECT MAX(updated_at) m FROM tokens").get() as any)?.m ?? null; } catch { return null; }
+})();
+console.log(`[record] built ${recordBuiltAt ? new Date(recordBuiltAt).toISOString() : "unknown"}`);
+const COV: Coverage = { from: win.length ? win[0].a : null, downtimeMinutes: chrome.gapMin, builtAt: recordBuiltAt };
 
 /**
  * Refuse to serve an empty archive. `openDb` creates its tables when the file is missing, so a database that failed to
@@ -343,6 +359,75 @@ const noRecord = (mint: string, why: string) => page("No record", `
 /** True only for a readable regular file: a directory exists but cannot be sent, and a broken path is not an error. */
 const isFile = (p: string): boolean => { try { return statSync(p).isFile(); } catch { return false; } };
 
+/**
+ * The front page, per request.
+ *
+ * It used to be a file, which meant its numbers were true at build time and drifted from then on — and the build that
+ * produced them could fail for a whole day, as it did. The chain does not stop, so neither should the page.
+ *
+ * Two things make this affordable. The counts are indexed aggregates over a 45 MB record, single-digit milliseconds.
+ * And certification no longer reads a pool: a launch is certified from a stored reading that is fresh enough
+ * (MAX_READING_AGE_MS), refreshed on our own schedule rather than a visitor's, so no request can ever be turned into
+ * an RPC amplifier. A reading that has aged out means uncertified, never a warning.
+ *
+ * The cache exists only so a burst of traffic cannot multiply the work; at this TTL the page is never meaningfully
+ * behind the database it reads, and it is orders of magnitude fresher than the file it replaces.
+ */
+const HOME_TTL_MS = Number(process.env.HOME_TTL_SECONDS ?? 15) * 1000;
+const HOME_DAYS = Number(process.env.HOME_DAYS ?? 7);
+let homeCache: { at: number; html: string } | null = null;
+
+function buildHome(now: number): Home {
+  const since = now - HOME_DAYS * 86400_000;
+  const toks = db.prepare(`SELECT ${TOKEN_COLUMNS} FROM tokens WHERE graduated = 1 AND created_at >= ?`).all(since) as any[];
+  const assessed = toks.map((t) => ({ t, a: assess(db, t, covered) }));
+
+  const certified = assessed.filter(({ t, a }) => cleanAtBirth(t, a) && readingCertifies(t.vault_at, t.vault_sol, now));
+  const unchecked = assessed.filter(({ t, a }) => cleanAtBirth(t, a) && !readingCertifies(t.vault_at, t.vault_sol, now)).length;
+
+  const inDay = (t: any) => t.created_at >= now - 86400_000;
+  const day = assessed.filter(({ t }) => inDay(t));
+
+  const proofRow = assessed
+    .filter(({ t, a }) => !t.late_discovery && t.dev_pct >= 50 && a.curveBuyers === 0 && t.pool && t.vault_at != null && (t.vault_sol ?? 0) < 10)
+    .sort((x, y) => (y.t.vault_at ?? 0) - (x.t.vault_at ?? 0))[0];
+
+  const ops = db.prepare(
+    `SELECT wallet, curve_sol, amm_buy, amm_sell, tokens FROM wallet_flow ORDER BY amm_sell DESC LIMIT 15`).all() as any[];
+  const walletCount = (db.prepare("SELECT COUNT(*) c FROM wallet_flow").get() as any).c as number;
+
+  return {
+    now, builtAt: recordBuiltAt,
+    graduated24h: day.length,
+    clean24h: certified.filter(({ t }) => inDay(t)).length,
+    danger24h: day.filter(({ a }) => a.flags.some((f) => f.level === "DANGER")).length,
+    onFile: (db.prepare("SELECT COUNT(*) c FROM tokens WHERE late_discovery=0").get() as any).c,
+    windowDays: HOME_DAYS, gradWindow: toks.length, unchecked,
+    cleanRows: certified.sort((x, y) => y.t.created_at - x.t.created_at).slice(0, 40).map(({ t, a }) => ({
+      mint: t.mint, symbol: t.symbol, devPct: t.dev_pct, buyers: a.curveBuyers ?? 0,
+      fillMs: t.graduated_at && t.created_at ? t.graduated_at - t.created_at : null,
+      poolSol: t.vault_sol, readAt: t.vault_at,
+    })),
+    wallets: walletCount,
+    opRows: ops.map((w) => ({ wallet: w.wallet, taken: w.tokens, spent: w.curve_sol, sold: w.amm_sell, bought: w.amm_buy })),
+    proof: proofRow ? {
+      mint: proofRow.t.mint, symbol: proofRow.t.symbol, devPct: proofRow.t.dev_pct,
+      gradMs: proofRow.t.graduated_at && proofRow.t.created_at ? proofRow.t.graduated_at - proofRow.t.created_at : null,
+      fundedSol: 0, nowSol: proofRow.t.vault_sol, nowAt: proofRow.t.vault_at,
+    } : null,
+    maxDevPct: MAX_DEV_PCT, minBuyers: MIN_BUYERS, buyoutSol: BUYOUT_SOL, minPoolSol: MIN_POOL_SOL,
+  };
+}
+
+function renderHome(): string {
+  const now = Date.now();
+  if (homeCache && now - homeCache.at < HOME_TTL_MS) return homeCache.html;
+  const h = buildHome(now);
+  const html = page(homeTitle(h), homeBody(h), chrome, 0, undefined, "/");
+  homeCache = { at: now, html };
+  return html;
+}
+
 // ---------- server ----------
 const TYPES: Record<string, string> = { ".html": "text/html; charset=utf-8", ".json": "application/json; charset=utf-8", ".css": "text/css", ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon" };
 
@@ -476,6 +561,10 @@ const server = createServer(async (req, res) => {
       return send(400, page("Not an address", `<h1>That is not a Solana address</h1>
         <p class="sub">A mint address is 32 to 44 characters of base58 — no 0, O, I or l.</p>${SEARCH}`, chrome, 0));
     }
+
+    // The front page is rendered, not served from disk. It must come before the static handler, which would
+    // otherwise keep answering with whatever index.html the last build left behind.
+    if (safe === "/index.html") return send(200, renderHome(), "text/html; charset=utf-8", "short");
 
     const file = join(DIR, safe);
     /**

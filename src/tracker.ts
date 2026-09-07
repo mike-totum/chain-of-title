@@ -13,6 +13,8 @@ export interface TokenState {
   creator: string;
   createdAt: number; // ms, receipt time
   createdSlot: number;
+  /** Launchpad slug, e.g. "pumpfun". Omitted by the pump.fun collector, which is the default in `upsertToken`. */
+  venue?: string;
   /** per-token override of the max watch window (operator-cluster tokens get 24 h) */
   watchCapMs?: number;
   /** most recent trade, for strategies that react to who is buying */

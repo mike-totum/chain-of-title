@@ -35,7 +35,7 @@ export const GLOBAL_PER_DAY = 400;
 /** Milliseconds are what the database holds; ISO-8601 is what a consumer in another language can read. Publish both. */
 const at = (ms: number | null | undefined) => (ms == null ? null : { ms, iso: new Date(ms).toISOString() });
 
-export type Coverage = { from: number | null; downtimeMinutes: number };
+export type Coverage = { from: number | null; downtimeMinutes: number; builtAt: number | null };
 
 /** Common envelope. Every response carries where it came from and under what terms, including the errors. */
 const envelope = (cov: Coverage, path: string) => ({
@@ -45,7 +45,17 @@ const envelope = (cov: Coverage, path: string) => ({
     downtimeMinutes: Math.round(cov.downtimeMinutes),
     note: "Launches outside these windows were not observed. We rebuild them from chain history on request; until that succeeds their provenance is unknown, not clean.",
   },
-  asOf: at(Date.now()),
+  /**
+   * `asOf` describes the DATA, not this response. It used to be Date.now(), which meant the API stamped the current
+   * time on an archive that can be hours old: production served `launches: 143102, asOf: 18:18` while the record it
+   * was reading had been built at 16:01 and the collector already held 146,061. A consumer reads `asOf` to decide
+   * how much to trust a number, so pointing it at the clock rather than at the data made it worse than absent.
+   *
+   * The record carries its own build time in `meta.built_at`; that is what belongs here. `generatedAt` keeps the
+   * response time for anyone who wants it, under a name that cannot be mistaken for freshness of the archive.
+   */
+  asOf: at(cov.builtAt),
+  generatedAt: at(Date.now()),
   source: CANONICAL_HOST ? `${CANONICAL_HOST}${path}` : path,
   license: LICENSE,
 });
@@ -64,6 +74,12 @@ export function tokenRecord(
     mint: t.mint,
     symbol: t.symbol ?? null,
     name: t.name ?? null,
+    /**
+     * The launchpad this token was launched on. Always "pumpfun" today — the collector has only ever watched that one
+     * program — but it is published from the day the column exists rather than the day a second venue arrives, so a
+     * consumer can branch on it without ever having to assume that an absent field meant pump.fun.
+     */
+    venue: t.venue ?? null,
     // The answer, and the only field a caller should branch on. `label`/`why` are the same sentences the page prints.
     verdict: { level: v.level, label: v.label, why: v.why },
     // true = the launch record shows no sign of manufacture. false = it failed at least one test.

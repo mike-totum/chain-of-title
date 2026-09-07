@@ -11,12 +11,11 @@ import { join } from "node:path";
 import { config } from "./config.ts";
 import { openDb } from "./db.ts";
 import { profile, verdictLine } from "./operator.ts";
-import { poolReservesPooled } from "./outcomes.ts";
 import { rpcStats } from "./rpc-http.ts";
 import { tokenRecord, walletRecord, API_VERSION, PER_IP_PER_HOUR, type Coverage } from "./api.ts";
 import { BRAND, CANONICAL_HOST, CONTACT, CSS, FAVICON, SEARCH, page, tokenBody, walletBody, tokenPreview, esc, fmt, when, dur, ago, type Chrome, type Reading } from "./render.ts";
 import {
-  assess, cleanAtBirth, coverageWindows, TOKEN_COLUMNS,
+  assess, cleanAtBirth, readingCertifies, MAX_READING_AGE_MS, coverageWindows, TOKEN_COLUMNS,
   BUYOUT_SOL, MAX_DEV_PCT, MIN_BUYERS, MIN_GRAD_MS, MIN_POOL_SOL,
   type Assessment, type Flag,
 } from "./provenance.ts";
@@ -43,8 +42,16 @@ const chrome: Chrome = {
   coverageFrom: win.length ? when(win[0].a) : "unknown",
   gapMin: win.slice(1).reduce((a, w, i) => a + Math.max(0, w.a - win[i].b), 0) / 60_000,
 };
-/** The same coverage statement the page footer makes, in the shape the JSON records carry. */
-const COV: Coverage = { from: win.length ? win[0].a : null, downtimeMinutes: chrome.gapMin };
+/**
+ * The same coverage statement the page footer makes, in the shape the JSON records carry. `builtAt` is the database's
+ * own build time rather than this run's clock: the generator reads a record it did not produce, so the age a consumer
+ * cares about is the data's, not the page's.
+ */
+const builtAt = (() => {
+  try { const m = db.prepare("SELECT v FROM meta WHERE k='built_at'").get() as any; if (m?.v) return Number(m.v); } catch {}
+  try { return (db.prepare("SELECT MAX(updated_at) m FROM tokens").get() as any)?.m ?? null; } catch { return null; }
+})();
+const COV: Coverage = { from: win.length ? win[0].a : null, downtimeMinutes: chrome.gapMin, builtAt };
 
 
 
@@ -72,15 +79,10 @@ const look = (t: any): Assessment => assess(db, t, covered);
  * `fresh` records which kind of number this is. A stored reading may still be shown, always with its age attached; only
  * a reading taken during this run can support a certificate.
  */
-const readings = new Map<string, Reading>();
-const stored = (t: any): Reading | null =>
-  t.vault_sol == null || t.vault_at == null ? null : { sol: t.vault_sol, at: t.vault_at, fresh: false };
-const reading = (t: any): Reading | null => readings.get(t.mint) ?? stored(t);
-const isClean = (t: any, a: Assessment) => {
-  if (!cleanAtBirth(t, a)) return false;
-  const r = readings.get(t.mint);
-  return !!r && r.fresh && r.sol >= MIN_POOL_SOL;
-};
+const reading = (t: any): Reading | null =>
+  t.vault_sol == null || t.vault_at == null ? null
+    : { sol: t.vault_sol, at: t.vault_at, fresh: now - t.vault_at <= MAX_READING_AGE_MS };
+const isClean = (t: any, a: Assessment) => cleanAtBirth(t, a) && readingCertifies(t.vault_at, t.vault_sol, now);
 
 // ---------- token pages ----------
 const wallets = new Map<string, { mints: string[] }>();
@@ -90,67 +92,19 @@ const cleanBuyers = new Map<string, number>();
 // Pass 1: read the archive. No network, so a broken RPC can never change what the launch record says.
 const assessed = toks.map((t) => ({ t, a: look(t) }));
 
-// Pass 2: re-read the pool for every token whose launch record would certify it. Bounded by construction — this is
-// the handful of tokens a day that survive the birth tests, not the thousands that graduate.
-const candidates = assessed.filter(({ t, a }) => cleanAtBirth(t, a) && t.pool);
-const unverified: any[] = [];   // passed every launch test; pool could not be read, so not certified
-console.log(`re-reading ${candidates.length} pools from chain…`);
-let reread = 0;
-// Reads go through the managed endpoint pool, not the single public node the collector saturates: reading 249 pools
-// from api.mainnet-beta returned 429 for 133 of them, and every failure silently becomes "not certified".
-const POOL_CONCURRENCY = 4;
 /**
- * A deadline on the whole pass.
+ * There is no pool-reading pass here any more, and that is the point.
  *
- * Every read is individually bounded — 15 s, catching its own failure — but the pass over them was not, and each
- * failure costs up to eight attempts across three endpoints with escalating back-off. On 2026-09-07 every endpoint
- * 429'd on every attempt and 279 candidates ran for over an hour without finishing; the daily pipeline's own run hit
- * the same wall and was still going five hours after it started. An unbounded step in a scheduled job is a job that
- * can silently stop finishing, and nothing downstream of it runs.
+ * This generator used to re-read every candidate's pool so it could certify one; that made a page build depend on
+ * hundreds of RPC calls, took over an hour when the endpoints were throttled, and produced a page that was true at
+ * build time and drifted from then on. Certification now reads a stored balance and asks how old it is
+ * (MAX_READING_AGE_MS), and the front page is rendered per request by `serve.ts` rather than written here — so the
+ * numbers move with the chain instead of with the build.
  *
- * Giving up is safe here precisely because the gate exists: an abandoned read is an uncertified token, and enough of
- * those refuse the build. So the deadline degrades into a loud stop rather than a quiet one.
+ * What is left in this file is the part that genuinely does not move: method, data, 404 and the API page. None of
+ * them assert anything about a specific token, so none of them need the network, and a build is seconds rather than
+ * an hour and cannot be blocked by an RPC brownout.
  */
-const POOL_DEADLINE = Date.now() + Number(process.env.POOL_DEADLINE_MIN ?? 10) * 60_000;
-let next = 0, abandoned = 0;
-await Promise.all(Array.from({ length: POOL_CONCURRENCY }, async () => {
-  for (let i = next++; i < candidates.length; i = next++) {
-    if (Date.now() > POOL_DEADLINE) { abandoned++; continue; }
-    const { t } = candidates[i];
-    const r = await poolReservesPooled(t.pool, t.mint);
-    if (r) { readings.set(t.mint, { sol: r.quoteSol, at: Date.now(), fresh: true }); reread++; }
-  }
-}));
-if (abandoned) console.log(`  gave up on ${abandoned} after ${process.env.POOL_DEADLINE_MIN ?? 10} min; they count as unreadable`);
-for (const { t } of candidates) if (!readings.has(t.mint)) unverified.push(t);
-console.log(`  ${reread} answered, ${unverified.length} unreadable (cannot be certified)`);
-
-/**
- * Refuse the build when too many pools could not be read.
- *
- * Certification already fails closed per token, which is right, but the aggregate did not: a run during an RPC
- * brownout still produced a complete, publishable page whose only signal was a footnote beside the seven-day table.
- * On 2026-09-07 a run read 54 of 279 pools and published "5 of 9,035 graduations" where a healthy run the night
- * before had found 27 — and `clean24h` was 4 against 24 unverified, so the headline could have been out by seven
- * times. The headline is also the og:title, which means it travels into every shared link on its own, with no
- * footnote anywhere near it.
- *
- * So the failure belongs to the build, not the page. Writing nothing leaves yesterday's correct pages up and exits
- * non-zero, which the GATE in daily.sh already treats as a stop — the same shape as `npm run labels`. A loud failure
- * beats a quiet degradation, and this is a site whose entire claim is that it declines rather than guesses.
- */
-const MAX_UNREADABLE = Number(process.env.MAX_UNREADABLE_PCT ?? 20) / 100;
-const unreadableFrac = candidates.length ? unverified.length / candidates.length : 0;
-if (unreadableFrac > MAX_UNREADABLE) {
-  console.error(`\nREFUSING TO BUILD: ${unverified.length} of ${candidates.length} pools unreadable ` +
-    `(${(100 * unreadableFrac).toFixed(0)}%, limit ${(100 * MAX_UNREADABLE).toFixed(0)}%).`);
-  console.error(`Every unreadable pool is a token that cannot be certified, so the clean counts this run would`);
-  console.error(`publish — including the headline, which is also the link preview — are understated by an unknown`);
-  console.error(`amount. Nothing has been written; the previous build's pages are still correct and still up.`);
-  console.error(`Re-run when the RPC endpoints answer. Override deliberately with MAX_UNREADABLE_PCT.`);
-  console.error(`  ${rpcStats()}`);
-  process.exit(1);
-}
 
 // Pass 3: write.
 for (const { t, a } of assessed) {
@@ -188,6 +142,8 @@ for (const [w] of wallets) {
 // ---------- front page ----------
 const day = toks.filter((t) => t.created_at >= now - 86400_000);
 const dayClean = clean.filter((t) => t.created_at >= now - 86400_000);
+// Passed every birth test but carries no reading fresh enough to certify. Not a warning — an absence of one.
+const unverified = assessed.filter(({ t, a }) => cleanAtBirth(t, a) && !readingCertifies(t.vault_at, t.vault_sol, now)).map(({ t }) => t);
 const dayUnverified = unverified.filter((t) => t.created_at >= now - 86400_000);
 // The page's central claim, counted rather than asserted: how many of yesterday's graduations carry a danger flag.
 const dayAssessed = assessed.filter(({ t }) => t.created_at >= now - 86400_000);
@@ -197,94 +153,14 @@ const dayDanger = dayAssessed.filter(({ a }) => a.flags.some((f) => f.level === 
 // that everything measurable looks ordinary, and later takes it back out. A scanner run during the middle window sees
 // nothing wrong; one run afterwards reports thin liquidity, correctly and far too late. Only the birth record was
 // true throughout. Both pool figures are read rather than assumed — the "now" one live, here.
-const proofCandidates = assessed
-  .filter(({ t, a }) => t.graduated && !t.late_discovery && t.dev_pct >= 50 && a.curveBuyers === 0 && t.pool && (t.vault_sol ?? 0) >= 500)
-  .sort((x, y) => (y.t.vault_sol ?? 0) - (x.t.vault_sol ?? 0));
-let proof: typeof proofCandidates[number] | undefined;
-let proofNow = 0;
-for (const c of proofCandidates.slice(0, 8)) {
-  const r = await poolReservesPooled(c.t.pool, c.t.mint);
-  if (r) { proof = c; proofNow = r.quoteSol; break; }
-}
-if (!proof) console.log("  no worked example could be read this build; the page omits that section");
-const cleanRows = clean.sort((a, b) => b.created_at - a.created_at).slice(0, 40).map((t) => `<tr>
-  <td><a href="t/${esc(t.mint)}.html">${esc(t.symbol ?? "?")}</a></td><td class="num">${t.dev_pct.toFixed(1)}%</td>
-  <td class="num">${fmt(cleanBuyers.get(t.mint) ?? 0)}</td><td class="num">${dur(t.graduated_at - t.created_at)}</td><td class="num">${(readings.get(t.mint)!.sol).toFixed(0)} SOL</td></tr>`).join("");
-const opRows = [...wallets.entries()].map(([w, v]) => ({ w, p: profile(db, w), n: v.mints.length }))
-  .filter((x) => x.p.buyouts.length >= 1).sort((a, b) => b.p.ammSell - a.p.ammSell).slice(0, 15)
-  .map((x) => `<tr><td class="mono"><a href="w/${esc(x.w)}.html">${esc(x.w.slice(0, 12))}…</a></td>
-    <td class="num">${x.p.buyouts.length}</td><td class="num">${fmt(x.p.curveSol)} SOL</td><td class="num">${fmt(x.p.ammSell)} SOL</td><td class="num">${fmt(x.p.ammBuy)} SOL</td></tr>`).join("");
+/**
+ * The worked example moved with the page that showed it. It needed a pool read to prove the "now" column, which was
+ * the last network call in this generator — leaving it here would have kept a build that cannot fail on RPC
+ * depending on RPC anyway, for a section nothing in this file renders.
+ */
 
 
-writeFileSync(join(OUT, "index.html"), page(`${fmt(dayClean.length)} of ${fmt(day.length)} tokens launched clean yesterday`, `
-  <div class="hero">
-    <h1 class="headline">In the last 24 hours ${fmt(day.length)} tokens finished their bonding curve.
-    <b>${fmt(dayClean.length)}</b> of them launched clean.</h1>
-    <p class="lede">Most were manufactured. The creator took the supply, or a single wallet bought the whole curve and
-    called it demand. That evidence exists for about thirty seconds and is unrecoverable afterwards — so we watch every
-    launch on pump.fun and keep the record.</p>
-    <p class="lede">Paste any mint. If we hold its launch, you get what happened. If we do not, we rebuild it from the
-    chain, and if we cannot do that we say so rather than guess.</p>
-    ${SEARCH}
-    ${proof ? `<p class="sub" style="margin:-18px 0 24px">Nothing to hand? Read <a href="t/${esc(proof.t.mint)}.html">${esc(proof.t.symbol ?? "?")}</a>, a launch this archive holds.</p>` : ""}
-    <div style="margin:4px 0 0">
-      <div class="stat"><span>graduated, last 24h</span><b class="big">${fmt(day.length)}</b></div>
-      <div class="stat"><span>launched clean</span><b class="big">${fmt(dayClean.length)}</b></div>
-      <div class="stat"><span>carrying a danger flag</span><b class="big">${fmt(dayDanger)}</b></div>
-      <div class="stat"><span>launches on file</span><b class="big">${fmt((db.prepare("SELECT COUNT(*) c FROM tokens WHERE late_discovery=0").get() as any).c)}</b></div>
-    </div>
-    <p class="sub" style="margin:6px 0 0">Counted over the 24 hours to ${when(now)}, when this page was built.</p>
-  </div>
-
-  ${proof ? `<div class="sec"><h2>Why a scanner cannot tell you this</h2></div>
-  <p class="lede">One launch from this archive — <a href="t/${esc(proof.t.mint)}.html">${esc(proof.t.symbol ?? "?")}</a> — and several hundred like it. Read left to right.</p>
-  <div class="proof">
-    <div class="birth">
-      <h3>1 · At birth, recorded live</h3>
-      <ul>
-        <li>Creator took <b>${proof.t.dev_pct.toFixed(1)}%</b> of supply in the first block</li>
-        <li><b>Zero</b> outside wallets bought on the curve</li>
-        <li>Curve completed${proof.t.graduated_at ? ` in <b>${dur(proof.t.graduated_at - proof.t.created_at)}</b>` : ""}, without a market</li>
-      </ul>
-    </div>
-    <div class="now">
-      <h3>2 · Then, and this is what a scanner sees</h3>
-      <ul>
-        <li>Pool funded to <b>${fmt(proof.t.vault_sol)} SOL</b> of real liquidity</li>
-        <li>Mint and freeze authority <b>renounced</b></li>
-        <li>Supply <b>spread across wallets</b>, no large holder</li>
-      </ul>
-    </div>
-    <div class="birth">
-      <h3>3 · Now</h3>
-      <ul>
-        <li>Pool holds <b>${proofNow < 10 ? proofNow.toFixed(1) : fmt(proofNow)} SOL</b>, read just now</li>
-        <li>The SOL that made it look ordinary <b>has been taken back out</b></li>
-        <li>Whoever bought during step 2 <b>cannot sell into this</b></li>
-      </ul>
-    </div>
-  </div>
-  <p class="verdictline">A checker run at step 2 finds nothing wrong, because at step 2 there is nothing left to find:
-  the operator bought the float, then paid for the appearance of a market. A checker run at step 3 reports thin
-  liquidity — correctly, and far too late to be worth anything. The launch record was true at every step, and it is
-  the only thing here that could not be bought.</p>` : ""}
-
-  <div class="sec"><h2>Launched clean — last ${DAYS === 1 ? "24 hours" : `${DAYS} days`}</h2><span class="cnt">${fmt(clean.length)} of ${fmt(toks.length)} graduations</span></div>
-  <p class="lede">Creator kept under ${MAX_DEV_PCT}% and has not sold, at least ${MIN_BUYERS} distinct buyers on the curve,
-  the curve took over a minute to fill and was not taken by a single ${BUYOUT_SOL}+ SOL buy, and at least ${MIN_POOL_SOL} SOL
-  in the pool right now. That means <b>not manufactured</b>. It is not a recommendation, and most of these will still lose money.</p>
-  <table class="data"><tr><th>Token</th><th class="num">Creator kept</th><th class="num">Buyers</th><th class="num">Time to fill</th><th class="num">Liquidity, read ${when(now)}</th></tr>${cleanRows}</table>
-  <p class="callout">Launch figures are permanent; a pool balance is not. Every pool above was read from the chain while
-  this page was built, and a token whose pool could not be read is left off rather than carried on an old number.${unverified.length ? ` <b>${fmt(unverified.length)}</b> passed every launch test but could not be read just now — absent here means unchecked, not manufactured.` : ""}</p>
-
-  <div class="sec"><h2>Who takes the curves</h2><span class="cnt">${fmt(wallets.size)} wallets on file</span></div>
-  <p class="lede">A single large buy that completes a bonding curve is not demand, it is a purchase of the float. These
-  are the wallets doing it, what they spent, and what they did with the tokens afterwards. This is the part no
-  contract scanner can produce, because it needs a wallet's history across many tokens rather than one token's state.</p>
-  <table class="data"><tr><th>Wallet</th><th class="num">Curves taken</th><th class="num">Spent</th><th class="num">Sold after</th><th class="num">Bought back</th></tr>${opRows}</table>`,
-  chrome, 0,
-  `Of ${fmt(day.length)} pump.fun tokens that finished their bonding curve in the last 24 hours, ${fmt(dayClean.length)} launched clean and ${fmt(dayDanger)} carry a danger flag. We watch every launch and keep the record, because the evidence only exists while it happens.`));
-
+// The front page is rendered per request by `serve.ts` (homeBody), not written here.
 writeFileSync(join(OUT, "404.html"), page("No record", `
   <h1>We have no record of this launch</h1>
   <div class="sub">Either it launched outside our coverage, or it is not a pump.fun token.
@@ -528,14 +404,13 @@ catch { console.log("  assets/og.png missing — link previews will have no imag
 
 writeFileSync(join(OUT, "api", "summary.json"), JSON.stringify({
   generatedAt: now, coverageFrom: win.length ? win[0].a : null, downtimeMinutes: Math.round(chrome.gapMin),
-  // What the clean counts below are worth. A consumer reading this instead of the page needs the same caveat.
-  poolsRead: reread, poolsUnreadable: unverified.length,
-  unreadableFraction: Number(unreadableFrac.toFixed(4)), degraded: unreadableFrac > 0.05,
+  // A certificate needs a reading no older than MAX_READING_AGE_MS, so this says how many candidates had one.
+  maxReadingAgeMs: MAX_READING_AGE_MS, uncertified: unverified.length,
   graduated24h: day.length, clean24h: dayClean.length, unverified24h: dayUnverified.length,
   archivedLaunches: (db.prepare("SELECT COUNT(*) c FROM tokens WHERE late_discovery=0").get() as any).c,
   clean: clean.map((t) => ({
     mint: t.mint, symbol: t.symbol, creatorSupplyPct: t.dev_pct, curveBuyers: cleanBuyers.get(t.mint) ?? null,
-    poolSol: readings.get(t.mint)!.sol, poolReadAt: readings.get(t.mint)!.at,
+    poolSol: t.vault_sol, poolReadAt: t.vault_at,
   })),
 }, null, 2));
 
@@ -544,4 +419,4 @@ console.log(PAGES
   ? `  ${toks.length.toLocaleString()} token pages + ${wallets.size} wallet pages written (--pages)`
   : `  ${toks.length.toLocaleString()} graduations and ${wallets.size} curve-taking wallets assessed; their pages are rendered on request by \`npm run serve\` (pass --pages to write them)`);
 console.log(`  ${clean.length} launched clean; ${dayClean.length} in the last 24 h of ${day.length} graduations`);
-console.log(`  index.html, api.html, api/summary.json` + (PAGES ? `, api/${API_VERSION}/token/<mint>.json, api/${API_VERSION}/wallet/<wallet>.json` : ""));
+console.log(`  method.html, data.html, 404.html, api.html, api/summary.json` + (PAGES ? `, api/${API_VERSION}/token/<mint>.json, api/${API_VERSION}/wallet/<wallet>.json` : ""));

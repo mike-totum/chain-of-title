@@ -383,6 +383,111 @@ export function tokenBody(
     <div class="sec"><h2>Check another</h2></div>${SEARCH}`;
 }
 
+/**
+ * The front page, rendered from data rather than built into a file.
+ *
+ * It exists here because the page is now produced two ways — `site.ts` writes it during a build, `serve.ts` renders it
+ * per request — and a registry whose front page disagrees with itself depending on how you arrived is not a registry.
+ * Same rule as the token page: one renderer, two callers.
+ *
+ * It states two ages, deliberately, because it has two kinds of fact on it. The counts come from an archive the
+ * service pulls periodically, so they are current as of when that archive was built. The liquidity readings are
+ * refreshed continuously and are minutes old at most. A single "now" covering both would be false about one of them,
+ * and the honest version reads better anyway: nobody else can print when their number was taken.
+ */
+export interface CleanRow { mint: string; symbol: string | null; devPct: number; buyers: number; fillMs: number | null; poolSol: number; readAt: number }
+export interface OpRow { wallet: string; taken: number; spent: number; sold: number; bought: number }
+export interface Home {
+  now: number; builtAt: number | null;
+  graduated24h: number; clean24h: number; danger24h: number; onFile: number;
+  windowDays: number; gradWindow: number; unchecked: number;
+  cleanRows: CleanRow[]; wallets: number; opRows: OpRow[];
+  proof: null | { mint: string; symbol: string | null; devPct: number; gradMs: number | null; fundedSol: number; nowSol: number; nowAt: number };
+  maxDevPct: number; minBuyers: number; buyoutSol: number; minPoolSol: number;
+}
+
+export function homeTitle(h: Home): string {
+  return `${fmt(h.clean24h)} of ${fmt(h.graduated24h)} tokens launched clean yesterday`;
+}
+
+export function homeBody(h: Home): string {
+  const p = h.proof;
+  const rows = h.cleanRows.map((r) => `<tr>
+    <td><a href="t/${esc(r.mint)}.html">${esc(r.symbol ?? "?")}</a></td><td class="num">${r.devPct.toFixed(1)}%</td>
+    <td class="num">${fmt(r.buyers)}</td><td class="num">${r.fillMs === null ? "?" : dur(r.fillMs)}</td>
+    <td class="num">${r.poolSol.toFixed(0)} SOL</td><td class="num">${ago(h.now - r.readAt)}</td></tr>`).join("");
+  const ops = h.opRows.map((x) => `<tr><td class="mono"><a href="w/${esc(x.wallet)}.html">${esc(x.wallet.slice(0, 12))}…</a></td>
+    <td class="num">${x.taken}</td><td class="num">${fmt(x.spent)} SOL</td>
+    <td class="num">${fmt(x.sold)} SOL</td><td class="num">${fmt(x.bought)} SOL</td></tr>`).join("");
+  return `
+  <div class="hero">
+    <h1 class="headline">In the last 24 hours ${fmt(h.graduated24h)} tokens finished their bonding curve.
+    <b>${fmt(h.clean24h)}</b> of them launched clean.</h1>
+    <p class="lede">Most were manufactured. The creator took the supply, or a single wallet bought the whole curve and
+    called it demand. That evidence exists for about thirty seconds and is unrecoverable afterwards — so we watch every
+    launch on pump.fun and keep the record.</p>
+    <p class="lede">Paste any mint. If we hold its launch, you get what happened. If we do not, we rebuild it from the
+    chain, and if we cannot do that we say so rather than guess.</p>
+    ${SEARCH}
+    ${p ? `<p class="sub" style="margin:-18px 0 24px">Nothing to hand? Read <a href="t/${esc(p.mint)}.html">${esc(p.symbol ?? "?")}</a>, a launch this archive holds.</p>` : ""}
+    <div style="margin:4px 0 0">
+      <div class="stat"><span>graduated, last 24h</span><b class="big">${fmt(h.graduated24h)}</b></div>
+      <div class="stat"><span>launched clean</span><b class="big">${fmt(h.clean24h)}</b></div>
+      <div class="stat"><span>carrying a danger flag</span><b class="big">${fmt(h.danger24h)}</b></div>
+      <div class="stat"><span>launches on file</span><b class="big">${fmt(h.onFile)}</b></div>
+    </div>
+    <p class="sub" style="margin:6px 0 0">Launch counts as of ${h.builtAt ? `${when(h.builtAt)} — ${ago(h.now - h.builtAt)}` : "an unrecorded time"}, the age of the archive this reads.
+    Pool balances are read separately and continuously; each carries its own age below.</p>
+  </div>
+
+  ${p ? `<div class="sec"><h2>Why a scanner cannot tell you this</h2></div>
+  <p class="lede">One launch from this archive — <a href="t/${esc(p.mint)}.html">${esc(p.symbol ?? "?")}</a> — and several hundred like it. Read left to right.</p>
+  <div class="proof">
+    <div class="birth">
+      <h3>1 · At birth, recorded live</h3>
+      <ul>
+        <li>Creator took <b>${p.devPct.toFixed(1)}%</b> of supply in the first block</li>
+        <li><b>Zero</b> outside wallets bought on the curve</li>
+        <li>Curve completed${p.gradMs !== null ? ` in <b>${dur(p.gradMs)}</b>` : ""}, without a market</li>
+      </ul>
+    </div>
+    <div class="now">
+      <h3>2 · Then, and this is what a scanner sees</h3>
+      <ul>
+        <li>Pool funded to <b>${fmt(p.fundedSol)} SOL</b> of real liquidity</li>
+        <li>Mint and freeze authority <b>renounced</b></li>
+        <li>Supply <b>spread across wallets</b>, no large holder</li>
+      </ul>
+    </div>
+    <div class="birth">
+      <h3>3 · Now</h3>
+      <ul>
+        <li>Pool holds <b>${p.nowSol < 10 ? p.nowSol.toFixed(1) : fmt(p.nowSol)} SOL</b>, read ${ago(h.now - p.nowAt)}</li>
+        <li>The SOL that made it look ordinary <b>has been taken back out</b></li>
+        <li>Whoever bought during step 2 <b>cannot sell into this</b></li>
+      </ul>
+    </div>
+  </div>
+  <p class="verdictline">A checker run at step 2 finds nothing wrong, because at step 2 there is nothing left to find:
+  the operator bought the float, then paid for the appearance of a market. A checker run at step 3 reports thin
+  liquidity — correctly, and far too late to be worth anything. The launch record was true at every step, and it is
+  the only thing here that could not be bought.</p>` : ""}
+
+  <div class="sec"><h2>Launched clean — last ${h.windowDays === 1 ? "24 hours" : `${h.windowDays} days`}</h2><span class="cnt">${fmt(h.cleanRows.length)} of ${fmt(h.gradWindow)} graduations${h.unchecked ? ` · ${fmt(h.unchecked)} unchecked` : ""}</span></div>
+  <p class="lede">Creator kept under ${h.maxDevPct}% and has not sold, at least ${h.minBuyers} distinct buyers on the curve,
+  the curve took over a minute to fill and was not taken by a single ${h.buyoutSol}+ SOL buy, and at least ${h.minPoolSol} SOL
+  in the pool on a reading no older than five minutes. That means <b>not manufactured</b>. It is not a recommendation, and most of these will still lose money.</p>
+  <table class="data"><tr><th>Token</th><th class="num">Creator kept</th><th class="num">Buyers</th><th class="num">Time to fill</th><th class="num">Liquidity</th><th class="num">Read</th></tr>${rows}</table>
+  <p class="callout">Launch figures are permanent; a pool balance is not. Every balance above carries the moment it was
+  taken, and a token whose pool has not been read recently enough is left off rather than carried on an old number.${h.unchecked ? ` <b>${fmt(h.unchecked)}</b> passed every launch test but have no reading fresh enough to certify — absent here means unchecked, not manufactured.` : ""}</p>
+
+  <div class="sec"><h2>Who takes the curves</h2><span class="cnt">${fmt(h.wallets)} wallets on file</span></div>
+  <p class="lede">A single large buy that completes a bonding curve is not demand, it is a purchase of the float. These
+  are the wallets doing it, what they spent, and what they did with the tokens afterwards. This is the part no
+  contract scanner can produce, because it needs a wallet's history across many tokens rather than one token's state.</p>
+  <table class="data"><tr><th>Wallet</th><th class="num">Curves taken</th><th class="num">Spent</th><th class="num">Sold after</th><th class="num">Bought back</th></tr>${ops}</table>`;
+}
+
 /** A wallet's record: every curve it bought outright, and what it did with the tokens afterwards. */
 export function walletBody(w: string, p: any, line: string | null): string {
   const heavy = p.ammSell > p.ammBuy * 3 && p.ammSell >= 20 ? "DANGER" : "CAUTION";

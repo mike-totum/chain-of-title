@@ -25,6 +25,33 @@ export const MIN_BUYERS = 30;
 export const MIN_GRAD_MS = 60_000;
 /** SOL that has to be in the pool for a position to be sellable near the quoted price. */
 export const MIN_POOL_SOL = 40;
+/**
+ * How old a pool reading may be and still support a clean certificate.
+ *
+ * This is a criterion, not a tuning knob, so it lives here with the others. The question it answers is not "how long
+ * is a reading useful for" — it is "how long are we willing to be wrong for". Staleness on a certificate does not
+ * produce a missing answer, it produces a false all-clear, and that is the only error on this site that ends the
+ * project. Everything else here can be minutes old and nobody is harmed.
+ *
+ * Five minutes because a pool is drained in a single transaction, so the true worst case is bounded only by how often
+ * we look, and we have never measured the distribution of drain rates — any figure is a guess, so it should be a
+ * short one. HOOD and HCAT held 2,677 and 2,050 SOL when measured and $21 and $19 hours later; we do not know how
+ * fast that happened, which is precisely the reason not to be generous.
+ *
+ * It is affordable because certification only applies to launches that already passed every birth test — about 150 in
+ * a 24-hour window, so roughly 30 reads a minute on our own schedule. If the refresher cannot keep up, the honest
+ * response is a smaller candidate set or better RPC, never a wider window: widening trades a real guarantee for a
+ * cosmetically fuller list.
+ */
+export const MAX_READING_AGE_MS = 5 * 60_000;
+
+/**
+ * Whether a pool reading can still carry a certificate. Fail-closed in both directions: no reading, or one older than
+ * the window, means uncertified — which is the correct answer to "we do not currently know if you could sell this",
+ * and is not the same as a warning.
+ */
+export const readingCertifies = (at: number | null | undefined, sol: number | null | undefined, now: number): boolean =>
+  at != null && sol != null && now - at <= MAX_READING_AGE_MS && sol >= MIN_POOL_SOL;
 
 export type Level = "DANGER" | "CAUTION" | "UNKNOWN";
 export type Flag = { level: Level; text: string };
@@ -39,7 +66,7 @@ export type Assessment = {
 
 export const TOKEN_COLUMNS = `mint, symbol, name, creator, created_at, late_discovery, dev_pct, dev_sold, unique_buyers,
   snap30_buyers, bundled_buyers, graduated, graduated_at, pool, vault_sol, vault_at, last_price, updated_at,
-  rebuilt_at, rebuilt_complete, curve_buyers`;
+  rebuilt_at, rebuilt_complete, curve_buyers, venue`;
 
 /** Union of the collector's run intervals. A launch outside them happened while we were blind. */
 export function coverageWindows(db: DatabaseSync): { a: number; b: number }[] {

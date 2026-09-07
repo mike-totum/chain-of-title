@@ -72,7 +72,10 @@ db.exec(`
     unique_buyers INTEGER, curve_buyers INTEGER, snap30_buyers INTEGER, bundled_buyers INTEGER,
     graduated INTEGER, graduated_at INTEGER,
     pool TEXT, vault_sol REAL, vault_at INTEGER, last_price REAL,
-    rebuilt_at INTEGER, rebuilt_complete INTEGER, updated_at INTEGER
+    rebuilt_at INTEGER, rebuilt_complete INTEGER, updated_at INTEGER,
+    -- Last, matching main.tokens and the ALTER below, because the copy below is a positional INSERT ... SELECT.
+    -- NOT NULL so the published archive can never carry a row whose venue reads as unknown when it is not.
+    venue TEXT NOT NULL DEFAULT 'pumpfun'
   );
   CREATE INDEX IF NOT EXISTS rec.tokens_created ON tokens(created_at);
   CREATE INDEX IF NOT EXISTS rec.tokens_creator ON tokens(creator);
@@ -112,6 +115,16 @@ db.exec(`
  * ALTER is the same pattern `openDb` uses for the collector's own schema.
  */
 try { db.exec("ALTER TABLE rec.trades ADD COLUMN slot INTEGER"); } catch {}
+/**
+ * Same reasoning for the launch record's venue column, with one addition that matters more than the ALTER itself:
+ * the default backfills the rows already in the file.
+ *
+ * A bare `ADD COLUMN venue TEXT` leaves every existing row NULL, and an incremental run only re-copies rows changed
+ * since the watermark — so the first version of this left 143,102 of 145,984 published launches unstamped. That is
+ * worse than having no column at all: a consumer reading NULL concludes the venue is unknown, when we know exactly
+ * what it is. Every row in this file came from the pump.fun collector, so the default states a recorded fact.
+ */
+try { db.exec("ALTER TABLE rec.tokens ADD COLUMN venue TEXT NOT NULL DEFAULT 'pumpfun'"); } catch {}
 
 const since = FULL ? 0 : Number((db.prepare("SELECT v FROM rec.meta WHERE k='watermark'").get() as any)?.v ?? 0);
 log(`carrying launches ${since ? `changed since ${new Date(since).toISOString()}` : "(full rebuild)"}…`);
@@ -125,7 +138,10 @@ try {
            ${READ_ONLY ? `COALESCE(curve_buyers, (SELECT COUNT(DISTINCT tr.wallet) FROM trades tr
              WHERE tr.mint = main.tokens.mint AND tr.venue='curve' AND tr.side='buy' AND COALESCE(tr.is_dev,0)=0))` : "curve_buyers"},
            snap30_buyers, bundled_buyers, graduated, graduated_at,
-           pool, vault_sol, vault_at, last_price, rebuilt_at, rebuilt_complete, updated_at
+           pool, vault_sol, vault_at, last_price, rebuilt_at, rebuilt_complete, updated_at,
+           -- Last, matching both schemas. COALESCE because a collector database migrated mid-run can hold rows
+           -- written before the default applied; an unstamped launch is pump.fun for the same recorded reason.
+           COALESCE(venue, 'pumpfun')
     FROM main.tokens WHERE COALESCE(updated_at, 0) >= ${since}
       -- The quote asset is not a launch. Wrapped SOL was copied into the record as one and served as a token page.
       AND main.tokens.mint NOT IN ('So11111111111111111111111111111111111111112',

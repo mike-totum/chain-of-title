@@ -24,7 +24,12 @@ export function openDb(path: string): DatabaseSync {
       kol_signals INTEGER DEFAULT 0,
       pool TEXT, amm_trusted INTEGER, vault_sol REAL, vault_at INTEGER,
       finalized INTEGER DEFAULT 0,
-      updated_at INTEGER
+      updated_at INTEGER,
+      -- Which launchpad this token was launched on. Appended last, and matched by the ALTER below, so a database
+      -- created fresh and one migrated in place have identical column order: servicedb copies this table with a
+      -- positional INSERT ... SELECT, where a column-order difference between two live databases would silently
+      -- write each value into its neighbour's field.
+      venue TEXT NOT NULL DEFAULT 'pumpfun'
     );
     CREATE INDEX IF NOT EXISTS tokens_created ON tokens(created_at);
     CREATE TABLE IF NOT EXISTS positions (
@@ -123,6 +128,16 @@ export function openDb(path: string): DatabaseSync {
   // scanning `trades` per token, which is the only reason the serving path needed a 7 GB table at all; with it here,
   // the public service runs on a ~50 MB extract. Populated by `npm run servicedb`.
   try { db.exec("ALTER TABLE tokens ADD COLUMN curve_buyers INTEGER"); } catch {}
+  /**
+   * The launchpad a token was launched on. Every row written before this column existed is pump.fun, so the default
+   * backfills them correctly — and that is a *recorded* fact, not an inference: the collector has only ever subscribed
+   * to the pump.fun program, so "we watched pump.fun" is a statement about what we did, not a guess about the data.
+   *
+   * Added while the archive was still small enough for that to be true of all of it. The record is append-only and
+   * grows ~24,000 launches a day; a venue stamp added later would have to be asserted over millions of rows nobody
+   * recorded it for, which is precisely the move this project refuses to make about anyone else.
+   */
+  try { db.exec("ALTER TABLE tokens ADD COLUMN venue TEXT NOT NULL DEFAULT 'pumpfun'"); } catch {}
   return db;
 }
 
@@ -146,8 +161,8 @@ export function upsertToken(db: DatabaseSync, t: TokenState): void {
     INSERT INTO tokens (mint, name, symbol, uri, creator, created_at, late_discovery, launch_price, last_price, peak_price, peak_at,
       dev_pct, dev_sold, dev_sold_at, buys, sells, buy_vol_sol, sell_vol_sol, unique_buyers, unique_sellers, bundled_buyers,
       snap30_buyers, snap30_buys, snap30_sells, snap30_vol, graduated, graduated_at, p_1m, p_5m, p_15m, p_60m,
-      twitter, telegram, website, kol_signals, pool, amm_trusted, vault_sol, vault_at, finalized, updated_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      twitter, telegram, website, kol_signals, pool, amm_trusted, vault_sol, vault_at, finalized, updated_at, venue)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(mint) DO UPDATE SET
       name=excluded.name, symbol=excluded.symbol, launch_price=excluded.launch_price, last_price=excluded.last_price,
       peak_price=excluded.peak_price, peak_at=excluded.peak_at, dev_sold=excluded.dev_sold, dev_sold_at=excluded.dev_sold_at,
@@ -182,6 +197,9 @@ export function upsertToken(db: DatabaseSync, t: TokenState): void {
     t.checkpoints[60] ?? null, t.checkpoints[300] ?? null, t.checkpoints[900] ?? null, t.checkpoints[3600] ?? null,
     t.meta?.twitter ?? null, t.meta?.telegram ?? null, t.meta?.website ?? null,
     t.kolSignals, t.pool, t.ammTrusted === null ? null : t.ammTrusted ? 1 : 0, t.vaultSol, t.vaultAt, t.finalized ? 1 : 0, Date.now(),
+    // Not in the ON CONFLICT clause above: where a token launched is a launch fact and cannot change, the same reason
+    // `created_at` is never updated. Defaulted here as well as in the schema so a second collector sets one field.
+    t.venue ?? "pumpfun",
   );
 }
 
