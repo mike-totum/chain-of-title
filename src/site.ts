@@ -99,14 +99,29 @@ let reread = 0;
 // Reads go through the managed endpoint pool, not the single public node the collector saturates: reading 249 pools
 // from api.mainnet-beta returned 429 for 133 of them, and every failure silently becomes "not certified".
 const POOL_CONCURRENCY = 4;
-let next = 0;
+/**
+ * A deadline on the whole pass.
+ *
+ * Every read is individually bounded — 15 s, catching its own failure — but the pass over them was not, and each
+ * failure costs up to eight attempts across three endpoints with escalating back-off. On 2026-09-07 every endpoint
+ * 429'd on every attempt and 279 candidates ran for over an hour without finishing; the daily pipeline's own run hit
+ * the same wall and was still going five hours after it started. An unbounded step in a scheduled job is a job that
+ * can silently stop finishing, and nothing downstream of it runs.
+ *
+ * Giving up is safe here precisely because the gate exists: an abandoned read is an uncertified token, and enough of
+ * those refuse the build. So the deadline degrades into a loud stop rather than a quiet one.
+ */
+const POOL_DEADLINE = Date.now() + Number(process.env.POOL_DEADLINE_MIN ?? 10) * 60_000;
+let next = 0, abandoned = 0;
 await Promise.all(Array.from({ length: POOL_CONCURRENCY }, async () => {
   for (let i = next++; i < candidates.length; i = next++) {
+    if (Date.now() > POOL_DEADLINE) { abandoned++; continue; }
     const { t } = candidates[i];
     const r = await poolReservesPooled(t.pool, t.mint);
     if (r) { readings.set(t.mint, { sol: r.quoteSol, at: Date.now(), fresh: true }); reread++; }
   }
 }));
+if (abandoned) console.log(`  gave up on ${abandoned} after ${process.env.POOL_DEADLINE_MIN ?? 10} min; they count as unreadable`);
 for (const { t } of candidates) if (!readings.has(t.mint)) unverified.push(t);
 console.log(`  ${reread} answered, ${unverified.length} unreadable (cannot be certified)`);
 
