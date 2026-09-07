@@ -32,3 +32,10 @@ data/x-mute.json
 # macOS.
 .DS_Store
 
+# Held back from the public repository, deliberately and temporarily. HANDOFF.md is a live
+# working document: it currently describes the unseeded cloud collector and the record build
+# that is failing silently, which is a map of an open weakness rather than a description of
+# method. Publish it once the collector is seeded and that build works. README.md,
+# ASSUMPTIONS.md and DEPLOY.md carry everything a reader needs in the meantime.
+HANDOFF.md
+
