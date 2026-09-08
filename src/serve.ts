@@ -121,6 +121,12 @@ const LIVE_MAX_AGE_MS = 60_000;
  * the collector and no way to point them at different services.
  */
 const LAUNCH_URL = HEALTH_URL ? HEALTH_URL.replace(/\/health$/, "/launch/") : "";
+/**
+ * Why the last live lookup did not answer. Reported on /api/v1/live rather than logged, for the same reason the
+ * counter's `unavailable` is: a feature that silently declines to work looks identical to one that was never built,
+ * and the difference is only visible from inside a container nobody can open.
+ */
+let lastLaunchLookup = "no lookup attempted yet";
 let live: { observed: number; held: number; at: number } | null = null;
 /**
  * Why the last poll produced nothing. The page renders the same either way — no counter — but "the collector is
@@ -576,13 +582,21 @@ async function decide(mint: string, ip: string): Promise<Decision> {
   if (LAUNCH_URL && !t) {
     try {
       const r = await fetch(LAUNCH_URL + mint, { signal: AbortSignal.timeout(2500) });
-      if (r.ok) {
+      if (!r.ok) lastLaunchLookup = `http ${r.status}`;
+      else {
         const live = (await r.json()) as any;
-        if (live?.held && live.observed && live.t && live.a)
+        if (live?.held && live.observed && live.t && live.a) {
+          lastLaunchLookup = "ok";
           return { kind: "record", t: live.t, judgeable: true, precomputed: live.a };
+        }
+        // Held but not observed, or not held at all: both are real answers and both are worth telling apart from
+        // a network failure, because they mean different things about the collector.
+        lastLaunchLookup = live?.held ? `held but not observed (late_discovery or outside coverage)` : "collector does not hold it";
       }
-    } catch { /* fall through to the rebuild path below, which is what this service did before */ }
-  }
+    } catch (e) {
+      lastLaunchLookup = `unreachable: ${(e as Error).name === "TimeoutError" ? "timeout" : (e as Error).message}`;
+    }
+  } else if (!LAUNCH_URL) lastLaunchLookup = "COLLECTOR_HEALTH_URL not set, so no live lookup is configured";
 
   // An existing job is reported without spending anything, so a poll or a reload is always free.
   const j = jobs.get(mint);
@@ -853,7 +867,7 @@ const server = createServer(async (req, res) => {
         const l = liveNow();
         return j(200, {
           observed: l?.observed ?? null, held: l?.held ?? null, at: l?.at ?? null,
-          published: observed, generatedAt: Date.now(),
+          published: observed, generatedAt: Date.now(), liveLookup: lastLaunchLookup,
           // Null when the counter is working. Says which fault when it is not, including the case where a poll
           // succeeded long ago and has since gone stale — a value that was real and is no longer current.
           unavailable: l ? null : (liveErr ?? (live ? `last successful poll ${Math.round((Date.now() - live.at) / 1000)}s ago, past the ${LIVE_MAX_AGE_MS / 1000}s tolerance` : "no successful poll yet")),
