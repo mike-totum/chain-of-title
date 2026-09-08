@@ -14,6 +14,14 @@ url: "https://chainoftitle.org"
 version: "0.1.0"
 date-released: "2026-09-07"
 license: AGPL-3.0-or-later
+doi: "10.57967/hf/10338"
+identifiers:
+  - type: doi
+    value: "10.57967/hf/10338"
+    description: The launch record, archived and citable
+  - type: url
+    value: "https://huggingface.co/datasets/chainoftitle/chain-of-title"
+    description: Independent mirror of the record database
 abstract: >-
   A public archive of launch-time provenance for Solana tokens. For every launch
   it records what the token was at birth: the share of supply the creator took in

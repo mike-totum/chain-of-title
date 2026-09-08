@@ -4,6 +4,16 @@
 supporting tables needed to answer a question about one. It is a SQLite file, released into the
 public domain under CC0-1.0 (`LICENSE-DATA`). Use it without asking, including commercially.
 
+**Cite it as `doi:10.57967/hf/10338`.** That identifier resolves to a mirror held on
+infrastructure this project does not run, and it cannot be renamed, withdrawn or made private.
+The record outlives the site, which is the point of publishing it this way.
+
+Mirror: https://huggingface.co/datasets/chainoftitle/chain-of-title
+
+Row counts below are from the build of 2026-09-07 23:12 UTC and grow with every rebuild. The
+authoritative count for any given file is `SELECT COUNT(*) FROM tokens` on that file, and
+`meta.built_at` says when it was made.
+
 Released with each version at
 [github.com/mike-totum/chain-of-title/releases](https://github.com/mike-totum/chain-of-title/releases),
 and served live at `https://chainoftitle.org/data/record.db`.
@@ -36,7 +46,7 @@ graduation was never confirmed, not that it did not happen.
 
 ---
 
-## `tokens` (143,102 rows) — one row per launch
+## `tokens` (153,578 rows) — one row per launch
 
 | column | meaning |
 |---|---|
@@ -69,21 +79,21 @@ graduation was never confirmed, not that it did not happen.
 the last moment a launch actually arrived, not a wall clock, so a collector that was running but
 receiving nothing produces a truthful gap rather than a claim of coverage.
 
-## `trades` (1,736 rows) and `hist_trades` (1,072 rows)
+## `trades` (1,865 rows) and `hist_trades` (1,072 rows)
 
 Deliberately not the full trade history: this file carries only the trades needed to answer a
 provenance question, chiefly curve buys of 40 SOL or more, which is the size that completes a curve
 by itself. `trades` is observed, `hist_trades` is reconstructed from chain history; they are kept
 separate so a reader can always tell which produced an answer. `venue` is `curve` or `amm`.
 
-## `operator_wallets` (7,157), `operator_policy` (26), `wallet_flow` (1,583)
+## `operator_wallets` (7,157), `operator_policy` (26), `wallet_flow` (1,708)
 
 Wallet groupings traced from the funder that seeded each wallet, plus per-wallet aggregate flow
 (`curve_sol`, `amm_buy`, `amm_sell`, `tokens`). These describe **observed conduct of addresses**.
 They are not claims about who controls an address, and nothing here should be read as an assertion
 about a person or an intent.
 
-## `pool_map` (2,663) and `meta`
+## `pool_map` (3,249) and `meta`
 
 Pool address to mint, from PumpSwap's own pool-creation events. `meta` holds `built_at`, the ms
 timestamp of the build that produced the file, and `watermark`.

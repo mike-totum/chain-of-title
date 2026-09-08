@@ -286,6 +286,8 @@ writeFileSync(join(OUT, "data.html"), page("The data", `
     <tr><td class="k">Coverage</td><td>from ${chrome.coverageFrom}${chrome.gapMin >= 1 ? `, ${fmt(chrome.gapMin)} min of recorded downtime` : ", no recorded downtime"}</td></tr>
     <tr><td class="k">Licence</td><td>CC0 1.0, public domain. It is a record of public facts; nobody should have to ask us for it.</td></tr>
     <tr><td class="k">Rebuilt</td><td>on each deploy, by <span class="mono">npm run servicedb</span></td></tr>
+    <tr><td class="k">Mirror</td><td><a href="https://huggingface.co/datasets/chainoftitle/chain-of-title">Hugging Face</a>, held independently of anything this project runs. If this site is gone, the record is not.</td></tr>
+    <tr><td class="k">Cite it</td><td><span class="mono">doi:10.57967/hf/10338</span>. Permanent: it cannot be renamed, withdrawn or made private.</td></tr>
   </table>
   <p class="lede">Tables: <span class="mono">tokens</span> (the launch record), <span class="mono">trades</span> and
   <span class="mono">hist_trades</span> (curve buys large enough to be a buyout), <span class="mono">wallet_flow</span>

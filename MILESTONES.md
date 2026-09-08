@@ -78,13 +78,15 @@ launch record, labelled as reconstructed, with the counts it was built from.
 
 ## M3. Make the archive citable and hard to lose
 
-**Not started.** Roughly one week.
+**Partly done.** The deposit and identifier are live; the API work remains. Roughly half a week left.
 
 The record currently exists in two places. A public good that can be lost with one laptop is
 not yet public infrastructure.
 
-- Versioned releases of the record database, deposited with a DOI, mirrored independently of
-  any infrastructure this project controls.
+- Versioned releases of the record database, deposited with a persistent identifier, mirrored
+  independently of any infrastructure this project controls. **Done 2026-09-07:** `doi:10.57967/hf/10338`,
+  resolving to https://huggingface.co/datasets/chainoftitle/chain-of-title. Permanent by construction:
+  the deposit cannot be renamed, withdrawn or made private.
 - A data dictionary and a stated schema, so the file is usable without reading the code.
 - A public API with a batch endpoint, keyless and rate-limited rather than gated, so a wallet
   or an explorer can check many mints in one call.
