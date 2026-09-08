@@ -322,6 +322,22 @@ writeFileSync(join(OUT, "data.html"), page("The data", `
   <p class="callout">The collector's own database is around 7 GB and is not this. It holds every trade on every tracked
   token and exists to derive the record; it is a research instrument on a retention window, not the archive.</p>
 
+  <div class="sec"><h2>The pictures, and why most are missing</h2></div>
+  <p class="lede">Every row carries the image URL the launch declared. <span class="mono">image_sha256</span> carries the
+  sha256 of the bytes themselves, when we hold them — the proof rather than the picture, so the archive stays a file
+  you can mirror. On most rows that hash is NULL, and it means <b>we did not fetch the image</b>. It does not mean the
+  launch had none: that case is a NULL <span class="mono">image</span> with <span class="mono">meta_at</span> set,
+  which is a different statement and stored differently on purpose.</p>
+  <p class="lede">We fetch the bytes for launches that completed their curve. The reason is arithmetic rather than
+  judgement. Around 24,000 launches a day declare an image and they average 409 KB — 13.6 GB a day, the whole storage
+  volume every 33 hours. Graduations run near 1,400 a day, about 570 MB, and that is what can actually be kept.
+  Pictures are stored by content hash, so the many launches reusing the same image cost one copy.</p>
+  <p class="callout">This is a gap in the archive and naming it is the point. The image is the one thing here that
+  cannot be rebuilt from chain by anyone willing to pay for archival RPC: it sits behind a pin the operator can drop.
+  If that happens to a launch we did not fetch, the picture is gone and this file will not have it. The URLs are all
+  in the record and nothing stops you fetching them yourself — the only reason we did not is that we could not
+  afford the disk.</p>
+
   <div class="sec"><h2>Live JSON</h2></div>
   <table>
     <tr><td class="k"><a href="api/${API_VERSION}/token/{mint}" class="mono">api/${API_VERSION}/token/{mint}</a></td><td>one launch record: free, keyless, CORS-open. <a href="api.html">How to read it</a>, and the one rule that matters.</td></tr>
