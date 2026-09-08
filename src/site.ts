@@ -274,6 +274,31 @@ writeFileSync(join(OUT, "method.html"), page("How this is decided", `
 // A public good has to be downloadable, or the claim is rhetorical. The record database is the archive itself, not an
 // export of it: the same file the service reads.
 const recStat = (() => { try { return statSync("data/record.db"); } catch { return null; } })();
+/**
+ * Count the file being offered, not the one this build happens to be reading.
+ *
+ * The download link points at `data/record.db` and the count beside it came from `config.dbPath` — the collector's
+ * working database, a different file that is always ahead of the published one by however long ago the last publish
+ * was. It told a downloader 166,273 and handed them 164,998.
+ *
+ * And it used the wrong definition under the right word. `serve.ts` distinguishes `observed` (watched from the
+ * creation transaction — the population every claim on this site is about) from `held` (every row in the file, which
+ * also counts launches a detector restored afterwards and the few rebuilt from chain history). Commit "Make
+ * launches mean one thing on every surface" settled that for the service and missed this page, which reported `held`
+ * as "Launches". Both counts are honest; publishing one under the other's name is not.
+ *
+ * Falls back to nulls rather than to the working database if record.db is absent: a page that quietly substitutes a
+ * different file's number is the bug being fixed, and no number is better than a wrong one.
+ */
+const recCounts = (() => {
+  if (!recStat) return null;
+  try {
+    const r = openDb("data/record.db");
+    const held = (r.prepare("SELECT COUNT(*) c FROM tokens").get() as any).c as number;
+    const observed = (r.prepare("SELECT COUNT(*) c FROM tokens WHERE COALESCE(late_discovery,0)=0").get() as any).c as number;
+    return { held, observed };
+  } catch { return null; }
+})();
 writeFileSync(join(OUT, "data.html"), page("The data", `
   <h1 class="headline">Take the whole archive</h1>
   <p class="lede">Everything this site knows is one file. It is the same database the service reads, not an export,
@@ -282,7 +307,7 @@ writeFileSync(join(OUT, "data.html"), page("The data", `
   <div class="sec"><h2>The record database</h2>${recStat ? `<span class="cnt">${(recStat.size / 1048576).toFixed(1)} MB</span>` : ""}</div>
   <table>
     <tr><td class="k">Download</td><td><a href="data/record.db"><b>record.db</b></a>: SQLite, ${recStat ? `${(recStat.size / 1048576).toFixed(1)} MB` : "~40 MB"}, one row per launch</td></tr>
-    <tr><td class="k">Launches</td><td>${fmt((db.prepare("SELECT COUNT(*) c FROM tokens").get() as any).c)}</td></tr>
+    <tr><td class="k">Launches</td><td>${recCounts ? `${fmt(recCounts.observed)} observed from the creation transaction, in ${fmt(recCounts.held)} records. The difference is launches a detector restored after the fact or rebuilt from chain history: real records, but not first-block observations.` : "unavailable — record.db was not present at build time"}</td></tr>
     <tr><td class="k">Coverage</td><td>from ${chrome.coverageFrom}${chrome.gapMin >= 1 ? `, ${fmt(chrome.gapMin)} min of recorded downtime` : ", no recorded downtime"}</td></tr>
     <tr><td class="k">Licence</td><td>CC0 1.0, public domain. It is a record of public facts; nobody should have to ask us for it.</td></tr>
     <tr><td class="k">Rebuilt</td><td>on each deploy, by <span class="mono">npm run servicedb</span></td></tr>
@@ -320,7 +345,7 @@ FROM tokens WHERE graduated=1
 FROM wallet_flow
 ORDER BY amm_sell DESC LIMIT 20;</td><td>who sold the most into buyers after taking a curve</td></tr>
   </table>`, chrome, 0,
-  `The whole Chain of Title archive as one CC0 SQLite file: ${fmt((db.prepare("SELECT COUNT(*) c FROM tokens").get() as any).c)} Solana launch records, one row each, no key or sign-up.`, "/data.html"));
+  `The whole Chain of Title archive as one CC0 SQLite file: ${recCounts ? `${fmt(recCounts.held)} ` : ""}Solana launch records, one row each, no key or sign-up.`, "/data.html"));
 
 /**
  * The API page. It documents one thing above everything else — that a null is not a clean result — because the whole
