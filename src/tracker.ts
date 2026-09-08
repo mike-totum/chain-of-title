@@ -94,6 +94,13 @@ export interface TokenState {
 }
 
 export interface TokenMeta {
+  /**
+   * The metadata document exactly as served, when it fits. The extracted fields below are a reading of it; this is
+   * the thing itself, and it is in the same unrecoverable class as the image — behind a URI the creator controls.
+   */
+  raw?: string;
+  /** Size of that document as served, recorded even when `raw` was too big to keep. */
+  bytes?: number;
   twitter?: string;
   telegram?: string;
   website?: string;
@@ -509,17 +516,33 @@ export class Tracker extends EventEmitter {
  * description are the only facts here that cannot be recovered later: the chain keeps its own history, but the
  * launch's picture and words live behind a URI its creator can repoint at any time.
  */
+/** Bigger than this is not a metadata document. Recorded as seen but not stored; see `raw` in TokenMeta. */
+const MAX_META_BYTES = 16 * 1024;
+
 export async function fetchMeta(uri: string): Promise<TokenMeta | null> {
   const { res } = await fetchContent(uri, 8000);
   if (!res) return null;
   try {
-    const j: any = await res.json();
+    /**
+     * Read the text and keep it, then parse. It used to call `res.json()`, which parses and discards the document —
+     * five fields kept out of however many the operator wrote, at the one moment the file is retrievable. The URI is
+     * the creator's to repoint and the pin is theirs to drop, so every key we did not think to name was being thrown
+     * away permanently: the off-chain name (which can differ from the on-chain one), creator handles, and whatever
+     * else a launch platform stamps in there.
+     */
+    const text = await res.text();
+    const bytes = Buffer.byteLength(text);
+    const j: any = JSON.parse(text);
     const pick = (k: string) => (typeof j?.[k] === "string" && j[k] ? j[k] : undefined);
     return {
       twitter: pick("twitter"), telegram: pick("telegram"), website: pick("website"),
       description: pick("description")?.slice(0, 500),
       // `image` is the field worth having and it was never being read. See TokenMeta.image.
       image: pick("image"),
+      // Oversized documents are recorded as seen (`bytes`) but not stored, and never truncated: half a JSON document
+      // is not a JSON document, and storing one would put an unparseable value where a record is expected.
+      raw: bytes <= MAX_META_BYTES ? text : undefined,
+      bytes,
     };
   } catch {
     return null;

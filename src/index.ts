@@ -816,9 +816,10 @@ async function sweepMissingMeta(): Promise<void> {
       db.prepare(`UPDATE tokens SET
         image = COALESCE(image, ?), description = COALESCE(description, ?),
         twitter = COALESCE(twitter, ?), telegram = COALESCE(telegram, ?), website = COALESCE(website, ?),
+        meta_json = COALESCE(meta_json, ?), meta_bytes = COALESCE(meta_bytes, ?),
         meta_at = COALESCE(meta_at, ?) WHERE mint = ?`)
         .run(meta.image ?? null, meta.description ?? null, meta.twitter ?? null, meta.telegram ?? null,
-             meta.website ?? null, Date.now(), r.mint);
+             meta.website ?? null, meta.raw ?? null, meta.bytes ?? null, Date.now(), r.mint);
       got++;
     }
     if (got) log(`[meta] recovered ${got}/${rows.length} launch claims that the first attempt missed`);

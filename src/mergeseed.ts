@@ -107,6 +107,10 @@ const TOKEN_POLICY: Record<string, string> = {
   image: `COALESCE(tokens.image, excluded.image)`,
   description: `COALESCE(tokens.description, excluded.description)`,
   meta_at: `COALESCE(tokens.meta_at, excluded.meta_at)`,
+  // The document itself, same keep-first rule as every other launch claim: whoever read it first read it closest to
+  // the launch, and a later fetch reads today's URI rather than that day's.
+  meta_json: `COALESCE(tokens.meta_json, excluded.meta_json)`,
+  meta_bytes: `COALESCE(tokens.meta_bytes, excluded.meta_bytes)`,
   // A diagnostic about OUR fetch attempt, not a fact about the launch. The target's own attempt is the one that
   // describes the target, so it wins; the seed only fills a slot the target never wrote. Added 2026-09-08 when the
   // shared-column guard refused the merge over it — which is the guard working exactly as intended: a column that

@@ -198,6 +198,19 @@ export function openDb(path: string): DatabaseSync {
   try { db.exec("ALTER TABLE tokens ADD COLUMN image_at INTEGER"); } catch {}
   try { db.exec("ALTER TABLE tokens ADD COLUMN image_error TEXT"); } catch {}
   /**
+   * The metadata document itself, not our reading of it.
+   *
+   * `fetchMeta` extracted five fields and dropped the file. Everything else an operator wrote there — the off-chain
+   * name, creator handles, whatever a launch platform stamps in — was fetched and discarded at the one moment it was
+   * retrievable, because the URI is the creator's to repoint. This is the same unrecoverable class as the image and
+   * costs about a kilobyte a launch.
+   *
+   * `meta_bytes` is the document's size as served and is set even when `meta_json` is NULL, which is how "too big to
+   * store" is told apart from "never fetched". Never truncated: half a JSON document is not a JSON document.
+   */
+  try { db.exec("ALTER TABLE tokens ADD COLUMN meta_json TEXT"); } catch {}
+  try { db.exec("ALTER TABLE tokens ADD COLUMN meta_bytes INTEGER"); } catch {}
+  /**
    * Backfill from evidence already on the row. This is not a guess about history: every one of these rows has a pool
    * address we observed, and that observation is what confirmation means. Rows without one stay NULL — unconfirmed,
    * which is the honest state and the one the flag logic must now require against.
@@ -226,8 +239,8 @@ export function upsertToken(db: DatabaseSync, t: TokenState): void {
     INSERT INTO tokens (mint, name, symbol, uri, creator, created_at, late_discovery, launch_price, last_price, peak_price, peak_at,
       dev_pct, dev_sold, dev_sold_at, buys, sells, buy_vol_sol, sell_vol_sol, unique_buyers, unique_sellers, bundled_buyers,
       snap30_buyers, snap30_buys, snap30_sells, snap30_vol, graduated, graduated_at, p_1m, p_5m, p_15m, p_60m,
-      twitter, telegram, website, image, description, meta_at, kol_signals, pool, amm_trusted, vault_sol, vault_at, finalized, updated_at, venue, graduated_confirmed_by)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      twitter, telegram, website, image, description, meta_at, kol_signals, pool, amm_trusted, vault_sol, vault_at, finalized, updated_at, venue, graduated_confirmed_by, meta_json, meta_bytes)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(mint) DO UPDATE SET
       name=excluded.name, symbol=excluded.symbol, launch_price=excluded.launch_price, last_price=excluded.last_price,
       peak_price=excluded.peak_price, peak_at=excluded.peak_at, dev_sold=excluded.dev_sold, dev_sold_at=excluded.dev_sold_at,
@@ -255,6 +268,7 @@ export function upsertToken(db: DatabaseSync, t: TokenState): void {
       -- The launch claim is written once and never revised: a later fetch reads today's URI, not the launch's.
       image=COALESCE(tokens.image, excluded.image), description=COALESCE(tokens.description, excluded.description),
       meta_at=COALESCE(tokens.meta_at, excluded.meta_at),
+      meta_json=COALESCE(tokens.meta_json, excluded.meta_json), meta_bytes=COALESCE(tokens.meta_bytes, excluded.meta_bytes),
       kol_signals=excluded.kol_signals, pool=COALESCE(excluded.pool, tokens.pool), amm_trusted=COALESCE(excluded.amm_trusted, tokens.amm_trusted),
       -- vault_sol and vault_at move together or not at all: a kept balance keeps the time it was read.
       vault_sol=COALESCE(excluded.vault_sol, tokens.vault_sol),
@@ -273,6 +287,8 @@ export function upsertToken(db: DatabaseSync, t: TokenState): void {
     // `created_at` is never updated. Defaulted here as well as in the schema so a second collector sets one field.
     t.venue ?? "pumpfun",
     t.graduatedConfirmedBy ?? null,
+    // Appended last, matching the column list: this INSERT names its columns but binds positionally.
+    t.meta?.raw ?? null, t.meta?.bytes ?? null,
   );
 }
 
