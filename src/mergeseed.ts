@@ -125,22 +125,33 @@ const TOKEN_POLICY: Record<string, string> = {
 };
 
 /**
- * Mints whose buyer counts must not fall. BILL is here because it actually lost 3,046 of them to a careless write,
- * and the point of a fixed list is that it is checked during the merge rather than noticed afterwards.
+ * Mints whose buyer counts must not fall: the 25 with the most to lose, read from the target before the merge.
+ * Dynamic rather than a fixed list, so it adapts to whatever the collector actually holds - the failure being
+ * guarded is the one that cost BILL 3,046 curve buyers on 2026-09-06 to a careless write.
  */
 const WITNESS_SQL = `SELECT mint, COALESCE(curve_buyers,0) b, COALESCE(unique_buyers,0) u FROM main.tokens
-  WHERE mint IN (SELECT mint FROM main.tokens WHERE curve_buyers IS NOT NULL ORDER BY curve_buyers DESC LIMIT 25)`;
+  WHERE curve_buyers IS NOT NULL ORDER BY curve_buyers DESC LIMIT 25`;
+/**
+ * The fallback matters more than it looks. `curve_buyers` is populated by `servicedb`, which on a collector whose
+ * record build has been failing may never have run - and then the set above comes back empty, the loop iterates zero
+ * times, and the merge reports that no token lost buyers having checked none. A check that can only fail one way is
+ * vacuous in the other, so an empty witness set refuses the merge rather than passing it.
+ */
+const WITNESS_FALLBACK_SQL = `SELECT mint, COALESCE(curve_buyers,0) b, COALESCE(unique_buyers,0) u FROM main.tokens
+  WHERE COALESCE(unique_buyers,0) > 0 ORDER BY unique_buyers DESC LIMIT 25`;
 
-export function mergeSeed(
+export async function mergeSeed(
   db: DatabaseSync, seedPath: string, opts: { dryRun?: boolean; log?: (s: string) => void } = {},
-): MergeResult {
+): Promise<MergeResult> {
   const log = opts.log ?? ((s: string) => console.log(s));
   const st = statSync(seedPath);
   const hash = createHash("sha256").update(readFileSync(seedPath)).digest("hex").slice(0, 16);
   const key = `${st.size}:${hash}`;
 
-  db.exec(`CREATE TABLE IF NOT EXISTS main.seed_merges (
-    key TEXT PRIMARY KEY, path TEXT, bytes INTEGER, merged_at INTEGER, rows_added INTEGER, note TEXT)`);
+  // Created inside the transaction below, not here: a dry run must write nothing at all, and `CREATE TABLE IF NOT
+  // EXISTS` before BEGIN left an empty table behind in a database the caller was only asking a question about.
+  const MARKER_DDL = `CREATE TABLE IF NOT EXISTS main.seed_merges (
+    key TEXT PRIMARY KEY, path TEXT, bytes INTEGER, merged_at INTEGER, rows_added INTEGER, note TEXT)`;
 
   const before: Record<string, number> = {};
   for (const t of TABLES) before[t] = count(db, "main", t);
@@ -150,7 +161,9 @@ export function mergeSeed(
    * on boot" is a promise about a file that is still sitting on the volume the next time the process starts — so the
    * marker is keyed on the file's size and content hash, not its name. A different seed is a different merge.
    */
-  const done = db.prepare("SELECT merged_at FROM main.seed_merges WHERE key = ?").get(key) as any;
+  // No marker table yet means nothing has ever been merged, which is not an error.
+  let done: any = null;
+  try { done = db.prepare("SELECT merged_at FROM main.seed_merges WHERE key = ?").get(key); } catch { done = null; }
   if (done && !opts.dryRun) {
     return { skipped: true, reason: `already merged at ${new Date(done.merged_at).toISOString()}`, before, after: before };
   }
@@ -161,7 +174,24 @@ export function mergeSeed(
    */
   let backup: string | undefined;
   if (!opts.dryRun) {
-    backup = `${seedPath.replace(/[^/]*$/, "")}pre-merge-${Date.now()}.db`;
+    /**
+     * Beside the live database, not beside the seed. Those are different filesystems on the collector: the seed
+     * ships inside the image at /app/data/seed.db while pump.db sits on the mounted volume, so deriving the path
+     * from the seed put a 1.2 GB backup on ephemeral container storage - gone at the next restart, and quite
+     * possibly filling the layer and failing the merge on the way. The one artefact whose whole purpose is
+     * surviving a bad merge has to live where the thing it is backing up lives.
+     */
+    const livePath = ((db.prepare("SELECT file FROM pragma_database_list WHERE name='main'").get() as any)?.file ?? "") as string;
+    if (!livePath) throw new Error("cannot determine the live database's path, so cannot place a backup beside it");
+    backup = `${livePath.replace(/[^/]*$/, "")}pre-merge-${Date.now()}.db`;
+    // A VACUUM INTO that runs out of room leaves a partial file consuming what is left. Check before, not after.
+    try {
+      const { statfsSync } = await import("node:fs");
+      const fs2 = statfsSync(livePath.replace(/[^/]*$/, "") || ".");
+      const free = fs2.bavail * fs2.bsize, need = statSync(livePath).size;
+      if (free < need * 1.1)
+        throw new Error(`backup needs ~${(need / 1e9).toFixed(1)} GB beside ${livePath} and only ${(free / 1e9).toFixed(1)} GB is free`);
+    } catch (e) { if ((e as Error).message.startsWith("backup needs")) throw e; }
     db.exec(`VACUUM INTO '${backup.replace(/'/g, "''")}'`);
     log(`[seed] backed up to ${backup}`);
   }
@@ -196,11 +226,16 @@ export function mergeSeed(
 
     const floorBefore = (db.prepare("SELECT MIN(created_at) m FROM main.tokens").get() as any)?.m ?? Infinity;
     const seedFloor = (db.prepare("SELECT MIN(created_at) m FROM seed.tokens").get() as any)?.m ?? Infinity;
-    const witnessBefore = new Map<string, any>(
-      (db.prepare(WITNESS_SQL).all() as any[]).map((r) => [r.mint, r]));
+    let witnessRows = db.prepare(WITNESS_SQL).all() as any[];
+    if (!witnessRows.length) witnessRows = db.prepare(WITNESS_FALLBACK_SQL).all() as any[];
+    if (!witnessRows.length)
+      throw new Error("no witness tokens: the target holds no row with a buyer count, so the buyer-loss check would verify nothing");
+    log(`[seed] ${witnessRows.length} witness tokens will be checked for lost buyers`);
+    const witnessBefore = new Map<string, any>(witnessRows.map((r) => [r.mint, r]));
 
     db.exec("BEGIN IMMEDIATE");
     try {
+      db.exec(MARKER_DDL);
       db.exec(`INSERT INTO main.tokens (${list}) SELECT ${list} FROM seed.tokens WHERE true
                ON CONFLICT(mint) DO UPDATE SET ${setClause}`);
 
@@ -285,7 +320,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const live = arg("--db"), seed = arg("--seed");
   if (!live || !seed) { console.error("usage: mergeseed --db <live.db> --seed <seed.db> [--dry-run]"); process.exit(2); }
   const db = openDb(live);
-  const r = mergeSeed(db, seed, { dryRun: process.argv.includes("--dry-run") });
+  const r = await mergeSeed(db, seed, { dryRun: process.argv.includes("--dry-run") });
   if (r.skipped) { console.log(`[seed] skipped: ${r.reason}`); process.exit(0); }
   for (const t of Object.keys(r.after)) {
     const d = r.after[t] - r.before[t];

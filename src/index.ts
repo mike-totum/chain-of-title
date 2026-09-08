@@ -47,7 +47,7 @@ if (process.env.SEED_PATH) {
     const { existsSync } = await import("node:fs");
     if (!existsSync(process.env.SEED_PATH)) log(`[seed] SEED_PATH=${process.env.SEED_PATH} does not exist, skipping`);
     else {
-      const r = mergeSeed(db, process.env.SEED_PATH, { log });
+      const r = await mergeSeed(db, process.env.SEED_PATH, { log });
       if (r.skipped) log(`[seed] ${r.reason}`);
       else log(`[seed] inherited ${Object.entries(r.after).map(([t, n]) => `${t} ${n - r.before[t]}`).join(", ")}`);
     }
