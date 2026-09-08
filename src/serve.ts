@@ -91,6 +91,47 @@ function clientIp(req: any): string {
 const RECORD_URL = arg("--record-url", process.env.RECORD_URL ?? "");
 const REFRESH_MS = Number(process.env.RECORD_REFRESH_HOURS ?? 6) * 3600_000;
 
+/**
+ * The collector's live launch count, which is a different claim from the published one and needs saying separately.
+ *
+ * Everything else this service reports comes out of `record.db`: a snapshot, exact about itself and as old as the
+ * last build. That is the right source for "how many launches are in the file you are downloading" and the wrong one
+ * for "how many launches are on record", which the site had been answering from it — so the headline sat frozen for
+ * six hours at a stretch while the collector never stopped ingesting, and understated the archive by thousands by
+ * the end of each cycle.
+ *
+ * Derived from RECORD_URL rather than configured separately, so there is one address for the collector and no way to
+ * point them at different services. Null whenever the collector cannot be reached or has not answered recently: a
+ * live number that has quietly stopped moving is worse than none, because the page would then assert ingestion is
+ * healthy on the strength of a value that died.
+ */
+/**
+ * Settable on its own, and that is the point rather than a convenience.
+ *
+ * Deriving it from RECORD_URL alone would mean the live counter could not be switched on without also arming
+ * `pullRecord`, which adopts whatever record the collector is serving. That pull is the step being deliberately held
+ * back until the collector's build has been observed producing something sane — it is the path that can replace a
+ * 165,025-launch published archive — and a display feature must not be the thing that arms it. Set
+ * COLLECTOR_HEALTH_URL for the counter; set RECORD_URL when, separately, the pull is meant to be live.
+ */
+const HEALTH_URL = process.env.COLLECTOR_HEALTH_URL || (RECORD_URL ? RECORD_URL.replace(/\/record\.db$/, "/health") : "");
+const LIVE_MAX_AGE_MS = 60_000;
+let live: { observed: number; held: number; at: number } | null = null;
+
+async function pollLive(): Promise<void> {
+  if (!HEALTH_URL) return;
+  try {
+    const res = await fetch(HEALTH_URL, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const h = (await res.json()) as any;
+    // A collector that answers without a count is not a collector that has zero launches.
+    if (typeof h.observed === "number" && typeof h.held === "number") live = { observed: h.observed, held: h.held, at: Date.now() };
+  } catch { /* leave the previous value; freshness is judged by `at` below, not by whether this poll worked */ }
+}
+/** Null once the last successful poll is older than the tolerance, so a dead collector shows no live number at all. */
+const liveNow = () => (live && Date.now() - live.at <= LIVE_MAX_AGE_MS ? live : null);
+if (HEALTH_URL) { void pollLive(); setInterval(() => void pollLive(), 15_000); }
+
 async function pullRecord(first: boolean): Promise<void> {
   if (!RECORD_URL) return;
   const tmp = `${DB_FILE}.incoming`;
@@ -703,8 +744,22 @@ const server = createServer(async (req, res) => {
       };
       const rest = safe.slice(`/api/${API_VERSION}`.length).replace(/^\/+/, "");
 
+      if (rest === "live") {
+        /**
+         * What the collector holds right now, for the counter on the page. Deliberately its own endpoint rather than
+         * a field on /status: /status describes the published file and is cacheable, this cannot be cached at all,
+         * and merging them would make one of the two wrong. `null` means the collector is unreachable or stale —
+         * the page then shows the published figure alone rather than a number that has stopped moving.
+         */
+        const l = liveNow();
+        return j(200, { observed: l?.observed ?? null, held: l?.held ?? null, at: l?.at ?? null, published: observed, generatedAt: Date.now() });
+      }
+
       if (rest === "" || rest === "status")
         return j(200, statusRecord(COV, observed, {
+          // The collector's live count, which is a claim about the archive rather than about this file. Null when the
+          // collector cannot be reached; never falls back to the published number, which would make it meaningless.
+          recorded: liveNow()?.observed ?? null,
           // Every row in the file, including launches restored after creation and those rebuilt from chain history.
           // `launches` above counts only those observed from the creation transaction, which is what the pages report.
           records: held,

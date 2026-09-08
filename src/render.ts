@@ -455,10 +455,45 @@ export function homeBody(h: Home): string {
       <div class="stat"><span>graduated, 24h to ${h.windowEnd ? when(h.windowEnd) : "now"}</span><b class="big">${fmt(h.graduated24h)}</b></div>
       <div class="stat"><span>launched clean</span><b class="big">${fmt(h.clean24h)}</b></div>
       <div class="stat"><span>carrying a danger flag</span><b class="big">${fmt(h.danger24h)}</b></div>
-      <div class="stat"><span>launches on file</span><b class="big">${fmt(h.onFile)}</b></div>
+      <div class="stat"><span>launches recorded</span><b class="big" id="rec" data-n="${h.onFile}">${fmt(h.onFile)}</b></div>
     </div>
-    <p class="sub" style="margin:6px 0 0">Launch counts as of ${h.builtAt ? `${when(h.builtAt)}, ${ago(h.now - h.builtAt)}` : "an unrecorded time"}, the age of the archive this reads.
+    <p class="sub" style="margin:6px 0 0"><span id="recnote">Launch counts as of ${h.builtAt ? `${when(h.builtAt)}, ${ago(h.now - h.builtAt)}` : "an unrecorded time"}, the age of the archive this reads.</span>
     Pool balances are read separately and continuously; each carries its own age below.</p>
+    <!--
+      The counter climbs because the collector never stops, and this is the one number on the page that is a claim
+      about the archive rather than about the published file. It was read out of the snapshot, so it sat frozen for
+      six hours at a time and understated the record by thousands by the end of each cycle.
+
+      It only ever displays values the collector actually reported. The animation interpolates between two real
+      readings and stops on the second; it never extrapolates forward from a rate, because a number that invents
+      launches it has not seen is precisely the thing this site exists to catch other people doing. If the collector
+      is unreachable or its answer is stale the figure stays exactly as rendered, still labelled with the archive's
+      age, and nothing pretends to be live.
+    -->
+    <script>(function(){
+      var el=document.getElementById('rec'),note=document.getElementById('recnote');
+      if(!el||!window.fetch)return;
+      var shown=+el.getAttribute('data-n')||0,anim=null;
+      function paint(n){el.textContent=n.toLocaleString()}
+      function to(target){
+        if(target===shown)return; if(anim)cancelAnimationFrame(anim);
+        var from=shown,d=target-from,t0=null,ms=Math.min(1200,Math.max(300,Math.abs(d)*12));
+        function step(t){ if(t0===null)t0=t; var k=Math.min(1,(t-t0)/ms);
+          paint(Math.round(from+d*(1-Math.pow(1-k,3))));
+          if(k<1){anim=requestAnimationFrame(step)}else{shown=target;paint(target)} }
+        anim=requestAnimationFrame(step);
+      }
+      function tick(){
+        fetch('/api/v1/live',{cache:'no-store'}).then(function(r){return r.json()}).then(function(d){
+          if(typeof d.observed!=='number')return;           // collector unreachable or stale: leave the rendered figure
+          if(d.observed<shown)return;                        // an archive never shrinks; refuse a lower number rather than animate down
+          to(d.observed);
+          if(note)note.textContent='Recorded live by the collector. The published file holds '+(d.published||0).toLocaleString()+', rebuilt periodically.';
+        }).catch(function(){});
+      }
+      tick(); setInterval(tick,10000);
+      document.addEventListener('visibilitychange',function(){if(!document.hidden)tick()});
+    })()</script>
   </div>
 
   ${p ? `<div class="sec"><h2>Why a scanner cannot tell you this</h2></div>

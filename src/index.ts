@@ -888,8 +888,29 @@ if (process.env.RECORD_PORT) {
       if (req.url === "/health") {
         let size = 0, mtime = 0;
         try { const st = statSync(RECORD_PATH); size = st.size; mtime = st.mtimeMs; } catch {}
+        /**
+         * The live count, which is a different claim from every other number this service publishes.
+         *
+         * `bytes`/`builtAt` describe the record FILE — a snapshot, correct only about itself. This describes what
+         * the collector holds right now, and it is the honest source for "how many launches are on record", which
+         * the site had been answering out of the published snapshot. Those are two different sentences and the site
+         * was using one number for both: the download page understated the file it offered by 8,818 launches on
+         * 2026-09-08, and the headline sat frozen for six hours at a time while ingestion never stopped.
+         *
+         * Read fresh per request rather than cached, because a cached count is a snapshot again and this endpoint
+         * exists precisely to not be one. It is a COUNT(*) on an indexed table behind the private network, called
+         * once every few seconds by one consumer.
+         *
+         * Failure returns null, never a stale or zero count. A frozen number presented as live is worse than no
+         * number: the site would claim ingestion is healthy on the strength of a value that stopped moving.
+         */
+        let observed: number | null = null, held: number | null = null;
+        try {
+          held = (db.prepare("SELECT COUNT(*) c FROM tokens").get() as any).c as number;
+          observed = (db.prepare("SELECT COUNT(*) c FROM tokens WHERE COALESCE(late_discovery,0)=0").get() as any).c as number;
+        } catch { /* null, and the consumer shows the published figure alone */ }
         res.writeHead(200, { "content-type": "application/json" });
-        return res.end(JSON.stringify({ record: RECORD_PATH, bytes: size, builtAt: mtime, building: buildingRecord }));
+        return res.end(JSON.stringify({ record: RECORD_PATH, bytes: size, builtAt: mtime, building: buildingRecord, observed, held, at: Date.now() }));
       }
       if (req.url !== "/record.db") { res.writeHead(404); return res.end("not found"); }
       let st;
