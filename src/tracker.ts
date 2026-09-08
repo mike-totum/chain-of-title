@@ -97,6 +97,15 @@ export interface TokenMeta {
   telegram?: string;
   website?: string;
   description?: string;
+  /**
+   * The launch image. This is the only field in the whole record that cannot be reconstructed at any price.
+   *
+   * Everything else this project publishes is on-chain and can be rebuilt from signature history by anyone willing to
+   * pay for archival RPC, which `backfill.ts` does. Off-chain metadata cannot: it lives behind a URI the creator
+   * controls, and repointing or unpinning it destroys the evidence of what the token claimed to be. A manufactured
+   * launch that presented itself as something else leaves no trace of the claim once the pin is dropped.
+   */
+  image?: string;
 }
 
 export interface Tracker {
@@ -495,7 +504,12 @@ export async function fetchMeta(uri: string): Promise<TokenMeta | null> {
     if (!res.ok) return null;
     const j: any = await res.json();
     const pick = (k: string) => (typeof j?.[k] === "string" && j[k] ? j[k] : undefined);
-    return { twitter: pick("twitter"), telegram: pick("telegram"), website: pick("website"), description: pick("description")?.slice(0, 200) };
+    return {
+      twitter: pick("twitter"), telegram: pick("telegram"), website: pick("website"),
+      description: pick("description")?.slice(0, 500),
+      // `image` is the field worth having and it was never being read. See TokenMeta.image.
+      image: pick("image"),
+    };
   } catch {
     return null;
   }

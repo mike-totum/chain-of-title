@@ -162,6 +162,28 @@ export function openDb(path: string): DatabaseSync {
    */
   try { db.exec("ALTER TABLE tokens ADD COLUMN graduated_confirmed_by TEXT"); } catch {}
   /**
+   * What the token claimed to be at launch: its image, its description, and when we read them.
+   *
+   * `uri`, `twitter`, `telegram` and `website` were already stored. The image never was — `fetchMeta` did not read the
+   * field, so the most recognisable thing about a launch was fetched and thrown away 154,000 times. The description was
+   * read and then dropped on the floor for want of a column.
+   *
+   * This is the only class of fact here that is not recoverable later. On-chain history can be rebuilt from an archival
+   * node whenever someone pays for it; off-chain metadata lives behind a URI the creator controls and disappears when
+   * they repoint or unpin it. Every hour without this column is an hour of evidence that no amount of money brings back.
+   *
+   * No backfill, and that is a decision rather than an oversight: we never held these values, so there is nothing to
+   * backfill from, and re-fetching the URIs now would record what they resolve to *today* while stamping it as the
+   * launch claim. That would be inventing evidence. Historical rows stay NULL, which is true, and the loss they
+   * represent is exactly what this column stops from continuing.
+   *
+   * `meta_at` records when the fetch succeeded, so a NULL image on a row with a `meta_at` means the launch declared
+   * none, while a NULL image with no `meta_at` means we never looked. Absence of data must not read as a finding.
+   */
+  try { db.exec("ALTER TABLE tokens ADD COLUMN image TEXT"); } catch {}
+  try { db.exec("ALTER TABLE tokens ADD COLUMN description TEXT"); } catch {}
+  try { db.exec("ALTER TABLE tokens ADD COLUMN meta_at INTEGER"); } catch {}
+  /**
    * Backfill from evidence already on the row. This is not a guess about history: every one of these rows has a pool
    * address we observed, and that observation is what confirmation means. Rows without one stay NULL — unconfirmed,
    * which is the honest state and the one the flag logic must now require against.
@@ -190,8 +212,8 @@ export function upsertToken(db: DatabaseSync, t: TokenState): void {
     INSERT INTO tokens (mint, name, symbol, uri, creator, created_at, late_discovery, launch_price, last_price, peak_price, peak_at,
       dev_pct, dev_sold, dev_sold_at, buys, sells, buy_vol_sol, sell_vol_sol, unique_buyers, unique_sellers, bundled_buyers,
       snap30_buyers, snap30_buys, snap30_sells, snap30_vol, graduated, graduated_at, p_1m, p_5m, p_15m, p_60m,
-      twitter, telegram, website, kol_signals, pool, amm_trusted, vault_sol, vault_at, finalized, updated_at, venue, graduated_confirmed_by)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      twitter, telegram, website, image, description, meta_at, kol_signals, pool, amm_trusted, vault_sol, vault_at, finalized, updated_at, venue, graduated_confirmed_by)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(mint) DO UPDATE SET
       name=excluded.name, symbol=excluded.symbol, launch_price=excluded.launch_price, last_price=excluded.last_price,
       peak_price=excluded.peak_price, peak_at=excluded.peak_at, dev_sold=excluded.dev_sold, dev_sold_at=excluded.dev_sold_at,
@@ -216,6 +238,9 @@ export function upsertToken(db: DatabaseSync, t: TokenState): void {
       graduated_confirmed_by=COALESCE(excluded.graduated_confirmed_by, tokens.graduated_confirmed_by),
       p_1m=excluded.p_1m, p_5m=excluded.p_5m, p_15m=excluded.p_15m, p_60m=excluded.p_60m,
       twitter=COALESCE(excluded.twitter, tokens.twitter), telegram=COALESCE(excluded.telegram, tokens.telegram), website=COALESCE(excluded.website, tokens.website),
+      -- The launch claim is written once and never revised: a later fetch reads today's URI, not the launch's.
+      image=COALESCE(tokens.image, excluded.image), description=COALESCE(tokens.description, excluded.description),
+      meta_at=COALESCE(tokens.meta_at, excluded.meta_at),
       kol_signals=excluded.kol_signals, pool=COALESCE(excluded.pool, tokens.pool), amm_trusted=COALESCE(excluded.amm_trusted, tokens.amm_trusted),
       -- vault_sol and vault_at move together or not at all: a kept balance keeps the time it was read.
       vault_sol=COALESCE(excluded.vault_sol, tokens.vault_sol),
@@ -228,6 +253,7 @@ export function upsertToken(db: DatabaseSync, t: TokenState): void {
     t.graduated ? 1 : 0, t.graduatedAt,
     t.checkpoints[60] ?? null, t.checkpoints[300] ?? null, t.checkpoints[900] ?? null, t.checkpoints[3600] ?? null,
     t.meta?.twitter ?? null, t.meta?.telegram ?? null, t.meta?.website ?? null,
+    t.meta?.image ?? null, t.meta?.description ?? null, t.meta ? Date.now() : null,
     t.kolSignals, t.pool, t.ammTrusted === null ? null : t.ammTrusted ? 1 : 0, t.vaultSol, t.vaultAt, t.finalized ? 1 : 0, Date.now(),
     // Not in the ON CONFLICT clause above: where a token launched is a launch fact and cannot change, the same reason
     // `created_at` is never updated. Defaulted here as well as in the schema so a second collector sets one field.

@@ -418,6 +418,8 @@ export interface CleanRow { mint: string; symbol: string | null; devPct: number;
 export interface OpRow { wallet: string; taken: number; spent: number; sold: number; bought: number }
 export interface Home {
   now: number; builtAt: number | null;
+  /** end of the 24h window: the archive's own build time, not the request clock. See `inDay` in serve.ts. */
+  windowEnd?: number | null;
   graduated24h: number; clean24h: number; danger24h: number; onFile: number;
   windowDays: number; gradWindow: number; unchecked: number; unchecked24h: number;
   cleanRows: CleanRow[]; wallets: number; opRows: OpRow[];
@@ -440,7 +442,7 @@ export function homeBody(h: Home): string {
     <td class="num">${fmt(x.sold)} SOL</td><td class="num">${fmt(x.bought)} SOL</td></tr>`).join("");
   return `
   <div class="hero">
-    <h1 class="headline">In the last 24 hours ${fmt(h.graduated24h)} tokens finished their bonding curve.
+    <h1 class="headline">${h.windowEnd && h.now - h.windowEnd > 3600_000 ? `In the 24 hours to ${when(h.windowEnd)}` : "In the last 24 hours"} ${fmt(h.graduated24h)} tokens finished their bonding curve.
     <b>${fmt(h.clean24h)}</b> of them launched clean.</h1>
     <p class="lede">Most were manufactured. The creator took the supply, or a single wallet bought the whole curve and
     called it demand. That evidence exists for about thirty seconds and is unrecoverable afterwards, so we watch every
@@ -450,7 +452,7 @@ export function homeBody(h: Home): string {
     ${SEARCH}
     ${p ? `<p class="sub" style="margin:-18px 0 24px">Nothing to hand? Read <a href="t/${esc(p.mint)}.html">${esc(p.symbol ?? "?")}</a>, a launch this archive holds.</p>` : ""}
     <div class="stats" style="margin:4px 0 0">
-      <div class="stat"><span>graduated, last 24h</span><b class="big">${fmt(h.graduated24h)}</b></div>
+      <div class="stat"><span>graduated, 24h to ${h.windowEnd ? when(h.windowEnd) : "now"}</span><b class="big">${fmt(h.graduated24h)}</b></div>
       <div class="stat"><span>launched clean</span><b class="big">${fmt(h.clean24h)}</b></div>
       <div class="stat"><span>carrying a danger flag</span><b class="big">${fmt(h.danger24h)}</b></div>
       <div class="stat"><span>launches on file</span><b class="big">${fmt(h.onFile)}</b></div>

@@ -534,7 +534,21 @@ function buildHome(now: number): Home {
   const uncertified = assessed.filter(({ t, a }) => cleanAtBirth(t, a) && !readingCertifies(t.vault_at, t.vault_sol, now));
   const unchecked = uncertified.length;
 
-  const inDay = (t: any) => t.created_at >= now - 86400_000;
+  /**
+   * The 24-hour window ends where the archive ends, not where the clock is.
+   *
+   * Measured against `now`, this window slides forward while the data behind it stands still, so a
+   * frozen archive does not read as stale: it reads as a collapsing market. On 2026-09-07 the
+   * published record sat at one build for seven hours and this counter fell from 1,433 to 1,378
+   * with nothing wrong upstream. Left long enough it reaches zero, and the headline then states
+   * that no token completed a bonding curve all day, which is not stale, it is false.
+   *
+   * Anchoring to `built_at` makes the sentence true of the record we are actually serving. It also
+   * stops the number moving for a reason unrelated to the market, which is the more insidious half:
+   * a figure that drifts looks live, and a reader has no way to tell drift from news.
+   */
+  const windowEnd = recordBuiltAt ?? now;
+  const inDay = (t: any) => t.created_at >= windowEnd - 86400_000 && t.created_at <= windowEnd;
   const day = assessed.filter(({ t }) => inDay(t));
 
   const proofRow = assessed
@@ -546,7 +560,7 @@ function buildHome(now: number): Home {
   const walletCount = (db.prepare("SELECT COUNT(*) c FROM wallet_flow").get() as any).c as number;
 
   return {
-    now, builtAt: recordBuiltAt,
+    now, builtAt: recordBuiltAt, windowEnd,
     graduated24h: day.length,
     clean24h: certified.filter(({ t }) => inDay(t)).length,
     danger24h: day.filter(({ a }) => a.flags.some((f) => f.level === "DANGER")).length,
