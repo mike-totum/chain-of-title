@@ -72,6 +72,30 @@ graduation was never confirmed, not that it did not happen.
 | `rebuilt_complete` | 1 if the reconstruction read every transaction. A partial rebuild understates buyers and dev share, always in the direction that makes a manufactured launch look ordinary, and certifies nothing |
 | `venue` | launch venue. `pumpfun` throughout this release; the column exists because the record format is venue-neutral |
 | `updated_at` | last write to this row |
+| `uri` | the metadata URI declared in the creation transaction |
+| `image`, `description` | what the token claimed to be at launch, read from that URI. Captured from 2026-09-08 onward; NULL on earlier rows because nothing read them then, and they are deliberately **not** backfilled — re-fetching a URI today records what it resolves to now and stamping that as the launch claim would be manufacturing evidence about the past |
+| `meta_at` | when that read succeeded. This is what separates "the launch declared no image" (`image` NULL, `meta_at` set) from "we never looked" (both NULL) |
+| `image_sha256` | sha256 of the image bytes as we fetched them, when we hold them. The record carries the proof, never the picture: 64 hex characters against a few hundred KB, which is what keeps this file mirrorable |
+| `image_bytes`, `image_at` | size of those bytes, and when they were fetched — the fetch time, not the launch time |
+
+### Why the picture is only kept for some launches
+
+`image_sha256` is NULL on most rows, and that means **we did not fetch the bytes**, not that the launch had no
+image. The URL is on the row either way.
+
+The bytes are fetched for launches that **completed their bonding curve**, and the reason is arithmetic rather
+than principle. Roughly 24,000 launches a day declare an image, and they average 409 KB — about **13.6 GB a day**,
+or the entire storage volume every 33 hours. Graduations run near 1,400 a day, which is about 570 MB a day, and
+that is what can actually be kept. Images are stored content-addressed, so the many launches that reuse the same
+picture cost one copy: roughly a quarter of what we fetch is already held.
+
+This is a real limit and it is stated rather than hidden, because the gap it leaves is exactly the kind we
+criticise elsewhere. A launch that never graduated has its declared image URL recorded and its bytes unheld, and
+if the operator unpins it, that picture is gone and this archive will not have it. If that matters to you, the
+URLs are in the file and nothing stops you fetching them; the reason we did not is that we could not afford to.
+
+`image_error` exists in the collector's own database but is **not** published here: it records why *our* fetch
+failed, which is a fact about our infrastructure and not about the launch.
 
 ## `runs` (59 rows) — when the collector was watching
 
