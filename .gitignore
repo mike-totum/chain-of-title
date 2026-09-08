@@ -43,3 +43,9 @@ HANDOFF.md
 # Grant application drafts. Working documents with figures that go stale, and negotiating
 # positions that should not be public while they are being negotiated.
 .grants/
+
+# Runtime traces from the launchd jobs: stderr, and the freshness probe's alert-suppression state. data/*.log was
+# already covered by the rule above; these were not, and the hourly probe writes them.
+data/*.err
+data/*.state
+data/UNDELIVERED-ALERT.txt
