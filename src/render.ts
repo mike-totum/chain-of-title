@@ -38,11 +38,10 @@ export const CSS = `
 :root{--bg:#fbfbfa;--fg:#1a1a19;--mut:#6b6b68;--line:#e4e4e1;--bad:#a4342a;--warn:#8a6a1f;--ok:#2f6b46;--card:#fff}
 @media(prefers-color-scheme:dark){:root{--bg:#141414;--fg:#e8e8e6;--mut:#9a9a96;--line:#2c2c2a;--bad:#e0796d;--warn:#d6b25e;--ok:#7fc39a;--card:#1b1b1a}}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
-/* One measure for the whole page. Prose was capped at 62ch inside an 860px column while every table ran the full
-   width, so each section began with a short paragraph over a wide grid and the eye had two left-to-right rhythms to
-   follow. 800px is ~70ch at this size: inside the comfortable range for reading, and still wide enough for a
-   five-column table of numbers. Prose and tables now share one edge. */
-.wrap{max-width:800px;margin:0 auto;padding:32px 20px 80px}
+/* Prose and tables share one left edge; only the right edge differs. See the grid below. The .wrap element no
+   longer lays anything out - it is kept so page() stays one string, and dissolves into the body flex column. */
+.wrap{display:contents}
+.shell{width:100%;max-width:1200px;margin:0 auto;padding:0 28px}
 a{color:inherit}h1{font-size:22px;margin:0 0 4px}h2{font-size:15px;text-transform:uppercase;letter-spacing:.08em;color:var(--mut);margin:32px 0 10px;font-weight:600}
 /* Keyboard users could see the focus ring on the search input and nowhere else. */
 a:focus-visible,button:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid var(--fg);outline-offset:2px}
@@ -58,7 +57,14 @@ th,td{padding:7px 10px 7px 0;border-bottom:1px solid var(--line);vertical-align:
 .note{color:var(--mut);font-size:13px;border-top:1px solid var(--line);margin-top:40px;padding-top:16px}
 .big{font-size:30px;font-weight:600}.stat{display:inline-block;margin-right:36px;margin-bottom:12px}
 .stat span{display:block;color:var(--mut);font-size:12px;text-transform:uppercase;letter-spacing:.05em}
-.mast{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;padding-bottom:14px;margin-bottom:28px;border-bottom:1.5px solid var(--fg)}
+/* The page needs edges before restraint reads as restraint. The rule under the masthead used to sit on .mast
+   itself, which stopped at the measure, so on a wide screen the content was a ribbon on an empty field with nothing
+   establishing where the page was. Both bands now span the viewport and the rule spans with them. */
+body{min-height:100vh;display:flex;flex-direction:column}
+.band-top{background:var(--card);border-bottom:1.5px solid var(--fg)}
+.band-bot{background:var(--card);border-top:1px solid var(--line);margin-top:72px}
+.band-bot .note{border-top:0;margin:0;padding:30px 0 44px}
+.mast{display:grid;grid-template-columns:auto auto minmax(0,1fr);align-items:baseline;gap:0 12px;padding:16px 0 14px}
 .mast a.brand{font-weight:600;font-size:15px;letter-spacing:.02em;text-decoration:none;display:inline-flex;align-items:center;gap:8px}
 .mast a.brand:hover span{text-decoration:underline;text-underline-offset:3px}
 .mark{flex:none;overflow:visible}
@@ -79,10 +85,10 @@ form.find button{padding:11px 18px;font:600 13px/1.4 inherit;color:var(--bg);bac
    chain. The serif is a system stack, so the page stays a single self-contained file with no network font. */
 .serif{font-family:ui-serif,Georgia,"Iowan Old Style","Times New Roman",serif}
 .mast{align-items:baseline}
-.mast .what{color:var(--mut);font-size:12.5px;flex-basis:100%;margin-top:2px}
+.mast .what{color:var(--mut);font-size:12.5px;grid-column:1/-1;max-width:78ch;margin-top:3px}
 .hero{padding:6px 0 0}
 .headline{font-family:ui-serif,Georgia,"Iowan Old Style","Times New Roman",serif;
-  font-size:clamp(28px,4.6vw,40px);line-height:1.12;letter-spacing:-.015em;font-weight:600;margin:0 0 14px;text-wrap:balance}
+  font-size:clamp(27px,4.2vw,37px);line-height:1.14;letter-spacing:-.015em;font-weight:600;margin:0 0 14px;text-wrap:balance}
 .headline b{font-weight:600;border-bottom:3px solid var(--bad);padding-bottom:1px}
 .lede{font-size:16px;line-height:1.62;color:var(--fg);margin:0 0 6px}
 .lede + .lede{margin-top:12px;color:var(--mut);font-size:14.5px}
@@ -108,12 +114,38 @@ form.find button{padding:11px 18px;font:600 13px/1.4 inherit;color:var(--bg);bac
   font-size:14px;color:var(--mut)}
 /* Three narrow columns stop being readable well before the phone breakpoint. */
 @media(max-width:820px){.proof{grid-template-columns:1fr}.proof > div + div{border-left:0;border-top:1px solid var(--line)}}
-/* Prose and data do not want the same width. 800px is about 70 characters, which is right for reading and cramped
-   for a six-column table of numbers - on a wide screen the tables looked squeezed while the paragraphs above them
-   were correct. So the measure stays where it is and only the tables and the stat row are allowed out of it, and
-   only when there is room. Centred by equal negative margins, so nothing shifts on a narrow screen. */
-@media(min-width:1100px){
-  .data,.stats{width:calc(100% + 180px);margin-left:-90px;margin-right:-90px;max-width:none}
+/* Prose and data do not want the same width. Tables used to buy their extra width with equal negative margins,
+   which gave them a left edge 90px outside the prose: two competing alignments on one page, which reads as a
+   mistake rather than a decision. Two named tracks instead. Prose stops at a readable measure, tables and panels
+   run on to the wide edge, and both start at the same place. */
+main.page{flex:1;display:grid;align-content:start;column-gap:60px;padding:38px 28px 0;
+  grid-template-columns:[wide-start] minmax(0,700px) [text-end] minmax(0,1fr) [wide-end]}
+main.page > *{grid-column:wide-start/text-end;min-width:0}
+main.page > .hero,main.page > .sec,main.page > .proof,main.page > .verdict,
+main.page > .verdictline,main.page > table,main.page > .stats{grid-column:wide-start/wide-end}
+
+/* The hero is the one block that earns two columns: the argument on the left, the figures on the right. */
+.hero{display:grid;column-gap:60px;align-items:start;padding-top:2px;
+  grid-template-columns:minmax(0,700px) minmax(0,1fr)}
+.hero .col-a,.hero .col-b{min-width:0}
+/* A ledger, not a 2x2. The labels ("graduated, 24h to 2026-09-08 20:50 UTC") are long enough that a grid wraps them
+   unevenly and the figures stop sharing a baseline. */
+.hero .stats{margin:6px 0 0;border:1px solid var(--line);background:var(--card);padding:4px 22px}
+.hero .stat{display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin:0;
+  padding:13px 0;border-bottom:1px solid var(--line)}
+.hero .stat:last-child{border-bottom:0}
+.hero .stat span{display:block;margin:0;flex:1;min-width:0;line-height:1.4}
+.hero .big{font-size:24px;font-variant-numeric:tabular-nums}
+.hero .col-b .sub{margin:12px 0 0;font-size:12.5px;line-height:1.5}
+
+@media(max-width:1000px){
+  /* One column, but the line NAMES have to survive: dropping them sent every table and panel into an implicit
+     second column and the whole page scrolled sideways. */
+  main.page{grid-template-columns:[wide-start] minmax(0,1fr) [text-end wide-end];padding:32px 24px 0}
+  .hero{grid-template-columns:[wide-start] minmax(0,1fr) [wide-end]}
+  .hero .col-b{margin-top:26px}
+  .mast{grid-template-columns:auto minmax(0,1fr)}
+  .shell{padding:0 24px}
 }
 td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 tbody tr:hover{background:var(--card)}
@@ -141,6 +173,22 @@ tbody tr:hover{background:var(--card)}
 .addr a,.addr button{font:600 11px/1 inherit;text-transform:uppercase;letter-spacing:.07em;color:var(--mut);
   background:none;border:1px solid var(--line);padding:6px 9px;cursor:pointer;text-decoration:none;white-space:nowrap}
 .addr a:hover,.addr button:hover{color:var(--fg);border-color:var(--fg)}
+.headline b.q{border-bottom:0}
+/* A sample of the actual output. A visitor who has never seen a record cannot tell what pasting a mint will get
+   them, and a description of a verdict is not a verdict. */
+.sample{display:block;margin:22px 0 0;padding:16px 18px;border:1px solid var(--line);background:var(--card);
+  text-decoration:none;border-left:3px solid var(--mut)}
+.sample:hover{border-color:var(--fg);border-left-color:var(--fg)}
+.sample .slab{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.09em;color:var(--mut);font-weight:700}
+.sample .sv{display:block;margin:7px 0 4px;font-family:ui-serif,Georgia,"Iowan Old Style","Times New Roman",serif;
+  font-size:21px;font-weight:600;line-height:1.15}
+.sample .sv.DANGER{color:var(--bad)}.sample .sv.OK{color:var(--ok)}
+.sample .sv.CAUTION{color:var(--warn)}.sample .sv.UNKNOWN{color:var(--mut)}
+.sample .swhy{display:block;color:var(--mut);font-size:13.5px;line-height:1.5}
+.sample .scta{display:block;margin-top:9px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut)}
+.sample:hover .scta{color:var(--fg)}
+/* Scope, next to the claim it qualifies rather than in the footer. */
+.vscope{margin:9px 0 20px;color:var(--mut);font-size:13px;line-height:1.55;max-width:70ch}
 /* Attribution. A registry that will not say who keeps it is asking for a trust it has not offered. */
 .who{margin-top:14px}
 .who b{font-weight:600;color:var(--fg)}
