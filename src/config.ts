@@ -2,10 +2,27 @@ import { readFileSync, existsSync } from "node:fs";
 
 // Minimal .env loader (no dependency). Real env vars win over the file.
 if (existsSync(".env")) {
+  // FIRST OCCURRENCE WINS, and that is worth stating out loud rather than leaving to be inferred from the condition
+  // below. A key repeated later in the file is ignored, so an EMPTY earlier line silently defeats a correct value
+  // further down: `TELEGRAM_BOT_TOKEN=` on line 26 beat a real token on line 44, and every consumer — the collector's
+  // alerts, the daily report, the freshness probe — read it as unconfigured and reported success at telling nobody.
+  //
+  // The warning below is the whole fix, and it is deliberately not a silent correction. Which duplicate is the
+  // intended one is a question only the author can answer: preferring the last would quietly change behaviour for
+  // anyone relying on the current rule, and preferring the non-empty one guesses. So the rule stays, and the
+  // collision stops being invisible. Absence must not read as configuration.
+  const seen = new Set<string>();
+  const dupes: string[] = [];
   for (const line of readFileSync(".env", "utf8").split("\n")) {
     const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*(#.*)?$/);
-    if (m && process.env[m[1]] === undefined) process.env[m[1]] = m[2].replace(/^["']|["']$/g, "");
+    if (!m) continue;
+    if (seen.has(m[1])) dupes.push(m[1]);
+    seen.add(m[1]);
+    if (process.env[m[1]] === undefined) process.env[m[1]] = m[2].replace(/^["']|["']$/g, "");
   }
+  if (dupes.length)
+    console.warn(`[config] .env defines ${[...new Set(dupes)].join(", ")} more than once. The FIRST value is used and the rest are ignored — ` +
+      `if one of them is empty and appears first, the setting is empty. Remove the duplicates.`);
 }
 
 const num = (k: string, d: number) => {
@@ -70,4 +87,15 @@ export const config = {
 
   telegramBotToken: str("TELEGRAM_BOT_TOKEN"),
   telegramChatId: str("TELEGRAM_CHAT_ID"),
+  /**
+   * Send a Telegram message for every per-token signal — operator clusters, buyouts, movements, KOL posts, buzz,
+   * paper trades. Off by default, and the default is the point.
+   *
+   * These alerts were written when this was a trading bot. That thesis is dead (0 of 19,412 curve positions ever
+   * reached 5x), so a per-token signal is now research output, not something anyone needs to act on within seconds.
+   * At ~1,300 launches an hour they arrive faster than they can be read, and an alert channel that is mostly noise
+   * is one nobody looks at — which silently disarms the system alerts sharing it. The channel's job is now: is the
+   * collector ingesting, and is the archive still being published.
+   */
+  alertSignals: str("ALERT_SIGNALS") === "1",
 };

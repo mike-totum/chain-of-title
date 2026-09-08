@@ -31,9 +31,18 @@ const tracker = new Tracker({ watchMinutes: config.watchMinutes, deadAfterSecond
 const broker = new PaperBroker(db, tracker, strategies, config);
 const botNotify = telegramNotifier(config.telegramBotToken, config.telegramChatId);
 let selfNotify: ((text: string) => void) | null = null;
+/** System alerts: the collector stopped ingesting, or started again. Always sent. */
 const notify = (text: string) => {
   botNotify(text);
   selfNotify?.(text);
+};
+/**
+ * Per-token signal alerts. Silent unless ALERT_SIGNALS=1 — see `config.alertSignals` for why the default is off.
+ * The signals are still computed, still written to the `signals` table, and still visible in the log; what stops is
+ * the interruption. Muting these is what keeps the two alerts above worth reading.
+ */
+const signalNotify = (text: string) => {
+  if (config.alertSignals) notify(text);
 };
 const trades = new TradeWriter(db);
 for (const r of db.prepare("SELECT DISTINCT creator FROM tokens WHERE graduated=1 AND creator!='' AND created_at >= ?").all(Date.now() - 7 * 86400_000) as { creator: string }[])
@@ -109,7 +118,7 @@ function noteOperator(t: TokenState, wallet: string, cluster: string, side: "buy
   } else a.solOut += sol;
   if (event) {
     log(`[cluster] ${cluster} ${event} on ${t.symbol} ${short(t.mint)} (${venue}${t.graduated ? ", graduated" : ""})`);
-    notify(`🕸 operator cluster ${cluster}: ${event}\n${t.symbol} https://pump.fun/coin/${t.mint}`);
+    signalNotify(`🕸 operator cluster ${cluster}: ${event}\n${t.symbol} https://pump.fun/coin/${t.mint}`);
     db.prepare("INSERT INTO signals (source, account, mint, symbol, kind, text, url, posted_at, seen_at) VALUES (?,?,?,?,?,?,?,?,?)").run("cluster", `cluster:${cluster}`, t.mint, t.symbol, a.buyout && event.startsWith("buyout") ? "buyout" : "amm-accumulation", `${event}; ${venue} price ${px}`, `https://pump.fun/coin/${t.mint}`, now, now);
   }
 }
@@ -189,7 +198,7 @@ function recordKolSignal(t: import("./tracker.ts").TokenState, account: string, 
     "matcher", account, t.mint, t.symbol, kind, "", url, postedAt, now,
   );
   log(`[kol] @${account} ${kind} → ${t.symbol} ${short(t.mint)} (lead ${((now - postedAt) / 60000).toFixed(1)}m)`);
-  notify(`🎯 @${account} ${kind}: ${t.symbol} launched\nhttps://pump.fun/coin/${t.mint}`);
+  signalNotify(`🎯 @${account} ${kind}: ${t.symbol} launched\nhttps://pump.fun/coin/${t.mint}`);
   broker.evaluateEntries(t, now, true);
   upsertToken(db, t);
 }
@@ -238,7 +247,7 @@ feed.on("trade", (e, now) => {
     const born = (db.prepare("SELECT created_at FROM tokens WHERE mint = ?").get(e.mint) as { created_at: number } | undefined)?.created_at;
     const ageH = born ? (now - born) / 3600_000 : null;
     log(`[buyout] ${e.solAmount.toFixed(1)} SOL took the curve of ${t.symbol} ${short(e.mint)} by ${short(e.traderPublicKey)} (${ageH === null ? "age unknown, never seen" : `dormant ${ageH.toFixed(1)} h`}, restored)`);
-    notify(`💰 curve buyout ${e.solAmount.toFixed(0)} SOL — ${t.symbol}\nwallet ${e.traderPublicKey}\nhttps://pump.fun/coin/${e.mint}`);
+    signalNotify(`💰 curve buyout ${e.solAmount.toFixed(0)} SOL — ${t.symbol}\nwallet ${e.traderPublicKey}\nhttps://pump.fun/coin/${e.mint}`);
     db.prepare("INSERT INTO signals (source, account, mint, symbol, kind, text, url, posted_at, seen_at) VALUES (?,?,?,?,?,?,?,?,?)")
       .run("buyout", `wallet:${e.traderPublicKey}`, e.mint, t.symbol, "curve-buyout", `${e.solAmount.toFixed(1)} SOL, ${ageH === null ? "age unknown" : `dormant ${ageH.toFixed(1)} h`}`, `https://pump.fun/coin/${e.mint}`, now, now);
     blindOperators.add(e.traderPublicKey);
@@ -264,7 +273,7 @@ feed.on("status", (m) => log("[feed]", m));
 
 tracker.on("preannounced", (t, k) => {
   log(`[kol] PRE-ANNOUNCED launch: ${t.symbol} ${short(t.mint)} was posted ${k}x before it existed — evaluating entry at creation`);
-  notify(`🚨 pre-announced launch: ${t.symbol} — mint was posted before launch\nhttps://pump.fun/coin/${t.mint}`);
+  signalNotify(`🚨 pre-announced launch: ${t.symbol} — mint was posted before launch\nhttps://pump.fun/coin/${t.mint}`);
   db.prepare("INSERT INTO signals (source, account, mint, symbol, kind, text, url, posted_at, seen_at) VALUES (?,?,?,?,?,?,?,?,?)").run("matcher", "pre-announced", t.mint, t.symbol, "pre-announced-mint", "", "", Date.now(), Date.now());
   broker.evaluateEntries(t, Date.now(), true);
 });
@@ -442,7 +451,7 @@ function noteMovement(tr: { pool: string; user: string; side: "buy" | "sell"; qu
     if (!t.graduated) { t.graduated = true; t.graduatedAt = t.graduatedAt ?? now; }
     t.watchCapMs = Math.max(t.watchCapMs ?? 0, 12 * 3600_000);
     log(`[movement] ${t.symbol} ${short(mint)} +${net.toFixed(0)} SOL net from ${buyers.size} buyers, ${lift.toFixed(1)}x in 5 min (top buyer ${(topShare * 100).toFixed(0)} %)`);
-    notify(`🚀 movement: ${t.symbol} ${lift.toFixed(1)}x in 5 min on +${net.toFixed(0)} SOL from ${buyers.size} buyers\nhttps://pump.fun/coin/${mint}`);
+    signalNotify(`🚀 movement: ${t.symbol} ${lift.toFixed(1)}x in 5 min on +${net.toFixed(0)} SOL from ${buyers.size} buyers\nhttps://pump.fun/coin/${mint}`);
     db.prepare("INSERT INTO signals (source, account, mint, symbol, kind, text, url, posted_at, seen_at) VALUES (?,?,?,?,?,?,?,?,?)")
       .run("movement", "amm-scan", mint, t.symbol, "amm-movement", `+${net.toFixed(1)} SOL net, ${buyers.size} buyers, ${lift.toFixed(2)}x in 5 min, top buyer ${(topShare * 100).toFixed(0)}%`, `https://pump.fun/coin/${mint}`, now, now);
     broker.evaluateEntries(t, now);
@@ -507,11 +516,11 @@ setInterval(() => {
 broker.on("open", (p, t) => {
   log(`[${p.strategy}] BUY  ${t.symbol.padEnd(8)} ${short(t.mint)} age=${((p.openedAt - t.createdAt) / 1000).toFixed(0)}s mcap=${(t.curve.vSol / t.curve.vTokens * 1e9).toFixed(1)} SOL  ${p.reason}`);
   upsertToken(db, t);
-  if (p.strategy !== "baseline-all") notify(`📈 [${p.strategy}] paper BUY ${t.symbol} (${t.name})\n${p.reason}\nhttps://pump.fun/coin/${t.mint}`);
+  if (p.strategy !== "baseline-all") signalNotify(`📈 [${p.strategy}] paper BUY ${t.symbol} (${t.name})\n${p.reason}\nhttps://pump.fun/coin/${t.mint}`);
 });
 broker.on("partial", (p, t, x) => {
   log(`[${p.strategy}] BANK ${t.symbol.padEnd(8)} ${short(t.mint)} half out at ${fmtX(x.multiple)} (+${x.solOut.toFixed(4)} SOL realised), rest rides on flow`);
-  notify(`💰 [${p.strategy}] banked half of ${t.symbol} at ${fmtX(x.multiple)}`);
+  signalNotify(`💰 [${p.strategy}] banked half of ${t.symbol} at ${fmtX(x.multiple)}`);
 });
 broker.on("close", (p, t, x) => {
   const r = realized.get(p.strategy)!;
@@ -522,7 +531,7 @@ broker.on("close", (p, t, x) => {
   }
   log(`[${p.strategy}] SELL ${t.symbol.padEnd(8)} ${short(t.mint)} ${fmtX(x.multiple)} pnl=${x.pnl >= 0 ? "+" : ""}${x.pnl.toFixed(4)} SOL  ${x.reason}  held=${((Date.now() - p.openedAt) / 1000).toFixed(0)}s`);
   upsertToken(db, t);
-  if (p.strategy !== "baseline-all") notify(`${x.pnl >= 0 ? "✅" : "❌"} [${p.strategy}] paper SELL ${t.symbol} ${fmtX(x.multiple)} (${x.reason})`);
+  if (p.strategy !== "baseline-all") signalNotify(`${x.pnl >= 0 ? "✅" : "❌"} [${p.strategy}] paper SELL ${t.symbol} ${fmtX(x.multiple)} (${x.reason})`);
 });
 
 // ---------- KOL twitter watcher ----------
@@ -554,7 +563,7 @@ function handleSignal(sourceName: string, s: KolSignal): void {
     sourceName, s.account, mint, symbol, s.kind, s.text.slice(0, 500), s.url, s.postedAt, now,
   );
   log(`[${sourceName}] ${s.account} ${s.kind} ${mint ? short(mint) : "$" + symbol} ${mint ? "" : "(no launch yet — will buy a matching launch within 6h)"}`);
-  notify(`🐦 ${s.account} posted ${s.kind}: ${mint ?? "$" + symbol}\n${s.url}`);
+  signalNotify(`🐦 ${s.account} posted ${s.kind}: ${mint ?? "$" + symbol}\n${s.url}`);
   if (!mint) {
     if (symbol) expectations.set(symbol, { account: s.account, url: s.url, postedAt: s.postedAt });
     return;
@@ -614,7 +623,7 @@ if (provider?.search && config.xListenQueries.length) {
         b.term, b.kind, b.authors, b.mentions, b.followers, b.priorMentionsPerWindow, matched, b.sampleUrl, b.sampleText.slice(0, 500), now,
       );
       log(`[buzz] ${b.kind === "cashtag" ? "$" : "#"}${b.term}: ${b.mentions} mentions by ${b.authors} accounts in 10m (baseline ${b.priorMentionsPerWindow.toFixed(1)}/10m)${matched ? ` → matches launch ${short(matched)}` : " → no launch yet, watching for one"}`);
-      notify(`📣 buzz ${b.kind === "cashtag" ? "$" : "#"}${b.term}: ${b.mentions} mentions / ${b.authors} accounts in 10m${matched ? ` — token exists https://pump.fun/coin/${matched}` : " — no token yet"}\n${b.sampleUrl}`);
+      signalNotify(`📣 buzz ${b.kind === "cashtag" ? "$" : "#"}${b.term}: ${b.mentions} mentions / ${b.authors} accounts in 10m${matched ? ` — token exists https://pump.fun/coin/${matched}` : " — no token yet"}\n${b.sampleUrl}`);
       if (b.kind === "cashtag") handleSignal("x-buzz", { account: "x-buzz", kind: "cashtag", mint: matched, symbol: b.term, text: b.sampleText, url: b.sampleUrl, postedAt: now });
     }
   }, 60_000);
