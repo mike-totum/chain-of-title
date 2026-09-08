@@ -98,6 +98,11 @@ export function verdictLine(p: Profile): string | null {
     return `This wallet has taken ${n} bonding curve${n > 1 ? "s" : ""} outright (${p.curveSol.toFixed(0)} SOL) and sold ${p.ammSell.toFixed(0)} SOL into buyers on the open market while buying back only ${p.ammBuy.toFixed(1)}. It distributes; it does not hold.`;
   if (p.ammSell >= 20 && ratio >= 1.2)
     return `This wallet has taken ${n} bonding curve${n > 1 ? "s" : ""} and is a net seller on the open market (${p.ammSell.toFixed(0)} SOL out against ${p.ammBuy.toFixed(0)} in).`;
+  // Zero in and zero out is an absence of data, not a measured neutral, and it must not read as one: most
+  // graduations have no market trades on our record at all, so "not yet a net seller (0 SOL in, 0 out)" was
+  // reporting silence as a finding.
+  if (p.ammBuy === 0 && p.ammSell === 0)
+    return `This wallet has taken ${n} bonding curve${n > 1 ? "s" : ""} outright (${p.curveSol.toFixed(0)} SOL). We hold no market trades for it in either direction, so what it did with the tokens afterwards is not on our record.`;
   return `This wallet has taken ${n} bonding curve${n > 1 ? "s" : ""} outright (${p.curveSol.toFixed(0)} SOL). It is not yet a net seller in our data (${p.ammBuy.toFixed(0)} SOL in, ${p.ammSell.toFixed(0)} out).`;
 }
 
