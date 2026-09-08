@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import type { CreateEvent, TradeEvent } from "./feed/pumpportal.ts";
 import { TOTAL_SUPPLY, isGraduated, price, type Curve } from "./curve.ts";
+import { fetchContent } from "./ipfs.ts";
 
 export const CHECKPOINTS_S = [60, 300, 900, 3600] as const;
 export type CheckpointKey = (typeof CHECKPOINTS_S)[number];
@@ -496,12 +497,22 @@ export class Tracker extends EventEmitter {
   }
 }
 
-/** Fetch token metadata JSON (socials) with a short timeout. Never throws. */
+/**
+ * Fetch a launch's declared metadata. Never throws; returns null only when nobody would serve it.
+ *
+ * Was a single request to the URL as declared, with a 4-second timeout. Every pump.fun launch declares `ipfs.io`,
+ * `ipfs.io` returns 429 to us in about 50 ms, and one refused request meant the launch's own account of itself was
+ * lost — 27% captured out of a day's 28,488, with a URI in hand for 99.5%. It reads as "we never looked" because
+ * nothing was written down either way.
+ *
+ * Now goes through `fetchContent`, which asks the same CID of whichever gateway will serve it. The image and the
+ * description are the only facts here that cannot be recovered later: the chain keeps its own history, but the
+ * launch's picture and words live behind a URI its creator can repoint at any time.
+ */
 export async function fetchMeta(uri: string): Promise<TokenMeta | null> {
-  if (!uri || !/^https?:/.test(uri)) return null;
+  const { res } = await fetchContent(uri, 8000);
+  if (!res) return null;
   try {
-    const res = await fetch(uri, { signal: AbortSignal.timeout(4000) });
-    if (!res.ok) return null;
     const j: any = await res.json();
     const pick = (k: string) => (typeof j?.[k] === "string" && j[k] ? j[k] : undefined);
     return {

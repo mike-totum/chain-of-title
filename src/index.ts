@@ -783,6 +783,49 @@ setInterval(() => {
  * Only working data goes; tokens, signals, operator_*, pool_map and buyout-sized curve buys are the archive and are
  * never touched. That last clause was missing and the sentence was false for as long as it was: see KEEP_EVIDENCE.
  */
+/**
+ * Go back for the launches whose metadata we failed to fetch the first time.
+ *
+ * A launch is asked for its metadata once, as it happens. When that request failed — and until 2026-09-08 it failed
+ * about three times in four, because every launch declares `ipfs.io` and `ipfs.io` returns 429 to us — nothing tried
+ * again and nothing was written down, so the row reads exactly like a launch that declared no metadata at all.
+ *
+ * This is the only loss here that a cheque cannot undo. On-chain history sits on the chain and an archival node will
+ * sell it back whenever someone pays. The image and the description live behind a URI the creator controls, and the
+ * window to fetch them closes quietly when they repoint or unpin it — no error, no event, just a document that used
+ * to be there. Roughly twenty thousand launches a day were falling through that window.
+ *
+ * Newest first, because a pin that is going to disappear usually disappears early, and because a launch nobody has
+ * asked about yet is still worth more than one from last week. Small batches on a slow timer: the obligation this
+ * process has is to keep watching the chain, and a sweep for old pictures must never compete with it.
+ */
+const META_SWEEP_BATCH = Number(process.env.META_SWEEP_BATCH ?? 25);
+async function sweepMissingMeta(): Promise<void> {
+  try {
+    const rows = db.prepare(`SELECT mint, uri FROM tokens
+      WHERE meta_at IS NULL AND uri IS NOT NULL AND uri != '' AND created_at > ?
+      ORDER BY created_at DESC LIMIT ?`).all(Date.now() - 3 * 86400_000, META_SWEEP_BATCH) as { mint: string; uri: string }[];
+    if (!rows.length) return;
+    let got = 0;
+    for (const r of rows) {
+      const meta = await fetchMeta(r.uri);
+      if (!meta) continue;
+      // Straight to the row: these tokens are long finalized and are not in the tracker any more. Written with the
+      // same keep-first rule as everywhere else, so a later fetch can never overwrite the launch's original claim.
+      db.prepare(`UPDATE tokens SET
+        image = COALESCE(image, ?), description = COALESCE(description, ?),
+        twitter = COALESCE(twitter, ?), telegram = COALESCE(telegram, ?), website = COALESCE(website, ?),
+        meta_at = COALESCE(meta_at, ?) WHERE mint = ?`)
+        .run(meta.image ?? null, meta.description ?? null, meta.twitter ?? null, meta.telegram ?? null,
+             meta.website ?? null, Date.now(), r.mint);
+      got++;
+    }
+    if (got) log(`[meta] recovered ${got}/${rows.length} launch claims that the first attempt missed`);
+  } catch (e) { log("[meta] sweep failed:", (e as Error).message); }
+}
+setInterval(() => void sweepMissingMeta(), 60_000);
+setTimeout(() => void sweepMissingMeta(), 90_000);
+
 const RETENTION_DAYS = Number(process.env.RETENTION_DAYS || 14);
 /**
  * A curve buy large enough to be a buyout is EVIDENCE, not working data, and retention must never take it.

@@ -27,6 +27,7 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { config } from "./config.ts";
 import { openDb } from "./db.ts";
+import { fetchContent } from "./ipfs.ts";
 
 const arg = (k: string, d: string) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : d; };
 const LIMIT = Number(arg("--limit", "500"));
@@ -66,8 +67,10 @@ let ok = 0, skipped = 0, errored = 0, bytes = 0, reused = 0;
 
 async function one(mint: string, url: string): Promise<void> {
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "follow" });
-    if (!res.ok) { failed.run(`http ${res.status}`, Date.now(), mint); errored++; return; }
+    // Through the gateway rotation, not the declared host: every launch declares ipfs.io and ipfs.io refuses us.
+    // The CID is the address; the hostname is only a way of reaching it, so the same bytes come from whoever answers.
+    const { res, error } = await fetchContent(url, TIMEOUT_MS);
+    if (!res) { failed.run(error ?? "unreachable", Date.now(), mint); errored++; return; }
     const type = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
     const len = Number(res.headers.get("content-length") ?? 0);
     if (len > MAX_BYTES) { failed.run(`too large: ${len}`, Date.now(), mint); skipped++; return; }
