@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Chain of Title — a public archive of launch-time provenance for Solana tokens",
+  "description": "Chain of Title \u2014 a public archive of launch-time provenance for Solana tokens",
   "scripts": {
     "start": "tsx --no-warnings=ExperimentalWarning src/index.ts",
     "report": "tsx --no-warnings=ExperimentalWarning src/report.ts",
@@ -49,7 +49,9 @@
     "servicedb": "tsx --no-warnings=ExperimentalWarning src/servicedb.ts",
     "preflight": "sh scripts/preflight.sh",
     "smoke": "sh scripts/smoke.sh",
-    "repair": "tsx --no-warnings=ExperimentalWarning src/repair.ts"
+    "repair": "tsx --no-warnings=ExperimentalWarning src/repair.ts",
+    "freshness": "sh scripts/freshness.sh",
+    "refresh": "npm run servicedb && npm run preflight && railway up"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
