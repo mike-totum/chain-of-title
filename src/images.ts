@@ -25,15 +25,12 @@
 import { mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
+import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
+import type { DatabaseSync } from "node:sqlite";
 import { config } from "./config.ts";
 import { openDb } from "./db.ts";
 import { fetchContent } from "./ipfs.ts";
-
-const arg = (k: string, d: string) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : d; };
-const LIMIT = Number(arg("--limit", "500"));
-const CONCURRENCY = Number(arg("--concurrency", "6"));
-const ALL = process.argv.includes("--all");
-const DIR = arg("--dir", "data/images");
 
 /** Bigger than this is not a token icon, and we are not a CDN. Skipped and recorded as skipped, never retried blindly. */
 const MAX_BYTES = 5 * 1024 * 1024;
@@ -44,77 +41,112 @@ const EXT: Record<string, string> = {
   "image/webp": "webp", "image/svg+xml": "svg", "image/avif": "avif",
 };
 
-const db = openDb(config.dbPath);
-for (const c of ["image_sha256 TEXT", "image_bytes INTEGER", "image_at INTEGER", "image_error TEXT"])
-  try { db.exec(`ALTER TABLE tokens ADD COLUMN ${c}`); } catch {}
+export type CaptureStats = { attempted: number; kept: number; skipped: number; failed: number; bytes: number; reused: number };
 
 /**
- * A gateway URL is a way of reaching the bytes, not the bytes. Normalising to a gateway we can actually reach matters
- * less than recording what we tried, so the URL is used as declared and any failure is written down rather than
- * retried forever: `image_error` is how a permanently dead pin stops costing a request on every run.
+ * Capture the pending launch images into `dir`, recording the sha256 on each row.
+ *
+ * Takes an open database rather than opening its own, because the collector now calls this in-process on a timer.
+ * That is a change from the original design note above, and the reason is the one this whole file is about: as a
+ * separate laptop job it stopped the moment the lid closed, and this is the only thing the project collects that
+ * cannot be rebuilt from chain afterwards. A second PROCESS writing the collector's database is what must not
+ * happen — a multi-second write transaction against a 10 s busy_timeout costs dropped launches — but sharing the
+ * collector's own handle has no contention to lose: the writes below are single-row UPDATEs, serialised with
+ * ingestion by the same connection, and everything slow here is awaited network I/O that blocks nothing.
+ *
+ * Still bounded on purpose: `limit` rows per call and `concurrency` in flight, so a run of dead gateways costs a
+ * bounded number of open sockets and never a stalled collector.
  */
-const pending = db.prepare(`
-  SELECT mint, image FROM tokens
-   WHERE image IS NOT NULL AND image != ''
-     AND image_sha256 IS NULL AND image_error IS NULL
-     ${ALL ? "" : "AND graduated = 1"}
-   ORDER BY created_at DESC LIMIT ?`).all(LIMIT) as { mint: string; image: string }[];
+export async function captureImages(
+  db: DatabaseSync,
+  opts: { dir: string; limit: number; concurrency: number; all?: boolean; log?: (s: string) => void } =
+    { dir: "data/images", limit: 500, concurrency: 6 },
+): Promise<CaptureStats> {
+  const log = opts.log ?? ((s: string) => console.log(s));
+  for (const c of ["image_sha256 TEXT", "image_bytes INTEGER", "image_at INTEGER", "image_error TEXT"])
+    try { db.exec(`ALTER TABLE tokens ADD COLUMN ${c}`); } catch {}
 
-const done = db.prepare("UPDATE tokens SET image_sha256=?, image_bytes=?, image_at=? WHERE mint=?");
-const failed = db.prepare("UPDATE tokens SET image_error=?, image_at=? WHERE mint=?");
+  /**
+   * A gateway URL is a way of reaching the bytes, not the bytes. Normalising to a gateway we can actually reach
+   * matters less than recording what we tried, so the URL is used as declared and any failure is written down rather
+   * than retried forever: `image_error` is how a permanently dead pin stops costing a request on every run.
+   */
+  const pending = db.prepare(`
+    SELECT mint, image FROM tokens
+     WHERE image IS NOT NULL AND image != ''
+       AND image_sha256 IS NULL AND image_error IS NULL
+       ${opts.all ? "" : "AND graduated = 1"}
+     ORDER BY created_at DESC LIMIT ?`).all(opts.limit) as { mint: string; image: string }[];
 
-let ok = 0, skipped = 0, errored = 0, bytes = 0, reused = 0;
+  const st: CaptureStats = { attempted: pending.length, kept: 0, skipped: 0, failed: 0, bytes: 0, reused: 0 };
+  if (pending.length === 0) return st;
 
-async function one(mint: string, url: string): Promise<void> {
-  try {
-    // Through the gateway rotation, not the declared host: every launch declares ipfs.io and ipfs.io refuses us.
-    // The CID is the address; the hostname is only a way of reaching it, so the same bytes come from whoever answers.
-    const { res, error } = await fetchContent(url, TIMEOUT_MS);
-    if (!res) { failed.run(error ?? "unreachable", Date.now(), mint); errored++; return; }
-    const type = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
-    const len = Number(res.headers.get("content-length") ?? 0);
-    if (len > MAX_BYTES) { failed.run(`too large: ${len}`, Date.now(), mint); skipped++; return; }
-    const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.length === 0) { failed.run("empty body", Date.now(), mint); errored++; return; }
-    if (buf.length > MAX_BYTES) { failed.run(`too large: ${buf.length}`, Date.now(), mint); skipped++; return; }
+  const done = db.prepare("UPDATE tokens SET image_sha256=?, image_bytes=?, image_at=? WHERE mint=?");
+  const failed = db.prepare("UPDATE tokens SET image_error=?, image_at=? WHERE mint=?");
 
-    const sha = createHash("sha256").update(buf).digest("hex");
-    // Content-addressed, two-character fan-out: many launches reuse the same picture, and this stores it once.
-    const sub = join(DIR, sha.slice(0, 2));
-    const ext = EXT[type] ?? "bin";
-    const path = join(sub, `${sha}.${ext}`);
-    if (existsSync(path)) reused++;
-    else { mkdirSync(sub, { recursive: true }); writeFileSync(path, buf); }
-    done.run(sha, buf.length, Date.now(), mint);
-    ok++; bytes += buf.length;
-  } catch (e: any) {
-    // Recorded, not swallowed. A row with image_error and no sha is "we tried and could not", which is a different
-    // statement from "no image", and neither is "the launch had none".
-    failed.run(String(e?.name === "TimeoutError" ? "timeout" : e?.message ?? e).slice(0, 120), Date.now(), mint);
-    errored++;
-  }
+  const one = async (mint: string, url: string): Promise<void> => {
+    try {
+      // Through the gateway rotation, not the declared host: every launch declares ipfs.io and ipfs.io refuses us.
+      // The CID is the address; the hostname is only a way of reaching it, so the same bytes come from whoever answers.
+      const { res, error } = await fetchContent(url, TIMEOUT_MS);
+      if (!res) { failed.run(error ?? "unreachable", Date.now(), mint); st.failed++; return; }
+      const type = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+      const len = Number(res.headers.get("content-length") ?? 0);
+      if (len > MAX_BYTES) { failed.run(`too large: ${len}`, Date.now(), mint); st.skipped++; return; }
+      const buf = Buffer.from(await res.arrayBuffer());
+      if (buf.length === 0) { failed.run("empty body", Date.now(), mint); st.failed++; return; }
+      if (buf.length > MAX_BYTES) { failed.run(`too large: ${buf.length}`, Date.now(), mint); st.skipped++; return; }
+
+      const sha = createHash("sha256").update(buf).digest("hex");
+      // Content-addressed, two-character fan-out: many launches reuse the same picture, and this stores it once.
+      const sub = join(opts.dir, sha.slice(0, 2));
+      const ext = EXT[type] ?? "bin";
+      const path = join(sub, `${sha}.${ext}`);
+      if (existsSync(path)) st.reused++;
+      else { mkdirSync(sub, { recursive: true }); writeFileSync(path, buf); }
+      done.run(sha, buf.length, Date.now(), mint);
+      st.kept++; st.bytes += buf.length;
+    } catch (e: any) {
+      // Recorded, not swallowed. A row with image_error and no sha is "we tried and could not", which is a different
+      // statement from "no image", and neither is "the launch had none".
+      failed.run(String(e?.name === "TimeoutError" ? "timeout" : e?.message ?? e).slice(0, 120), Date.now(), mint);
+      st.failed++;
+    }
+  };
+
+  mkdirSync(opts.dir, { recursive: true });
+  log(`fetching ${pending.length} launch image${pending.length === 1 ? "" : "s"}${opts.all ? " (all launches)" : " (graduated only)"}…`);
+  let cursor = 0;
+  await Promise.all(Array.from({ length: opts.concurrency }, async () => {
+    for (;;) {
+      const i = cursor++;
+      if (i >= pending.length) return;
+      await one(pending[i].mint, pending[i].image);
+    }
+  }));
+  return st;
 }
 
-if (pending.length === 0) {
-  console.log("nothing to fetch: every candidate launch already has its image or a recorded failure");
-  process.exit(0);
-}
-
-mkdirSync(DIR, { recursive: true });
-console.log(`fetching ${pending.length} launch image${pending.length === 1 ? "" : "s"}${ALL ? " (all launches)" : " (graduated only)"}…`);
-
-let cursor = 0;
-await Promise.all(Array.from({ length: CONCURRENCY }, async () => {
-  for (;;) {
-    const i = cursor++;
-    if (i >= pending.length) return;
-    await one(pending[i].mint, pending[i].image);
+// ---------- CLI ----------
+// Only when run directly. Importing this module must not start fetching, now that the collector imports it.
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const arg = (k: string, d: string) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : d; };
+  const DIR = arg("--dir", "data/images");
+  const db = openDb(config.dbPath);
+  const st = await captureImages(db, {
+    dir: DIR,
+    limit: Number(arg("--limit", "500")),
+    concurrency: Number(arg("--concurrency", "6")),
+    all: process.argv.includes("--all"),
+  });
+  if (st.attempted === 0) {
+    console.log("nothing to fetch: every candidate launch already has its image or a recorded failure");
+    process.exit(0);
   }
-}));
-
-const held = (db.prepare("SELECT COUNT(*) c FROM tokens WHERE image_sha256 IS NOT NULL").get() as any).c;
-const distinct = (db.prepare("SELECT COUNT(DISTINCT image_sha256) c FROM tokens WHERE image_sha256 IS NOT NULL").get() as any).c;
-console.log(`  kept ${ok}  (${(bytes / 1048576).toFixed(1)} MB this run, ${reused} already on disk)`);
-console.log(`  skipped ${skipped}, failed ${errored}`);
-console.log(`  archive now holds images for ${held.toLocaleString()} launches, ${distinct.toLocaleString()} distinct pictures`);
-console.log(`\nThe record database carries the sha256, never the bytes. Files live in ${DIR}/<first two hex>/<sha256>.<ext>.`);
+  const held = (db.prepare("SELECT COUNT(*) c FROM tokens WHERE image_sha256 IS NOT NULL").get() as any).c;
+  const distinct = (db.prepare("SELECT COUNT(DISTINCT image_sha256) c FROM tokens WHERE image_sha256 IS NOT NULL").get() as any).c;
+  console.log(`  kept ${st.kept}  (${(st.bytes / 1048576).toFixed(1)} MB this run, ${st.reused} already on disk)`);
+  console.log(`  skipped ${st.skipped}, failed ${st.failed}`);
+  console.log(`  archive now holds images for ${held.toLocaleString()} launches, ${distinct.toLocaleString()} distinct pictures`);
+  console.log(`\nThe record database carries the sha256, never the bytes. Files live in ${DIR}/<first two hex>/<sha256>.<ext>.`);
+}

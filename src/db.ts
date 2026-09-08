@@ -184,6 +184,20 @@ export function openDb(path: string): DatabaseSync {
   try { db.exec("ALTER TABLE tokens ADD COLUMN description TEXT"); } catch {}
   try { db.exec("ALTER TABLE tokens ADD COLUMN meta_at INTEGER"); } catch {}
   /**
+   * The picture itself, or rather the proof of it. These existed only on the laptop, added by `images.ts` outside
+   * `openDb`, which meant no cloud collector had them and no record built in the cloud could ever carry image
+   * evidence — the one thing this project collects that cannot be rebuilt from chain at any price. Declared here so
+   * every database that `openDb` touches has the same shape.
+   *
+   * `image_sha256` present means we hold those bytes. `image_error` present means we tried and could not, which is a
+   * different statement from "the launch declared no image" (that is `image IS NULL` with a `meta_at`), and both are
+   * different from never having looked. Three states, three representations, on purpose.
+   */
+  try { db.exec("ALTER TABLE tokens ADD COLUMN image_sha256 TEXT"); } catch {}
+  try { db.exec("ALTER TABLE tokens ADD COLUMN image_bytes INTEGER"); } catch {}
+  try { db.exec("ALTER TABLE tokens ADD COLUMN image_at INTEGER"); } catch {}
+  try { db.exec("ALTER TABLE tokens ADD COLUMN image_error TEXT"); } catch {}
+  /**
    * Backfill from evidence already on the row. This is not a guess about history: every one of these rows has a pool
    * address we observed, and that observation is what confirmation means. Rows without one stay NULL — unconfirmed,
    * which is the honest state and the one the flag logic must now require against.

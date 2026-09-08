@@ -82,7 +82,12 @@ db.exec(`
     -- What the token claimed to be at launch. The only fields in this file that cannot be rebuilt from chain by
     -- anyone willing to pay for archival RPC: they live behind a URI the creator controls and vanish when it is
     -- repointed or unpinned. meta_at distinguishes "declared none" from "we never looked". See db.ts.
-    uri TEXT, image TEXT, description TEXT, meta_at INTEGER
+    uri TEXT, image TEXT, description TEXT, meta_at INTEGER,
+    -- The proof of the picture, never the picture. A sha256 is 64 bytes and lets anyone verify that a copy of an
+    -- image is the one we saw; the bytes average a few hundred KB and would inflate a 334-bytes-per-launch archive
+    -- by four orders of magnitude, destroying the property that makes it mirrorable. The files travel separately.
+    -- image_error is deliberately NOT carried: it describes our fetch, not the launch.
+    image_sha256 TEXT, image_bytes INTEGER, image_at INTEGER
   );
   CREATE INDEX IF NOT EXISTS rec.tokens_created ON tokens(created_at);
   CREATE INDEX IF NOT EXISTS rec.tokens_creator ON tokens(creator);
@@ -154,7 +159,8 @@ try { db.exec("UPDATE rec.tokens SET graduated_confirmed_by = 'pool' WHERE gradu
  * The launch claim: what the token said it was. Four columns, two different backfill answers, and the difference is
  * the whole point of stating them separately.
  */
-for (const c of ["uri TEXT", "image TEXT", "description TEXT", "meta_at INTEGER"])
+for (const c of ["uri TEXT", "image TEXT", "description TEXT", "meta_at INTEGER",
+                 "image_sha256 TEXT", "image_bytes INTEGER", "image_at INTEGER"])
   try { db.exec(`ALTER TABLE rec.tokens ADD COLUMN ${c}`); } catch {}
 /**
  * `uri` gets a real backfill, because the collector has held it all along: 154,000 of 157,000 launches. Without this
@@ -193,7 +199,9 @@ try {
            -- observed is confirmation, so upgrade on the way through rather than losing it.
            COALESCE(graduated_confirmed_by, CASE WHEN graduated = 1 AND pool IS NOT NULL THEN 'pool' END),
            -- The launch claim, carried verbatim. Never re-derived: a later read of the URI is not what it said then.
-           uri, image, description, meta_at
+           uri, image, description, meta_at,
+           -- Last again, and appended in the same order as the ALTER above: this is a positional INSERT ... SELECT.
+           image_sha256, image_bytes, image_at
     FROM main.tokens WHERE COALESCE(updated_at, 0) >= ${since}
       -- The quote asset is not a launch. Wrapped SOL was copied into the record as one and served as a token page.
       AND main.tokens.mint NOT IN ('So11111111111111111111111111111111111111112',

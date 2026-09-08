@@ -990,6 +990,49 @@ if (process.env.SITE_WATCH !== "0") {
 startHeartbeat(process.env.HEARTBEAT_URL ?? "", 5 * 60_000, "collector");
 
 /**
+ * Keep the launch images, here, because the laptop cannot be the thing that keeps them.
+ *
+ * Every other fact this project publishes can be rebuilt from chain by anyone with archival RPC. The picture cannot:
+ * it lives on IPFS behind a pin the operator can drop, and when it goes there is no price at which it comes back. It
+ * was an hourly launchd job on one machine, which means it stopped whenever that machine slept — collecting the one
+ * unrecoverable thing on the least reliable schedule in the system.
+ *
+ * In-process rather than a child process. `images.ts` argues for a separate job so slow gateways cannot stall the
+ * collector, and that reasoning holds against a second WRITER on the same database file, which is what would cost
+ * dropped launches. Sharing this connection has no such race: the writes are single-row UPDATEs serialised with
+ * ingestion, and the slow part is awaited network I/O, which blocks nothing.
+ *
+ * Bounded so a bad hour stays bounded: `IMAGES_LIMIT` rows per pass at `IMAGES_CONCURRENCY` in flight, every
+ * `IMAGES_EVERY_MINUTES`. Default scope is graduated launches (~1,400/day) rather than all ~24,000, which is what
+ * makes the storage arithmetic survivable — see the note in images.ts. Bytes go next to the database on the volume.
+ */
+if (process.env.IMAGES_CAPTURE === "1") {
+  const IMAGES_DIR = process.env.IMAGES_DIR ?? (config.dbPath.replace(/[^/]*$/, "") + "images");
+  const IMAGES_EVERY_MS = Number(process.env.IMAGES_EVERY_MINUTES ?? 20) * 60_000;
+  const IMAGES_LIMIT = Number(process.env.IMAGES_LIMIT ?? 300);
+  const IMAGES_CONCURRENCY = Number(process.env.IMAGES_CONCURRENCY ?? 4);
+  let capturing = false;
+  const capture = async () => {
+    if (capturing) return;
+    capturing = true;
+    try {
+      const { captureImages } = await import("./images.ts");
+      const st = await captureImages(db, {
+        dir: IMAGES_DIR, limit: IMAGES_LIMIT, concurrency: IMAGES_CONCURRENCY, log: () => {},
+      });
+      if (st.attempted > 0)
+        log(`[images] kept ${st.kept} (${(st.bytes / 1048576).toFixed(1)} MB, ${st.reused} already held), ` +
+          `skipped ${st.skipped}, failed ${st.failed}, of ${st.attempted} pending → ${IMAGES_DIR}`);
+    } catch (e) {
+      // Never fatal. Losing images is bad; losing ingestion is worse, and this runs in the ingesting process.
+      log(`[images] capture failed: ${(e as Error).message}`);
+    } finally { capturing = false; }
+  };
+  setTimeout(() => void capture(), 90_000);   // after the feeds are up, not competing with them for the boot
+  setInterval(() => void capture(), IMAGES_EVERY_MS);
+}
+
+/**
  * Hand the record to the web service. Private network only in normal operation — Railway routes
  * `collector.railway.internal` between services without exposing anything publicly.
  */
