@@ -116,6 +116,11 @@ const REFRESH_MS = Number(process.env.RECORD_REFRESH_HOURS ?? 6) * 3600_000;
  */
 const HEALTH_URL = process.env.COLLECTOR_HEALTH_URL || (RECORD_URL ? RECORD_URL.replace(/\/record\.db$/, "/health") : "");
 const LIVE_MAX_AGE_MS = 60_000;
+/**
+ * Ask the collector about one launch this file does not hold. Same host as the counter, so there is one address for
+ * the collector and no way to point them at different services.
+ */
+const LAUNCH_URL = HEALTH_URL ? HEALTH_URL.replace(/\/health$/, "/launch/") : "";
 let live: { observed: number; held: number; at: number } | null = null;
 /**
  * Why the last poll produced nothing. The page renders the same either way — no counter — but "the collector is
@@ -495,8 +500,15 @@ type TokenRead = { a: Assessment; reading: Reading | null; origin: "observed" | 
  * fail-closed. It means a stretch of RPC trouble downgrades good tokens to "not certified" (UNKNOWN), which is a cost
  * we accept — the opposite error, certifying on a balance we could not confirm, is the one that ends the project.
  */
-async function readRecord(t: any, judgeable: boolean): Promise<TokenRead> {
-  const a = assess(db, t, covered);
+async function readRecord(t: any, judgeable: boolean, precomputed?: any): Promise<TokenRead> {
+  /**
+   * `precomputed` is an assessment the collector made about its own data. It is used as given rather than recomputed
+   * here, because recomputing it is not possible: the trade rows behind a buyout and the run intervals proving we
+   * were watching live on the collector, and this service reads a file built hours ago. Judging the row here would
+   * miss a buyout it cannot see and call a launch uncovered because the record's last run ended when the file was
+   * built. Same `assess` from `provenance.ts` either way; only the database under it differs.
+   */
+  const a = precomputed ?? assess(db, t, covered);
   // `assess` already treats a complete rebuild as judgeable; the flag only decides how the record describes its source.
   const rebuilt = !!t.rebuilt_at && !!t.rebuilt_complete;
   let reading: Reading | null = judgeable && t.vault_sol != null && t.vault_at != null ? { sol: t.vault_sol, at: t.vault_at, fresh: false } : null;
@@ -510,8 +522,8 @@ async function readRecord(t: any, judgeable: boolean): Promise<TokenRead> {
   return { a, reading, origin: rebuilt ? "rebuilt" : "observed", clean };
 }
 
-async function renderToken(t: any, judgeable: boolean): Promise<string> {
-  const r = await readRecord(t, judgeable);
+async function renderToken(t: any, judgeable: boolean, precomputed?: any): Promise<string> {
+  const r = await readRecord(t, judgeable, precomputed);
   const pv = tokenPreview(t, r.a, r.clean);
   return page(pv.title, tokenBody(t, r.a, r.reading, r.origin, r.clean, Date.now()), chrome, 1, pv.summary,
     `/t/${t.mint}.html`);
@@ -530,7 +542,7 @@ async function renderToken(t: any, judgeable: boolean): Promise<string> {
  * more conventional ones in API_STATUS.
  */
 type Decision =
-  | { kind: "record"; t: any; judgeable: boolean }
+  | { kind: "record"; t: any; judgeable: boolean; precomputed?: any }
   | { kind: "rebuilding"; job: Job }
   | { kind: "unknown"; code: string; why: string; htmlStatus: number };
 
@@ -541,6 +553,36 @@ async function decide(mint: string, ip: string): Promise<Decision> {
   // could do for them — rebuild the launch from chain — was never attempted.
   const judgeable = !!t && (!!t.rebuilt_complete || (!t.late_discovery && covered(t.created_at)));
   if (judgeable) return { kind: "record", t, judgeable: true };
+
+  /**
+   * Before reconstructing a launch from chain, ask the machine that watched it.
+   *
+   * The record file is rebuilt every six hours, so a launch from the last few hours is simply not in it — and the
+   * service answered "we have no record of this launch" and started reading its entire bonding-curve history back
+   * off the chain. About a launch the collector observed live, from the creation transaction, and still holds.
+   *
+   * That is this product disclaiming the one thing it has. A cold scanner can read the chain too; being there at
+   * birth is the whole claim, and it was being denied during the only window when anybody asks — the first hours,
+   * when the token is new and the question is live.
+   *
+   * A rebuild is also strictly worse evidence. `rebuilt_complete` exists precisely to mark reconstruction as a
+   * weaker class than observation, it costs thousands of RPC reads, and it is rate limited to a handful per visitor
+   * per hour. Spending that to recover something we already have was not a trade-off anyone chose; it fell out of
+   * a lookup inheriting a bulk file's cadence.
+   *
+   * Short timeout, failure falls through to exactly what happened before: the collector being unreachable must
+   * never be worse than not having asked.
+   */
+  if (LAUNCH_URL && !t) {
+    try {
+      const r = await fetch(LAUNCH_URL + mint, { signal: AbortSignal.timeout(2500) });
+      if (r.ok) {
+        const live = (await r.json()) as any;
+        if (live?.held && live.observed && live.t && live.a)
+          return { kind: "record", t: live.t, judgeable: true, precomputed: live.a };
+      }
+    } catch { /* fall through to the rebuild path below, which is what this service did before */ }
+  }
 
   // An existing job is reported without spending anything, so a poll or a reload is always free.
   const j = jobs.get(mint);
@@ -845,8 +887,11 @@ const server = createServer(async (req, res) => {
         const mint = tj[1];
         const d = await decide(mint, clientIp(req));
         if (d.kind === "record") {
-          const r = await readRecord(d.t, d.judgeable);
-          return j(200, tokenRecord(d.t, r.a, r.reading, r.origin, r.clean, COV), d.judgeable ? "immutable" : "none");
+          const r = await readRecord(d.t, d.judgeable, d.precomputed);
+          // A live answer must never be cached as immutable: it describes a launch still moving, and the next
+          // question about it deserves the collector's current view rather than this second's.
+          return j(200, tokenRecord(d.t, r.a, r.reading, r.origin, r.clean, COV),
+            d.precomputed ? "short" : d.judgeable ? "immutable" : "none");
         }
         if (d.kind === "rebuilding")
           // 202: we have accepted the work and there is no answer yet. Poll the same URL; a finished rebuild is
@@ -939,7 +984,9 @@ const server = createServer(async (req, res) => {
       const mint = m[1];
       const d = await decide(mint, clientIp(req));
       if (d.kind === "record")
-        return send(200, await renderToken(d.t, d.judgeable), "text/html; charset=utf-8", d.judgeable ? "immutable" : "none");
+        // Same rule as the API: a live answer describes a launch still moving and must not be cached as immutable.
+        return send(200, await renderToken(d.t, d.judgeable, d.precomputed), "text/html; charset=utf-8",
+          d.precomputed ? "short" : d.judgeable ? "immutable" : "none");
       if (d.kind === "rebuilding") return send(200, waiting(mint, d.job));
       return send(d.htmlStatus, noRecord(mint, esc2(d.why)));
     }

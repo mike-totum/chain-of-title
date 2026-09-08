@@ -10,7 +10,7 @@ import { Tracker, fetchMeta } from "./tracker.ts";
 import { PaperBroker } from "./paper.ts";
 import { strategies, type OperatorActivity } from "./strategies/index.ts";
 import { rpc as rpcHttpCall } from "./rpc-http.ts";
-import { BUYOUT_SOL } from "./provenance.ts";
+import { BUYOUT_SOL, TOKEN_COLUMNS, coverageWindows, assess } from "./provenance.ts";
 import { base58 } from "./feed/rpc.ts";
 import type { TokenState } from "./tracker.ts";
 import { KolWatcher, StreetListener, loadKols, parseTags, parseTweet, twitterApiIoProvider, xApiProvider } from "./signals/twitter.ts";
@@ -975,6 +975,62 @@ if (process.env.RECORD_PORT) {
         } catch { /* null, and the consumer shows the published figure alone */ }
         res.writeHead(200, { "content-type": "application/json" });
         return res.end(JSON.stringify({ record: RECORD_PATH, bytes: size, builtAt: mtime, building: buildingRecord, observed, held, at: Date.now() }));
+      }
+      /**
+       * One launch, answered by the machine that watched it.
+       *
+       * The public service reads a record file rebuilt every six hours, so for the first hours of a launch's life it
+       * held no row and answered `UNKNOWN — Launch not observed`, then set about reconstructing the launch from
+       * chain history. About a launch we had watched from its creation transaction. That is the worst failure this
+       * product has: the single thing it offers that a cold scanner cannot is being there at birth, and it was
+       * disclaiming exactly that during the only window when anyone is asking.
+       *
+       * The lag was never a property of the data. It came from welding a question about one launch to the rebuild of
+       * a seventy-megabyte file — 1.6 MB of new launches shipped inside 69.6 MB of packaging, so the packaging set
+       * the clock. This answers from the live database instead, in milliseconds, over the private network the web
+       * service already polls for the counter.
+       *
+       * THE ASSESSMENT IS COMPUTED HERE, not there, and that is the point rather than an optimisation. `assess`
+       * needs the trade rows behind a buyout and the run intervals proving we were watching; both live here and
+       * neither is in a six-hour-old extract. Sending the row alone would have the web service judge it against
+       * evidence it does not hold — missing a buyout it cannot see, and calling the launch uncovered because the
+       * record's last run ended when the file was built. Same code from `provenance.ts`, run where the evidence is.
+       */
+      const lm = req.url?.match(/^\/launch\/([1-9A-HJ-NP-Za-km-z]{32,44})$/);
+      if (lm) {
+        try {
+          const t = db.prepare(`SELECT ${TOKEN_COLUMNS} FROM tokens WHERE mint = ?`).get(lm[1]) as any;
+          if (!t) { res.writeHead(404, { "content-type": "application/json" }); return res.end(JSON.stringify({ held: false })); }
+          /**
+           * Coverage up to now, not up to the last heartbeat — and only while ingestion proves it.
+           *
+           * `runs.stopped_at` is stamped with the last launch actually observed, once a minute. So the newest
+           * coverage window always trails the clock by up to sixty seconds, and a launch from the last minute reads
+           * as outside coverage: not observed. That is precisely the launch this endpoint exists to answer about,
+           * and it would have disclaimed every one of them for their first minute of life.
+           *
+           * Extending the window to now is safe ONLY because of what the heartbeat means. It is not a liveness
+           * timer — that version of it recorded deaf hours as covered and is the first row of the failure table in
+           * HANDOFF. It is the timestamp of the last launch this process actually decoded. A fresh one is therefore
+           * evidence of ingestion, not of the process merely being up, and 180s is the same threshold `npm run
+           * health` uses to call ingestion advancing.
+           *
+           * If the heartbeat is stale we were not reliably watching, and the honest answer is the unextended
+           * window: uncovered, which reads as UNKNOWN rather than as a finding.
+           */
+          const win = coverageWindows(db);
+          const last = win[win.length - 1];
+          const nowMs = Date.now();
+          if (last && nowMs - last.b < 180_000) last.b = nowMs;
+          const covered = (ts: number) => win.some((w) => ts >= w.a && ts <= w.b);
+          // Coverage is a statement about what this process did, and this process is the only authority on that.
+          const observed = !t.late_discovery && covered(t.created_at);
+          res.writeHead(200, { "content-type": "application/json" });
+          return res.end(JSON.stringify({ held: true, observed, t, a: assess(db, t, covered) }));
+        } catch (e) {
+          res.writeHead(500, { "content-type": "application/json" });
+          return res.end(JSON.stringify({ held: false, error: (e as Error).message }));
+        }
       }
       if (req.url !== "/record.db") { res.writeHead(404); return res.end("not found"); }
       let st;
