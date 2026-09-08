@@ -181,7 +181,20 @@ const COV: Coverage = { from: win.length ? win[0].a : null, downtimeMinutes: chr
  * with a clean 200, and indistinguishable from the truth. Being down is recoverable; being authoritatively wrong about
  * every token is not. This is exactly what a missing `data/record.db` did on the first deploy.
  */
+/**
+ * Two counts, because they answer different questions and publishing either one as "launches" was wrong.
+ *
+ * `observed` is every launch watched from its creation transaction: the population the product's claims are actually
+ * about. `held` is every row in the file, which additionally counts launches a detector restored after the fact and
+ * the handful rebuilt from chain history. Those rows are real records and belong in the file, but their first-block
+ * counters are not complete observations, so they must not be added to a number that means "we saw this happen".
+ *
+ * The front page has always shown `observed` and the API reported `held`, both labelled launches, and they differed by
+ * 2,736. Nobody was wrong about the data and the site still contradicted itself, which is the failure this project
+ * exists to point at in other people.
+ */
 const held = (db.prepare("SELECT COUNT(*) c FROM tokens").get() as any).c as number;
+const observed = (db.prepare("SELECT COUNT(*) c FROM tokens WHERE COALESCE(late_discovery,0)=0").get() as any).c as number;
 if (held < 1000) {
   console.error(`refusing to start: ${DB_FILE} holds ${held} launches, which cannot be a real archive.`);
   console.error(`build one with \`npm run servicedb\` and make sure it is present at that path.`);
@@ -691,7 +704,10 @@ const server = createServer(async (req, res) => {
       const rest = safe.slice(`/api/${API_VERSION}`.length).replace(/^\/+/, "");
 
       if (rest === "" || rest === "status")
-        return j(200, statusRecord(COV, held, {
+        return j(200, statusRecord(COV, observed, {
+          // Every row in the file, including launches restored after creation and those rebuilt from chain history.
+          // `launches` above counts only those observed from the creation transaction, which is what the pages report.
+          records: held,
           docs: "/api.html",
           bulk: "/data/record.db",
           endpoints: [`/api/${API_VERSION}/token/{mint}`, `/api/${API_VERSION}/wallet/{address}`, `/api/${API_VERSION}/status`],

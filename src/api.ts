@@ -176,7 +176,13 @@ export function walletRecord(w: string, p: Profile, line: string | null, cov: Co
   };
 }
 
-/** What this archive currently holds, so a consumer can decide whether to trust an UNKNOWN. */
+/**
+ * What this archive currently holds, so a consumer can decide whether to trust an UNKNOWN.
+ *
+ * `launches` is the count observed from the creation transaction, matching every figure on the pages. A caller
+ * wanting the size of the file wants `records`, which also counts launches restored after creation and those rebuilt
+ * from chain history. One word, one meaning, everywhere.
+ */
 export function statusRecord(cov: Coverage, launches: number, extra: Record<string, unknown> = {}): object {
   return { ...envelope(cov, "/data.html"), launches, ...extra };
 }
