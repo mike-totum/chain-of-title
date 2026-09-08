@@ -262,7 +262,25 @@ try {
     WHERE t.wallet IN (SELECT DISTINCT wallet FROM main.trades WHERE venue='curve' AND side='buy' AND sol >= ${BUYOUT_SOL})
     GROUP BY t.wallet`);
 
-  db.exec(`INSERT INTO rec.meta (k, v) VALUES ('watermark', '${Date.now()}'), ('built_at', '${Date.now()}')
+  /**
+   * Who built this file, not only when.
+   *
+   * On 2026-09-08 production began serving a record built at 14:37 that appears in no log: the publish loop's own
+   * log ends at 12:56, the collector's record build was not enabled locally, and nothing else admitted to it. The
+   * file was correct and there was still no way to say what produced it — which means there was no way to say
+   * whether the thing that produced it was supposed to.
+   *
+   * A record that cannot account for its own origin is a strange artefact for a provenance project to publish.
+   *
+   * Deliberately NOT the hostname. This file is published CC0 and mirrored under a DOI, so anything written here is
+   * public forever, and a personal machine name is not ours to publish. Railway names its own services; everything
+   * else is "local", which is the distinction that actually matters — cloud or laptop — without carrying a person
+   * into a permanent public record. The same care the rest of this project takes about other people's data.
+   */
+  const builder = process.env.RAILWAY_SERVICE_NAME ? `railway:${process.env.RAILWAY_SERVICE_NAME}` : "local";
+  const builtBy = `${builder} ${process.argv.slice(1).map((a) => a.replace(/^.*\//, "")).join(" ")}`.slice(0, 200).replace(/'/g, "''");
+  db.exec(`INSERT INTO rec.meta (k, v) VALUES ('watermark', '${Date.now()}'), ('built_at', '${Date.now()}'),
+      ('built_by', '${builtBy}'), ('built_pid', '${process.pid}')
     ON CONFLICT(k) DO UPDATE SET v = excluded.v`);
   db.exec("COMMIT");
 } catch (e) { db.exec("ROLLBACK"); throw e; }
