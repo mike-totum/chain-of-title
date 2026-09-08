@@ -15,7 +15,8 @@ import { base58 } from "./feed/rpc.ts";
 import type { TokenState } from "./tracker.ts";
 import { KolWatcher, StreetListener, loadKols, parseTags, parseTweet, twitterApiIoProvider, xApiProvider } from "./signals/twitter.ts";
 import { BuzzTracker } from "./signals/buzz.ts";
-import { telegramNotifier } from "./signals/telegram-notify.ts";
+import { telegramNotifier, telegramSend } from "./signals/telegram-notify.ts";
+import { startWatchdog, startHeartbeat, fmtAge } from "./watchdog.ts";
 import { TelegramWatcher } from "./signals/telegram.ts";
 import { createClient, loadChannels, telegramConfigured } from "./signals/telegram-client.ts";
 import type { KolSignal } from "./signals/twitter.ts";
@@ -939,6 +940,54 @@ if (process.env.RECORD_BUILD === "1") {
   setTimeout(() => void buildRecord(), 3 * 60_000);
   setInterval(() => void buildRecord(), RECORD_EVERY_MS);
 }
+
+/**
+ * Watch the public site from outside the public site.
+ *
+ * The web service watches the age of the record it serves, which catches a frozen archive and cannot catch its own
+ * death: a container that is gone, crash-looping, or wedged sends nothing, and silence from a watcher is
+ * indistinguishable from good news. This probe lives in the other service, in another container, and asks the
+ * question the way a visitor does — over the public internet, through Cloudflare, at the canonical host.
+ *
+ * That makes the two checks genuinely independent rather than two copies of one check: this one alarms when the site
+ * is unreachable or answering wrong, and it keeps alarming about staleness even if the process that would normally
+ * report its own staleness is not running at all.
+ *
+ * Three consecutive failures before alarming, because this one crosses a network and a single timeout means nothing.
+ * At a 15-minute interval that is a 45-minute worst case, well inside the tolerance it is checking.
+ */
+const SITE_URL = (process.env.SITE_URL ?? "https://chainoftitle.org").replace(/\/+$/, "");
+const SITE_STALE_MS = Number(process.env.SITE_STALE_HOURS ?? 8) * 3600_000;
+if (process.env.SITE_WATCH !== "0") {
+  if (!config.telegramBotToken || !config.telegramChatId)
+    log(`[watch] WARNING: TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID are not set. The site watch will run and log, and ` +
+      `will not be able to tell anyone.`);
+  startWatchdog({
+    name: `the public site (${SITE_URL})`,
+    everyMs: 15 * 60_000,
+    failuresBeforeAlarm: 3,
+    repeatMs: 6 * 3600_000,
+    log: (line) => log(line),
+    send: (text) => telegramSend(config.telegramBotToken, config.telegramChatId, text),
+    probe: async () => {
+      const res = await fetch(`${SITE_URL}/api/v1/status`, { signal: AbortSignal.timeout(20_000) });
+      if (!res.ok) return { ok: false, detail: `${SITE_URL}/api/v1/status answered ${res.status}` };
+      const j = await res.json() as any;
+      const asOf = Number(j?.asOf?.ms);
+      // A 200 carrying no timestamp is a failure, not a pass. The one thing this must never do is read a shape it
+      // does not understand as health — that is how a check ends up unable to fail.
+      if (!Number.isFinite(asOf) || asOf <= 0) return { ok: false, detail: `${SITE_URL}/api/v1/status carried no readable asOf` };
+      const age = Date.now() - asOf;
+      const launches = Number(j?.launches) || 0;
+      return age < SITE_STALE_MS
+        ? { ok: true, detail: `${launches.toLocaleString()} launches, built ${fmtAge(age)} ago` }
+        : { ok: false, detail: `${SITE_URL} is serving a record built ${fmtAge(age)} ago (limit ${fmtAge(SITE_STALE_MS)}) — ` +
+            `${launches.toLocaleString()} launches. Every route answers; the counts are old. Publishing has stopped.` };
+    },
+  });
+}
+/** See watchdog.ts: the only alarm that survives this whole platform going down is one nobody here sends. */
+startHeartbeat(process.env.HEARTBEAT_URL ?? "", 5 * 60_000, "collector");
 
 /**
  * Hand the record to the web service. Private network only in normal operation — Railway routes

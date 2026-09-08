@@ -5,10 +5,13 @@
 !site
 !site/**
 data/pump.db*
-# data/seed.db is shipped deliberately: mergeSeed reads it on boot to give a fresh collector the history it lacks.
-# It was excluded here, which was the other half of why seeding never worked - the exporter threw, and the file it
-# failed to write would not have reached the container anyway.
-!data/seed.db
+# data/seed.db is NOT shipped. It was, deliberately, for the two boots that merged it (13:12 and 14:13 on
+# 2026-09-08, both recorded in the collector's `seed_merges`); this is the negation being removed afterwards, which
+# the plan called putting the shovel back. Leaving it in bakes 91 MB into every image for no benefit, and worse: the
+# merge is keyed on the seed's size and hash, so the day someone re-runs `npm run seed` the next ordinary deploy
+# would carry a file with a new key and merge it on boot, unasked. To seed a fresh collector, re-add `!data/seed.db`
+# here and in .dockerignore for that one deploy, then take both out again.
+data/seed.db*
 data/archive.db*
 data/reports
 data/run.log

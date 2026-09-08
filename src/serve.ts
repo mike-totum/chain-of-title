@@ -22,10 +22,12 @@ import { type Assessment, assess, cleanAtBirth, coverageWindows, TOKEN_COLUMNS, 
 import { profile, verdictLine } from "./operator.ts";
 import { poolReservesPooled } from "./outcomes.ts";
 import { rebuild, store, curveExists } from "./backfill.ts";
-import { page, tokenBody, walletBody, tokenPreview, SEARCH, when, fmt, homeBody, homeTitle,
+import { page, tokenBody, walletBody, tokenPreview, SEARCH, when, fmt, homeBody, homeTitle, CANONICAL_HOST,
   type Home, type Chrome, type Reading } from "./render.ts";
 import { tokenRecord, walletRecord, statusRecord, unknownRecord, errorRecord,
   API_VERSION, PER_IP_PER_HOUR, GLOBAL_PER_HOUR, GLOBAL_PER_DAY, type Coverage } from "./api.ts";
+import { startWatchdog, startHeartbeat, fmtAge } from "./watchdog.ts";
+import { telegramSend } from "./signals/telegram-notify.ts";
 
 const arg = (k: string, d: string) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : d; };
 const PORT = Number(arg("--port", process.env.PORT ?? "8899"));
@@ -309,6 +311,49 @@ if (held < 1000) {
   console.error(`build one with \`npm run servicedb\` and make sure it is present at that path.`);
   process.exit(1);
 }
+
+/**
+ * Is the archive the public is being given still advancing?
+ *
+ * This is `scripts/freshness.sh`, moved off the laptop and into the service, because the laptop version could not run
+ * during the failure it was written for: a closed lid stops the publish timer AND the hourly probe that would have
+ * noticed, so the site froze and the alarm slept beside it.
+ *
+ * `recordBuiltAt` is fixed for the life of this process — adopting a pulled record renames the file and exits so the
+ * platform restarts us onto the new inode — so this age is exactly "how long since a record was successfully
+ * published", whatever the cause. A collector that stopped building, a pull that stopped passing its guards, a
+ * laptop that stopped deploying: all of them surface here as one number that stops moving, which is the only
+ * question the public actually cares about.
+ *
+ * One failure alarms, with no consecutive-failure grace: nothing here crosses a network, so a failure is a fact
+ * about a timestamp, not a blip that might clear on its own.
+ */
+const STALE_AFTER_MS = Number(process.env.STALE_AFTER_HOURS ?? 8) * 3600_000;
+const alertsArmed = !!(config.telegramBotToken && config.telegramChatId);
+if (!alertsArmed)
+  console.log(`[watch] WARNING: TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID are not set on this service. The staleness ` +
+    `watch will run and log, and will not be able to tell anyone. That is the state this watch exists to end.`);
+startWatchdog({
+  name: "the published archive has stopped advancing",
+  everyMs: 15 * 60_000,
+  failuresBeforeAlarm: 1,
+  repeatMs: 6 * 3600_000,
+  send: (text) => telegramSend(config.telegramBotToken, config.telegramChatId, text),
+  probe: async () => {
+    if (!recordBuiltAt) return { ok: false, detail: `the record being served carries no built_at, so its age cannot be stated` };
+    const age = Date.now() - recordBuiltAt;
+    // Not a pedantic guard: a builder with a wrong clock produces a record that is permanently "fresh" and would silence this
+    // check permanently. Fail on it rather than treating negative age as very recent.
+    if (age < 0) return { ok: false, detail: `the record claims to have been built ${fmtAge(-age)} in the future — check the clock on the builder` };
+    return age < STALE_AFTER_MS
+      ? { ok: true, detail: `${observed.toLocaleString()} launches, built ${fmtAge(age)} ago (limit ${fmtAge(STALE_AFTER_MS)})` }
+      : { ok: false, detail: `${CANONICAL_HOST || "the site"} is serving a record built ${fmtAge(age)} ago (limit ` +
+          `${fmtAge(STALE_AFTER_MS)}) — ${observed.toLocaleString()} launches. The site is up and every route answers; ` +
+          `the counts are simply old. The collector's build or the record pull has stopped.` };
+  },
+});
+/** The absence of this ping is the only alarm that survives the whole platform going down. See watchdog.ts. */
+startHeartbeat(process.env.HEARTBEAT_URL ?? "", 5 * 60_000, "web");
 
 const tokenQ = db.prepare(`SELECT ${TOKEN_COLUMNS} FROM tokens WHERE mint = ?`);
 
@@ -773,7 +818,11 @@ function summaryJson(): string {
   return JSON.stringify({
     generatedAt: Date.now(), asOf: h.builtAt, coverageFrom: COV.from, downtimeMinutes: Math.round(COV.downtimeMinutes),
     maxReadingAgeMs: MAX_READING_AGE_MS,
-    graduated24h: h.graduated24h, clean24h: h.clean24h, uncertified24h: h.unchecked24h,
+    graduated24h: h.graduated24h, clean24h: h.clean24h, danger24h: h.danger24h,
+    // The same identity the page renders: graduated - clean - danger. A consumer subtracting these must land where
+    // the page does, so the remainder is published rather than left for them to infer and get wrong.
+    neither24h: h.graduated24h - h.clean24h - h.danger24h,
+    uncertified24h: h.unchecked24h,
     uncertified: h.unchecked, archivedLaunches: h.onFile,
     clean: h.cleanRows.map((r) => ({
       mint: r.mint, symbol: r.symbol, creatorSupplyPct: r.devPct, curveBuyers: r.buyers,
