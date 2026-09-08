@@ -22,7 +22,7 @@ import { type Assessment, assess, cleanAtBirth, coverageWindows, TOKEN_COLUMNS, 
 import { profile, verdictLine } from "./operator.ts";
 import { poolReservesPooled } from "./outcomes.ts";
 import { rebuild, store, curveExists } from "./backfill.ts";
-import { page, tokenBody, walletBody, tokenPreview, SEARCH, when, fmt, homeBody, homeTitle, CANONICAL_HOST,
+import { page, tokenBody, walletBody, tokenPreview, SEARCH, when, fmt, homeBody, homeTitle, verdict, CANONICAL_HOST,
   type Home, type Chrome, type Reading } from "./render.ts";
 import { tokenRecord, walletRecord, statusRecord, unknownRecord, errorRecord,
   API_VERSION, PER_IP_PER_HOUR, GLOBAL_PER_HOUR, GLOBAL_PER_DAY, type Coverage } from "./api.ts";
@@ -786,10 +786,20 @@ function buildHome(now: number): Home {
     })),
     wallets: walletCount,
     opRows: ops.map((w) => ({ wallet: w.wallet, taken: w.tokens, spent: w.curve_sol, sold: w.amm_sell, bought: w.amm_buy })),
+    /**
+      * `fundedSol` used to be here, hardcoded to 0, and the front page printed "pool funded to 0 SOL of real
+      * liquidity" as step 2 of an argument whose whole point is that the pool looked funded before it was drained.
+      * It rendered as liquidity going up. We store one pool balance per token (`vault_sol`, with the time it was
+      * read) and no history, so there is no figure behind that claim and the claim is gone rather than guessed.
+      *
+      * The verdict comes from the same function the token's own record page calls, so the sample on the front page
+      * cannot state something its record does not.
+      */
     proof: proofRow ? {
       mint: proofRow.t.mint, symbol: proofRow.t.symbol, devPct: proofRow.t.dev_pct,
       gradMs: proofRow.t.graduated_at && proofRow.t.created_at ? proofRow.t.graduated_at - proofRow.t.created_at : null,
-      fundedSol: 0, nowSol: proofRow.t.vault_sol, nowAt: proofRow.t.vault_at,
+      nowSol: proofRow.t.vault_sol, nowAt: proofRow.t.vault_at,
+      verdict: verdict(proofRow.t, proofRow.a, false),
     } : null,
     maxDevPct: MAX_DEV_PCT, minBuyers: MIN_BUYERS, buyoutSol: BUYOUT_SOL, minPoolSol: MIN_POOL_SOL,
   };
@@ -818,11 +828,7 @@ function summaryJson(): string {
   return JSON.stringify({
     generatedAt: Date.now(), asOf: h.builtAt, coverageFrom: COV.from, downtimeMinutes: Math.round(COV.downtimeMinutes),
     maxReadingAgeMs: MAX_READING_AGE_MS,
-    graduated24h: h.graduated24h, clean24h: h.clean24h, danger24h: h.danger24h,
-    // The same identity the page renders: graduated - clean - danger. A consumer subtracting these must land where
-    // the page does, so the remainder is published rather than left for them to infer and get wrong.
-    neither24h: h.graduated24h - h.clean24h - h.danger24h,
-    uncertified24h: h.unchecked24h,
+    graduated24h: h.graduated24h, clean24h: h.clean24h, uncertified24h: h.unchecked24h,
     uncertified: h.unchecked, archivedLaunches: h.onFile,
     clean: h.cleanRows.map((r) => ({
       mint: r.mint, symbol: r.symbol, creatorSupplyPct: r.devPct, curveBuyers: r.buyers,

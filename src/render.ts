@@ -264,16 +264,18 @@ export function page(title: string, body: string, c: Chrome, depth = 0, summary?
 <link rel="icon" href="${root}favicon.svg" type="image/svg+xml">
 ${head}<style>${CSS}</style></head>
 <body><div class="wrap">
-<div class="mast"><a class="brand serif" href="${root}index.html">${MARK}<span>${BRAND}</span></a><span class="tag2">Solana launch records</span><span class="what">In property law, the chain of title is the unbroken documented history of ownership from origin: what you establish before you believe a claim about what something is.</span></div>
+<header class="band-top"><div class="shell"><div class="mast"><a class="brand serif" href="${root}index.html">${MARK}<span>${BRAND}</span></a><span class="tag2">Solana launch records</span><span class="what">In property law, the chain of title is the unbroken documented history of ownership from origin: what you establish before you believe a claim about what something is.</span></div></div></header>
+<main class="page shell">
 ${body}
-<div class="note"><a href="${root}method.html">How this is decided</a> · <a href="${root}corrections.html">Tell us we are wrong</a> · <a href="${root}data.html">Take the data</a> · <a href="${root}api.html">API</a> · <a href="${root}pledge.html">Pledge</a> · <a href="${root}index.html">${BRAND}</a><br>
+</main>
+<footer class="band-bot"><div class="shell"><div class="note"><a href="${root}method.html">How this is decided</a> · <a href="${root}corrections.html">Tell us we are wrong</a> · <a href="${root}data.html">Take the data</a> · <a href="${root}api.html">API</a> · <a href="${root}pledge.html">Pledge</a> · <a href="${root}index.html">${BRAND}</a><br>
 The documented history of a token from its first block. Coverage begins ${c.coverageFrom}${c.gapMin >= 1 ? `, with ${fmt(c.gapMin)} min of recorded downtime` : ", no recorded downtime"}.
 Everything here is read from the Solana chain and can be checked against it. A clean record means a launch was <b>not manufactured</b>. It is not a prediction and not advice.
 Most tokens lose money regardless: of 19,412 bonding-curve positions measured, none reached 5x.
 <div class="who">Kept by <b>${esc(KEEPER)}</b> · <a href="mailto:${esc(CONTACT)}">${esc(CONTACT)}</a>${SOURCE_URL ? ` · <a href="${esc(SOURCE_URL)}">Source</a>` : ""}<br>
 Free to use, with no account and no wallet connection. The archive is public domain (<a href="${root}data.html">CC0</a>) and
 downloadable in full, so nothing here depends on trusting us to keep publishing it. Funded by grants and by the
-services that read it, never by the projects it reports on, and never by sending you into a trade.</div></div>
+services that read it, never by the projects it reports on, and never by sending you into a trade.</div></div></div></footer>
 </div></body></html>`;
 }
 
@@ -389,8 +391,9 @@ export type Verdict = { level: "OK" | "DANGER" | "CAUTION" | "UNKNOWN"; label: s
 export function verdict(t: any, a: Assessment, clean: boolean): Verdict {
   if (!a.watched) return { level: "UNKNOWN", label: "Launch not observed",
     why: "We have no record of this launch, so we cannot say what it was at birth. That is not a clean result. Once the float has been spread, a manufactured launch is indistinguishable from a real one." };
+  // The "not a prediction" half of this moved to `.vscope`, which every verdict now carries.
   if (clean) return { level: "OK", label: "Launched clean",
-    why: "The launch record shows no sign of manufacture. That is not a prediction and not advice; most tokens lose money regardless." };
+    why: "The launch record shows no sign of manufacture." };
   const headline = manufactureHeadline(t, a);
   if (headline) return { level: "DANGER", label: "Manufactured launch", why: `The record shows ${headline}.` };
   if (a.flags.some((f) => f.level === "DANGER")) return { level: "DANGER", label: "Carries a danger flag",
@@ -436,6 +439,12 @@ export function tokenBody(
   return `
     <h1>${esc(t.symbol ?? "unknown")}</h1>
     <div class="verdict"><span class="v ${v.level}">${esc(v.label)}</span><span class="vwhy">${esc(v.why)}</span></div>
+    ${/*
+        This sentence does the liability work, and it used to sit in the footer, roughly 1,300px below the verdict it
+        qualifies, on a page whose entire job is to deliver one verdict. Scope belongs with the claim.
+      */ ""}
+    <p class="vscope">A record of what this launch was at birth, read from the Solana chain and checkable against it.
+    Not a prediction and not advice: most tokens lose money regardless.</p>
     <div class="addr">
       <span class="mono" id="mint">${esc(t.mint)}</span>
       <button type="button" onclick="cp()" id="cpb">Copy</button>
@@ -471,12 +480,19 @@ export interface Home {
   graduated24h: number; clean24h: number; danger24h: number; onFile: number;
   windowDays: number; gradWindow: number; unchecked: number; unchecked24h: number;
   cleanRows: CleanRow[]; wallets: number; opRows: OpRow[];
-  proof: null | { mint: string; symbol: string | null; devPct: number; gradMs: number | null; fundedSol: number; nowSol: number; nowAt: number };
+  proof: null | { mint: string; symbol: string | null; devPct: number; gradMs: number | null;
+    nowSol: number; nowAt: number; verdict: Verdict };
   maxDevPct: number; minBuyers: number; buyoutSol: number; minPoolSol: number;
 }
 
+/**
+ * Both base rates, the actionable one first. This used to say "8 of 1,539 launched clean" - 0.5%, and 0.16% over the
+ * seven-day window. A tool that reports almost nothing as clean teaches a reader that its clean bar is broken rather
+ * than that the market is, because from outside the two are indistinguishable. The danger rate is the same evidence
+ * stated at a threshold a reader can act on, and the clean count still follows it.
+ */
 export function homeTitle(h: Home): string {
-  return `${fmt(h.clean24h)} of ${fmt(h.graduated24h)} tokens launched clean yesterday`;
+  return `${fmt(h.danger24h)} of ${fmt(h.graduated24h)} launches carry a danger flag`;
 }
 
 export function homeBody(h: Home): string {
@@ -490,15 +506,28 @@ export function homeBody(h: Home): string {
     <td class="num">${fmt(x.sold)} SOL</td><td class="num">${fmt(x.bought)} SOL</td></tr>`).join("");
   return `
   <div class="hero">
+    <div class="col-a">
     <h1 class="headline">${h.windowEnd && h.now - h.windowEnd > 3600_000 ? `In the 24 hours to ${when(h.windowEnd)}` : "In the last 24 hours"} ${fmt(h.graduated24h)} tokens finished their bonding curve.
-    <b>${fmt(h.clean24h)}</b> of them launched clean.</h1>
+    <b>${fmt(h.danger24h)}</b> carry a danger flag. ${h.clean24h === 0 ? `<b class="q">None</b> launched clean.` : `Only <b class="q">${fmt(h.clean24h)}</b> launched clean.`}</h1>
     <p class="lede">Most were manufactured. The creator took the supply, or a single wallet bought the whole curve and
     called it demand. That evidence exists for about thirty seconds and is unrecoverable afterwards, so we watch every
     launch on pump.fun and keep the record.</p>
     <p class="lede">Paste any mint. If we hold its launch, you get what happened. If we do not, we rebuild it from the
     chain, and if we cannot do that we say so rather than guess.</p>
     ${SEARCH}
-    ${p ? `<p class="sub" style="margin:-18px 0 24px">Nothing to hand? Read <a href="t/${esc(p.mint)}.html">${esc(p.symbol ?? "?")}</a>, a launch this archive holds.</p>` : ""}
+    ${/*
+        A visitor who has never seen a record has no idea what pasting a mint gets them, and the page used to
+        describe the output at length without once showing it. This is a real verdict on a real launch, rendered by
+        the same `verdict()` the record page calls, so it cannot promise something a record does not deliver.
+      */ ""}
+    ${p ? `<a class="sample" href="t/${esc(p.mint)}.html">
+      <span class="slab">What a record says</span>
+      <span class="sv ${p.verdict.level}">${esc(p.verdict.label)}</span>
+      <span class="swhy">${esc(p.verdict.why)}</span>
+      <span class="scta">${esc(p.symbol ?? "?")} · read the record &rarr;</span>
+    </a>` : ""}
+    </div>
+    <div class="col-b">
     <div class="stats" style="margin:4px 0 0">
       <div class="stat"><span>graduated, 24h to ${h.windowEnd ? when(h.windowEnd) : "now"}</span><b class="big">${fmt(h.graduated24h)}</b></div>
       <div class="stat"><span>launched clean</span><b class="big">${fmt(h.clean24h)}</b></div>
@@ -542,6 +571,7 @@ export function homeBody(h: Home): string {
       tick(); setInterval(tick,10000);
       document.addEventListener('visibilitychange',function(){if(!document.hidden)tick()});
     })()</script>
+    </div>
   </div>
 
   ${p ? `<div class="sec"><h2>Why a scanner cannot tell you this</h2></div>
@@ -556,11 +586,11 @@ export function homeBody(h: Home): string {
       </ul>
     </div>
     <div class="now">
-      <h3>2 · Then, and this is what a scanner sees</h3>
+      <h3>2 · Then, what a checker reports</h3>
       <ul>
-        <li>Pool funded to <b>${fmt(p.fundedSol)} SOL</b> of real liquidity</li>
-        <li>Mint and freeze authority <b>renounced</b></li>
-        <li>Supply <b>spread across wallets</b>, no large holder</li>
+        <li>Mint and freeze authority <b>renounced</b> — pump.fun does that to every token it creates</li>
+        <li>The creator's ${p.devPct.toFixed(1)}% <b>no longer visible</b>, the float spread across wallets</li>
+        <li>A pool, a price and a chart, and <b>every one of them real</b></li>
       </ul>
     </div>
     <div class="birth">
@@ -572,24 +602,27 @@ export function homeBody(h: Home): string {
       </ul>
     </div>
   </div>
-  <p class="verdictline">A checker run at step 2 finds nothing wrong, because at step 2 there is nothing left to find:
-  the operator bought the float, then paid for the appearance of a market. A checker run at step 3 reports thin
-  liquidity: correctly, and far too late to be worth anything. The launch record was true at every step, and it is
-  the only thing here that could not be bought.</p>` : ""}
-
-  <div class="sec"><h2>Launched clean, last ${h.windowDays === 1 ? "24 hours" : `${h.windowDays} days`}</h2><span class="cnt">${fmt(h.cleanRows.length)} of ${fmt(h.gradWindow)} graduations${h.unchecked ? ` · ${fmt(h.unchecked)} unchecked` : ""}</span></div>
-  <p class="lede">Creator kept under ${h.maxDevPct}% and has not sold, at least ${h.minBuyers} distinct buyers on the curve,
-  the curve took over a minute to fill and was not taken by a single ${h.buyoutSol}+ SOL buy, and at least ${h.minPoolSol} SOL
-  in the pool on a reading no older than five minutes. That means <b>not manufactured</b>. It is not a recommendation, and most of these will still lose money.</p>
-  <table class="data"><tr><th>Token</th><th class="num">Creator kept</th><th class="num">Buyers</th><th class="num">Time to fill</th><th class="num">Liquidity</th><th class="num">Read</th></tr>${rows}</table>
-  <p class="callout">Launch figures are permanent; a pool balance is not. Every balance above carries the moment it was
-  taken, and a token whose pool has not been read recently enough is left off rather than carried on an old number.${h.unchecked ? ` <b>${fmt(h.unchecked)}</b> passed every launch test but have no reading fresh enough to certify. Absent here means unchecked, not manufactured.` : ""}</p>
+  <p class="verdictline">Steps 1 and 3 are readings we took and kept, each with the moment it was taken. Step 2 is
+  what a present-tense check reports, not a measurement of ours — and it finds nothing wrong, because by then there
+  is nothing left to find: the operator bought the float, then paid for the appearance of a market. A check run at
+  step 3 reports thin liquidity, correctly, and far too late to be worth anything. The launch record was true at
+  every step, and it is the only thing here that could not be bought.</p>` : ""}
 
   <div class="sec"><h2>Who takes the curves</h2><span class="cnt">${fmt(h.wallets)} wallets on file</span></div>
   <p class="lede">A single large buy that completes a bonding curve is not demand, it is a purchase of the float. These
   are the wallets doing it, what they spent, and what they did with the tokens afterwards. This is the part no
   contract scanner can produce, because it needs a wallet's history across many tokens rather than one token's state.</p>
-  <table class="data"><tr><th>Wallet</th><th class="num">Curves taken</th><th class="num">Spent</th><th class="num">Sold after</th><th class="num">Bought back</th></tr>${ops}</table>`;
+  <table class="data"><tr><th>Wallet</th><th class="num">Curves taken</th><th class="num">Spent</th><th class="num">Sold after</th><th class="num">Bought back</th></tr>${ops}</table>
+
+  <div class="sec"><h2>Launched clean, last ${h.windowDays === 1 ? "24 hours" : `${h.windowDays} days`}</h2><span class="cnt">${fmt(h.cleanRows.length)} of ${fmt(h.gradWindow)} graduations${h.unchecked ? ` · ${fmt(h.unchecked)} unchecked` : ""}</span></div>
+  <p class="lede">Creator kept under ${h.maxDevPct}% and has not sold, at least ${h.minBuyers} distinct buyers on the curve,
+  the curve took over a minute to fill and was not taken by a single ${h.buyoutSol}+ SOL buy, and at least ${h.minPoolSol} SOL
+  in the pool on a reading no older than five minutes. That means <b>not manufactured</b>. It is not a recommendation, and most of these will still lose money.</p>
+  ${h.cleanRows.length ? `<table class="data"><tr><th>Token</th><th class="num">Creator kept</th><th class="num">Buyers</th><th class="num">Time to fill</th><th class="num">Liquidity</th><th class="num">Read</th></tr>${rows}</table>`
+    : `<p class="callout">No launch in this window passed every test with a pool reading fresh enough to certify. That is a
+    statement about what we can certify right now, not a finding about any particular token.</p>`}
+  <p class="callout">Launch figures are permanent; a pool balance is not. Every balance above carries the moment it was
+  taken, and a token whose pool has not been read recently enough is left off rather than carried on an old number.${h.unchecked ? ` <b>${fmt(h.unchecked)}</b> passed every launch test but have no reading fresh enough to certify. Absent here means unchecked, not manufactured.` : ""}</p>`;
 }
 
 /** A wallet's record: every curve it bought outright, and what it did with the tokens afterwards. */
