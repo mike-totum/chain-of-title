@@ -2,9 +2,15 @@
 # Refuse a deploy that would publish a smaller archive than the one already live.
 #
 # `serve.ts` guards the *pull* path: a record fetched from the collector is rejected if it holds under 90% of what is
-# already there. But the archive currently reaches production a different way - `railway up` ships whatever
-# data/record.db happens to be on this disk, and that path has no guard at all beyond refusing a file with under 1000
-# launches. Since the collector's own build is broken, the unguarded path is the only one in use.
+# already there, on launches and on every other dimension. Since 2026-09-08 that pull is live and is how the archive
+# normally reaches production - the collector rebuilds every 3 h and the web service pulls every 3 h - so a deploy is
+# no longer the mechanism that keeps the site current. Do not `railway up` to move data; it will be replaced by the
+# next pull anyway.
+#
+# This script still matters, because `railway up` ALSO ships whatever data/record.db happens to be on the deploying
+# machine's disk, and that path has no guard beyond refusing a file with under 1000 launches. A laptop whose record is
+# behind can therefore swing the served archive backwards between pulls. Two people deploying from two checkouts makes
+# that a live hazard rather than a theoretical one.
 #
 # So compare against the thing that actually matters: what production is serving right now.
 #   sh scripts/preflight.sh [url]
