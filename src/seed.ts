@@ -2,7 +2,10 @@
  * Export the archive tables into a small seed database, so a fresh collector can inherit the history rather than
  * starting blank. The provenance and the operator map are the asset; the trade rows are not.
  *   npm run seed -- [--out data/seed.db]
- * Ship the result with the deploy; the collector merges it once on boot (see mergeSeed in src/index.ts).
+ * INCOMPLETE: this writes the file and nothing reads it. `mergeSeed` does not exist in src/index.ts, nothing outside
+ * this file mentions a seed database, and `.railwayignore` excludes `data/seed.db*` so it would not reach the
+ * container anyway. Seeding a fresh collector needs a merge-on-boot step that has never been written; until it is,
+ * running this produces a plausible file, prints success, and achieves nothing.
  */
 import { statSync, rmSync, existsSync } from "node:fs";
 import { config } from "./config.ts";
