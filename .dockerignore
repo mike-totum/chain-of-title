@@ -3,7 +3,10 @@
 # empty archive.
 node_modules
 data/pump.db*
-data/seed.db*
+# data/seed.db is COPYed deliberately: mergeSeed reads it on boot to give a fresh collector the history it lacks.
+# Excluding it here was the fourth independent reason seeding never worked, after an exporter that threw, a missing
+# importer, and .railwayignore. .railwayignore governs what is uploaded; this file governs what COPY puts in the
+# image, and fixing one without the other ships nothing.
 data/archive.db*
 data/reports
 data/telegram.session
