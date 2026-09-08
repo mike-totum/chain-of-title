@@ -221,9 +221,24 @@ try {
   db.exec(`INSERT INTO rec.trades (mint, wallet, side, sol, ts, slot, venue, is_dev)
     SELECT mint, wallet, side, sol, ts, slot, venue, COALESCE(is_dev,0)
     FROM main.trades WHERE venue='curve' AND side='buy' AND sol >= ${BUYOUT_SOL}`);
+  /**
+   * `hist_trades` is optional, and assuming otherwise is what has produced every 94 KB record the cloud collector has
+   * ever built. The table is created by `history.ts`, which only ever runs on the laptop - so on a collector it does
+   * not exist, this statement throws, the whole build dies before writing a single row, and the child process reports
+   * a failure nobody reads while the schema-only file it left behind sits there looking like a database.
+   *
+   * The web service's pull guard rejected those files for their size, which is the only reason the published archive
+   * survived. That was an accident, not a design: the build was broken for the entire life of the cloud collector and
+   * seeding it with 168,300 launches did not change that, because the fault was never missing data.
+   */
+  const hasHist = (db.prepare(
+    "SELECT COUNT(*) c FROM main.sqlite_master WHERE type='table' AND name='hist_trades'").get() as any).c > 0;
   db.exec("DELETE FROM rec.hist_trades");
-  db.exec(`INSERT INTO rec.hist_trades SELECT mint, sig, idx, ts, slot, wallet, side, sol, tokens, vsol, vtok, COALESCE(is_dev,0)
-    FROM main.hist_trades WHERE side='buy' AND sol >= ${BUYOUT_SOL}`);
+  if (hasHist)
+    db.exec(`INSERT INTO rec.hist_trades SELECT mint, sig, idx, ts, slot, wallet, side, sol, tokens, vsol, vtok, COALESCE(is_dev,0)
+      FROM main.hist_trades WHERE side='buy' AND sol >= ${BUYOUT_SOL}`);
+  else
+    log("  hist_trades absent in the source (history.ts has never run here); the record carries none");
 
   for (const [t, cols] of [
     ["operator_wallets", "wallet, funder, cluster, role, seeded_at, source_mint, added_at"],
