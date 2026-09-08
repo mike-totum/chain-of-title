@@ -117,6 +117,13 @@ const REFRESH_MS = Number(process.env.RECORD_REFRESH_HOURS ?? 6) * 3600_000;
 const HEALTH_URL = process.env.COLLECTOR_HEALTH_URL || (RECORD_URL ? RECORD_URL.replace(/\/record\.db$/, "/health") : "");
 const LIVE_MAX_AGE_MS = 60_000;
 let live: { observed: number; held: number; at: number } | null = null;
+/**
+ * Why the last poll produced nothing. The page renders the same either way — no counter — but "the collector is
+ * unreachable" and "the collector answered and could not count" are different faults with different fixes, and a
+ * single blank number collapses them into one. Reported on /api/v1/live rather than logged, so it can be read from
+ * outside the container without a shell.
+ */
+let liveErr: string | null = "not polled yet";
 
 async function pollLive(): Promise<void> {
   if (!HEALTH_URL) return;
@@ -124,9 +131,16 @@ async function pollLive(): Promise<void> {
     const res = await fetch(HEALTH_URL, { signal: AbortSignal.timeout(8000) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const h = (await res.json()) as any;
-    // A collector that answers without a count is not a collector that has zero launches.
-    if (typeof h.observed === "number" && typeof h.held === "number") live = { observed: h.observed, held: h.held, at: Date.now() };
-  } catch { /* leave the previous value; freshness is judged by `at` below, not by whether this poll worked */ }
+    // A collector that answers without a count is not a collector that has zero launches: it is one whose own
+    // COUNT(*) threw, which is a fault on its side and must not be rendered as a number.
+    if (typeof h.observed === "number" && typeof h.held === "number") {
+      live = { observed: h.observed, held: h.held, at: Date.now() };
+      liveErr = null;
+    } else liveErr = "collector reachable but reported no counts";
+  } catch (e) {
+    // Leave the previous value; freshness is judged by `at` below, not by whether this particular poll worked.
+    liveErr = `collector unreachable: ${(e as Error).message}`;
+  }
 }
 /** Null once the last successful poll is older than the tolerance, so a dead collector shows no live number at all. */
 const liveNow = () => (live && Date.now() - live.at <= LIVE_MAX_AGE_MS ? live : null);
@@ -752,7 +766,13 @@ const server = createServer(async (req, res) => {
          * the page then shows the published figure alone rather than a number that has stopped moving.
          */
         const l = liveNow();
-        return j(200, { observed: l?.observed ?? null, held: l?.held ?? null, at: l?.at ?? null, published: observed, generatedAt: Date.now() });
+        return j(200, {
+          observed: l?.observed ?? null, held: l?.held ?? null, at: l?.at ?? null,
+          published: observed, generatedAt: Date.now(),
+          // Null when the counter is working. Says which fault when it is not, including the case where a poll
+          // succeeded long ago and has since gone stale — a value that was real and is no longer current.
+          unavailable: l ? null : (liveErr ?? (live ? `last successful poll ${Math.round((Date.now() - live.at) / 1000)}s ago, past the ${LIVE_MAX_AGE_MS / 1000}s tolerance` : "no successful poll yet")),
+        });
       }
 
       if (rest === "" || rest === "status")
