@@ -15,7 +15,18 @@ db.exec("PRAGMA query_only = 1");
 const now = Date.now();
 const q = (sql: string, ...p: unknown[]) => db.prepare(sql).get(...p as any) as any;
 
-const lastRun = q("SELECT id, started_at, stopped_at FROM runs ORDER BY id DESC LIMIT 1");
+// The current run is the one that started most recently, which is not the same as the one with the highest id.
+// `runs.id` is AUTOINCREMENT, so it means insertion order, and any path that writes a run out of order — a seed
+// merge appending the laptop's history, a repair, a restore — gives an old `started_at` the highest id. Health would
+// then measure the heartbeat against a run that ended days ago and report a live collector as dead. Nothing inserts
+// out of order today; ordering by id to mean "most recent in time" is wrong regardless, and it is wrong in the
+// direction this project cares about, so it is fixed before something exploits it. `provenance.ts` already orders
+// coverage by `started_at`; this is the one place that did not.
+//
+// Not MAX(stopped_at) across all runs, which would look like the same thing and is the opposite of it: a fresh run
+// that has not yet stamped a heartbeat would inherit the previous run's, and a collector that is up and deaf would
+// pass the one check written to catch exactly that. A NULL heartbeat on the newest run must read as unproven.
+const lastRun = q("SELECT id, started_at, stopped_at FROM runs ORDER BY started_at DESC, id DESC LIMIT 1");
 const heartbeatAgeS = lastRun?.stopped_at ? (now - lastRun.stopped_at) / 1000 : Infinity;
 const lastLaunch = q("SELECT MAX(created_at) t FROM tokens WHERE late_discovery = 0")?.t ?? 0;
 const launchAgeS = (now - lastLaunch) / 1000;
