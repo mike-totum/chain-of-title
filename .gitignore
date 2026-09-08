@@ -49,3 +49,6 @@ HANDOFF.md
 data/*.err
 data/*.state
 data/UNDELIVERED-ALERT.txt
+
+# Written by scripts/deposit.py to describe each DOI deposit; regenerated per deposit, not source.
+data/_README.md
