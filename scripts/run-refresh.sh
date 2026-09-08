@@ -7,6 +7,7 @@
 #
 # Ordering is the safety property, not a convenience:
 #   servicedb   build from the collector's database
+#   site        regenerate the pages that describe that database
 #   preflight   refuse anything that would shrink the public archive, comparing against what production serves now
 #   railway up  ship it
 #   smoke       every route the deployed site needs
@@ -19,6 +20,17 @@ say() { echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] $*" >> "$LOG"; }
 
 say "refresh starting"
 if ! npm run --silent servicedb >> "$LOG" 2>&1; then say "FAILED at servicedb, nothing deployed"; exit 1; fi
+# The loop shipped the database and never rebuilt the pages that describe it, so every generated page was frozen at
+# whenever someone last ran this by hand. On 2026-09-08 data.html advertised "record.db, 45.6 MB, 153,444 launches"
+# above a download of a 68.1 MB file holding 162,262 — understating the archive by 8,818 on the one page whose whole
+# job is to hand it over. The same fault was corrected by hand on 09-07 and came straight back, because nothing in
+# the loop regenerated it. It is structural, not an oversight, and this line is the fix.
+#
+# Runs AFTER servicedb, so the pages describe the record they ship alongside, and BEFORE the deploy, so a failed
+# build stops the release instead of publishing stale pages over a fresh database. Takes ~7 min against the live
+# collector database on the laptop (measured, 406s: it assesses every graduation in the window while the collector
+# writes to the same file) — not the sub-second it takes against a quiet one. Budget for it.
+if ! npm run --silent site >> "$LOG" 2>&1; then say "FAILED at site, nothing deployed"; exit 1; fi
 if ! npm run --silent preflight >> "$LOG" 2>&1; then say "REFUSED by preflight, nothing deployed"; exit 1; fi
 if ! railway up --detach  >> "$LOG" 2>&1; then say "FAILED at railway up"; exit 1; fi
 
