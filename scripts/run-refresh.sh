@@ -39,4 +39,16 @@ for i in $(seq 1 40); do sleep 15; npm run --silent freshness >/dev/null 2>&1 &&
 
 if ! npm run --silent smoke >> "$LOG" 2>&1; then say "DEPLOYED BUT SMOKE FAILED - check the site"; exit 1; fi
 if ! npm run --silent freshness >> "$LOG" 2>&1; then say "DEPLOYED BUT STILL STALE - the published archive did not advance"; exit 1; fi
+
+# Re-deposit to the DOI mirror. Depositing was a thing someone did by hand, twice, and then stopped: by 2026-09-08 the
+# citable copy held 51,359,744 bytes against a published 72,982,528, about fifty thousand launches behind, while the
+# data page told every reader "if this site is gone, the record is not". A deposit that drifts is worse than none,
+# because it looks like insurance. It belongs next to the thing that builds the record, not in someone's memory.
+#
+# LAST, and deliberately after freshness: the mirror should carry a record the live site has already accepted and
+# served. Non-fatal to the deploy, because a failed deposit does not make a good deploy bad — but it is said loudly,
+# because the deposit silently not happening is the exact failure being fixed.
+if ! python3 scripts/deposit.py >> "$LOG" 2>&1; then
+  say "DEPLOYED AND SERVING, BUT THE DOI DEPOSIT FAILED - the citable copy is now behind the site"
+fi
 say "refresh complete and verified"
