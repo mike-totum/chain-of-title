@@ -5,7 +5,10 @@
 !site
 !site/**
 data/pump.db*
-data/seed.db*
+# data/seed.db is shipped deliberately: mergeSeed reads it on boot to give a fresh collector the history it lacks.
+# It was excluded here, which was the other half of why seeding never worked - the exporter threw, and the file it
+# failed to write would not have reached the container anyway.
+!data/seed.db
 data/archive.db*
 data/reports
 data/run.log

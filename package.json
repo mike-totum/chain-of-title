@@ -42,6 +42,7 @@
     "clean": "tsx --no-warnings=ExperimentalWarning src/clean.ts",
     "operator": "tsx --no-warnings=ExperimentalWarning src/operator.ts",
     "seed": "tsx --no-warnings=ExperimentalWarning src/seed.ts",
+    "mergeseed": "tsx --no-warnings=ExperimentalWarning src/mergeseed.ts",
     "site": "tsx --no-warnings=ExperimentalWarning src/site.ts",
     "labels": "tsx --no-warnings=ExperimentalWarning src/labels.ts",
     "backfill": "tsx --no-warnings=ExperimentalWarning src/backfill.ts",

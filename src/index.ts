@@ -25,6 +25,37 @@ const fmtX = (x: number) => `${x.toFixed(2)}x`;
 const short = (m: string) => `${m.slice(0, 4)}…${m.slice(-6)}`;
 
 const db = openDb(config.dbPath);
+
+/**
+ * Inherit an archive, once, before anything else happens.
+ *
+ * Here rather than as a `railway run` one-shot: a second process writing this file while the collector is live means
+ * a multi-second write transaction against a 10 s busy_timeout, and the cost of losing that race is dropped launches,
+ * which are unrecoverable. It runs before the feed is constructed and before this run's row is written, so the merge
+ * sees a quiet database and the coverage it imports is already in place when the run begins.
+ *
+ * Gated twice: only when SEED_PATH points at a file, and only when no `seed_merges` row matches that file's size and
+ * hash. A redeploy is therefore a no-op, and a collector in a crash-loop cannot merge twice - which is a claim about
+ * the second boot, so it is tested on the second boot (see the merge's own notes).
+ *
+ * A failure here must never take the collector down: being unseeded is a smaller problem than not collecting, and
+ * every minute not collecting is a permanent hole in the archive.
+ */
+if (process.env.SEED_PATH) {
+  try {
+    const { mergeSeed } = await import("./mergeseed.ts");
+    const { existsSync } = await import("node:fs");
+    if (!existsSync(process.env.SEED_PATH)) log(`[seed] SEED_PATH=${process.env.SEED_PATH} does not exist, skipping`);
+    else {
+      const r = mergeSeed(db, process.env.SEED_PATH, { log });
+      if (r.skipped) log(`[seed] ${r.reason}`);
+      else log(`[seed] inherited ${Object.entries(r.after).map(([t, n]) => `${t} ${n - r.before[t]}`).join(", ")}`);
+    }
+  } catch (e) {
+    log(`[seed] MERGE FAILED, continuing without it: ${(e as Error).message}`);
+  }
+}
+
 const runId = (db.prepare("INSERT INTO runs (started_at) VALUES (?)").run(Date.now()) as any).lastInsertRowid;
 const feed = config.tradeSource === "pumpportal" ? new PumpPortalFeed(config.pumpportalApiKey) : new RpcFeed(config.solanaWsUrl);
 const tracker = new Tracker({ watchMinutes: config.watchMinutes, deadAfterSeconds: config.deadAfterSeconds, watchMaxMinutes: config.watchMaxMinutes });
