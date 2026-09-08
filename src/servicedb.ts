@@ -78,7 +78,11 @@ db.exec(`
     venue TEXT NOT NULL DEFAULT 'pumpfun',
     -- Nullable on purpose: NULL means the graduation was inferred and never confirmed, which is a real third state
     -- and must not be collapsed into a boolean. See db.ts.
-    graduated_confirmed_by TEXT
+    graduated_confirmed_by TEXT,
+    -- What the token claimed to be at launch. The only fields in this file that cannot be rebuilt from chain by
+    -- anyone willing to pay for archival RPC: they live behind a URI the creator controls and vanish when it is
+    -- repointed or unpinned. meta_at distinguishes "declared none" from "we never looked". See db.ts.
+    uri TEXT, image TEXT, description TEXT, meta_at INTEGER
   );
   CREATE INDEX IF NOT EXISTS rec.tokens_created ON tokens(created_at);
   CREATE INDEX IF NOT EXISTS rec.tokens_creator ON tokens(creator);
@@ -146,6 +150,28 @@ try { db.exec("ALTER TABLE rec.tokens ADD COLUMN graduated_confirmed_by TEXT"); 
  * completed, so it is exactly the evidence the column is for. Rows without one stay NULL.
  */
 try { db.exec("UPDATE rec.tokens SET graduated_confirmed_by = 'pool' WHERE graduated = 1 AND pool IS NOT NULL AND graduated_confirmed_by IS NULL"); } catch {}
+/**
+ * The launch claim: what the token said it was. Four columns, two different backfill answers, and the difference is
+ * the whole point of stating them separately.
+ */
+for (const c of ["uri TEXT", "image TEXT", "description TEXT", "meta_at INTEGER"])
+  try { db.exec(`ALTER TABLE rec.tokens ADD COLUMN ${c}`); } catch {}
+/**
+ * `uri` gets a real backfill, because the collector has held it all along: 154,000 of 157,000 launches. Without this
+ * the watermark leaves every historical row NULL while the value sits in the source database, which is the third time
+ * that trap has been hit here. Copying it invents nothing; it is a value we recorded at launch.
+ */
+try {
+  db.exec(`UPDATE rec.tokens SET uri = (SELECT t.uri FROM main.tokens t WHERE t.mint = rec.tokens.mint)
+           WHERE uri IS NULL AND EXISTS (SELECT 1 FROM main.tokens t WHERE t.mint = rec.tokens.mint AND t.uri IS NOT NULL AND t.uri != '')`);
+} catch {}
+/**
+ * `image`, `description` and `meta_at` get none, and that is a decision rather than an omission. They were never
+ * captured before 2026-09-08: `fetchMeta` did not read the image field and there was no column for the description it
+ * did read. There is nothing to backfill from. Re-fetching the URIs now would record what they resolve to *today* and
+ * stamp it as the launch claim, which is manufacturing evidence about the past, and this project does not get to do
+ * that to anyone. Historical rows stay NULL because NULL is the true answer.
+ */
 
 const since = FULL ? 0 : Number((db.prepare("SELECT v FROM rec.meta WHERE k='watermark'").get() as any)?.v ?? 0);
 log(`carrying launches ${since ? `changed since ${new Date(since).toISOString()}` : "(full rebuild)"}…`);
@@ -165,7 +191,9 @@ try {
            COALESCE(venue, 'pumpfun'),
            -- No COALESCE: NULL here means "inferred, never confirmed" and must survive the copy as NULL. A pool we
            -- observed is confirmation, so upgrade on the way through rather than losing it.
-           COALESCE(graduated_confirmed_by, CASE WHEN graduated = 1 AND pool IS NOT NULL THEN 'pool' END)
+           COALESCE(graduated_confirmed_by, CASE WHEN graduated = 1 AND pool IS NOT NULL THEN 'pool' END),
+           -- The launch claim, carried verbatim. Never re-derived: a later read of the URI is not what it said then.
+           uri, image, description, meta_at
     FROM main.tokens WHERE COALESCE(updated_at, 0) >= ${since}
       -- The quote asset is not a launch. Wrapped SOL was copied into the record as one and served as a token page.
       AND main.tokens.mint NOT IN ('So11111111111111111111111111111111111111112',

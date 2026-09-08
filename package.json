@@ -51,7 +51,8 @@
     "smoke": "sh scripts/smoke.sh",
     "repair": "tsx --no-warnings=ExperimentalWarning src/repair.ts",
     "freshness": "sh scripts/freshness.sh",
-    "refresh": "npm run servicedb && npm run preflight && railway up"
+    "refresh": "npm run servicedb && npm run preflight && railway up",
+    "images": "tsx --no-warnings=ExperimentalWarning src/images.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
