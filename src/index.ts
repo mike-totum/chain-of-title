@@ -10,6 +10,7 @@ import { Tracker, fetchMeta } from "./tracker.ts";
 import { PaperBroker } from "./paper.ts";
 import { strategies, type OperatorActivity } from "./strategies/index.ts";
 import { rpc as rpcHttpCall } from "./rpc-http.ts";
+import { BUYOUT_SOL } from "./provenance.ts";
 import { base58 } from "./feed/rpc.ts";
 import type { TokenState } from "./tracker.ts";
 import { KolWatcher, StreetListener, loadKols, parseTags, parseTweet, twitterApiIoProvider, xApiProvider } from "./signals/twitter.ts";
@@ -779,16 +780,36 @@ setInterval(() => {
  * Self-pruning. On a server nothing else runs: the Dockerfile starts this process and the daily script that prunes
  * never executes, so the database would grow ~1 GB/day into a fixed volume and stop the collector within days. Losing
  * the collector loses coverage, and launch-time facts are unrecoverable, so retention has to be the process's own job.
- * Only working data goes; tokens, signals, operator_* and pool_map are the archive and are never touched.
+ * Only working data goes; tokens, signals, operator_*, pool_map and buyout-sized curve buys are the archive and are
+ * never touched. That last clause was missing and the sentence was false for as long as it was: see KEEP_EVIDENCE.
  */
 const RETENTION_DAYS = Number(process.env.RETENTION_DAYS || 14);
+/**
+ * A curve buy large enough to be a buyout is EVIDENCE, not working data, and retention must never take it.
+ *
+ * The comment above this function claimed only working data goes and that the archive is never touched. That was
+ * false, and quietly so: `findBuyout` reads `trades` to answer who took each curve, which is the attribution side of
+ * this product and the part no contract scanner can reproduce. Deleting those rows on a timer destroys the proof
+ * behind a claim the site keeps making, while every count on the site stays exactly the same — the record still says
+ * 169,100 launches and can no longer show you who bought them.
+ *
+ * Measured 2026-09-08: the collector's record carried 580 buyout trades against the laptop's 2,099, purely because
+ * one runs a 3-day window and the other 14. Nobody chose that; it fell out of a retention setting. An authority on
+ * provenance cannot let the completeness of its evidence depend on which machine happened to build the file.
+ *
+ * The exemption is narrow on purpose. Curve buys at or above BUYOUT_SOL are what `servicedb` copies into the record
+ * and what `findBuyout` reads; everything else in `trades` really is working data and still goes. At ~2,100 rows
+ * over the whole archive this costs nothing to keep and cannot be rebuilt once dropped — the transactions remain on
+ * chain, but only an archival node can reach back for them, and by then we are reconstructing what we watched.
+ */
+const KEEP_EVIDENCE = `AND NOT (venue = 'curve' AND side = 'buy' AND sol >= ${BUYOUT_SOL})`;
 function pruneWorkingData(): void {
   const cutoff = Date.now() - RETENTION_DAYS * 86400_000;
   const batch = 50_000;
   let removed = 0;
   try {
     for (const sql of [
-      `DELETE FROM trades WHERE rowid IN (SELECT rowid FROM trades WHERE ts < ? LIMIT ${batch})`,
+      `DELETE FROM trades WHERE rowid IN (SELECT rowid FROM trades WHERE ts < ? ${KEEP_EVIDENCE} LIMIT ${batch})`,
       `DELETE FROM curve_snapshots WHERE rowid IN (SELECT rowid FROM curve_snapshots WHERE ts < ? LIMIT ${batch})`,
       `DELETE FROM tweets WHERE rowid IN (SELECT rowid FROM tweets WHERE fetched_at < ? LIMIT ${batch})`,
     ]) {

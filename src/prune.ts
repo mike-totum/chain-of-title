@@ -6,10 +6,13 @@
  *   npm run prune -- --days 14 --apply
  *   npm run prune -- --apply --vacuum   # reclaim file space (needs ~2x free disk, locks the db)
  *
- * Never touches `tokens`, `signals`, `operator_*`, `pool_map` or `hist_*` — those are provenance, not working data.
+ * Never touches `tokens`, `signals`, `operator_*`, `pool_map`, `hist_*`, or curve buys at or above BUYOUT_SOL —
+ * those are provenance, not working data. The last of those was missing until 2026-09-08 and the sentence was false
+ * for as long as it was: buyout trades were being deleted on a timer while this comment said the archive was safe.
  */
 import { config } from "./config.ts";
 import { openDb } from "./db.ts";
+import { BUYOUT_SOL } from "./provenance.ts";
 
 const arg = (k: string, d: number) => { const i = process.argv.indexOf(k); return i > 0 ? Number(process.argv[i + 1]) : d; };
 const DAYS = arg("--days", 7);
@@ -52,7 +55,12 @@ function purge(label: string, sql: string, params: unknown[]): void {
   console.log(`\r  ${label}: ${n(total)} deleted        `);
 }
 console.log("");
-purge("trades", `DELETE FROM trades WHERE rowid IN (SELECT rowid FROM trades WHERE ts < ? LIMIT ${BATCH})`, [cutoff]);
+// Buyout-sized curve buys are evidence, not working data: `findBuyout` reads them and `servicedb` copies them into
+// the published record. Deleting them leaves every count intact while destroying the proof of who took each curve.
+// See KEEP_EVIDENCE in index.ts — the same exemption, because the collector prunes itself and this prunes by hand,
+// and a rule that holds in only one of them is not a rule.
+purge("trades", `DELETE FROM trades WHERE rowid IN (SELECT rowid FROM trades WHERE ts < ?
+  AND NOT (venue = 'curve' AND side = 'buy' AND sol >= ${BUYOUT_SOL}) LIMIT ${BATCH})`, [cutoff]);
 purge("wallet_token_stats", `DELETE FROM wallet_token_stats WHERE rowid IN (SELECT wts.rowid FROM wallet_token_stats wts JOIN tokens t ON t.mint = wts.mint WHERE t.created_at < ? LIMIT ${BATCH})`, [cutoff]);
 purge("curve_snapshots", `DELETE FROM curve_snapshots WHERE rowid IN (SELECT rowid FROM curve_snapshots WHERE ts < ? LIMIT ${BATCH})`, [cutoff]);
 purge("tweets", `DELETE FROM tweets WHERE rowid IN (SELECT rowid FROM tweets WHERE fetched_at < ? LIMIT ${BATCH})`, [cutoff]);

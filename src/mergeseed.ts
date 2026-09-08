@@ -29,10 +29,24 @@ export type MergeResult = {
 };
 
 /** Tables the seed carries, in dependency-free order. `tokens` first so the assertions below have something to check. */
-const TABLES = ["tokens", "operator_wallets", "operator_funders", "operator_policy", "pool_map", "runs", "signals"] as const;
+const TABLES = ["tokens", "operator_wallets", "operator_funders", "operator_policy", "pool_map", "runs", "signals",
+  "trades", "hist_trades"] as const;
 
+/**
+ * Columns of `table` in `schema`. The schema goes in the SECOND ARGUMENT, not as a prefix.
+ *
+ * `seed.pragma_table_info('tokens')` parses, runs, and silently returns MAIN's columns — the prefix on a
+ * table-valued pragma function is ignored rather than rejected. Measured 2026-09-08: 54 for both schemas where the
+ * seed actually had 50. So the subset check below was comparing main against main and could never fail, which made
+ * it exactly the check that cannot fail during the failure it exists to catch — the shape this codebase keeps
+ * producing, this time inside the guard written to stop it.
+ *
+ * It surfaced only because a test target had columns the seed lacked. On the real collector both sides are built by
+ * `openDb` and match, so the bug would have sat here undetected until the day the schemas diverged, which is the one
+ * day the check was for.
+ */
 const cols = (db: DatabaseSync, schema: string, table: string): string[] =>
-  (db.prepare(`SELECT name FROM ${schema}.pragma_table_info('${table}')`).all() as any[]).map((r) => r.name);
+  (db.prepare(`SELECT name FROM pragma_table_info(?, ?)`).all(table, schema) as any[]).map((r) => r.name);
 
 const count = (db: DatabaseSync, schema: string, table: string): number => {
   try { return (db.prepare(`SELECT COUNT(*) c FROM ${schema}.${table}`).get() as any).c as number; } catch { return 0; }
@@ -93,6 +107,11 @@ const TOKEN_POLICY: Record<string, string> = {
   image: `COALESCE(tokens.image, excluded.image)`,
   description: `COALESCE(tokens.description, excluded.description)`,
   meta_at: `COALESCE(tokens.meta_at, excluded.meta_at)`,
+  // A diagnostic about OUR fetch attempt, not a fact about the launch. The target's own attempt is the one that
+  // describes the target, so it wins; the seed only fills a slot the target never wrote. Added 2026-09-08 when the
+  // shared-column guard refused the merge over it — which is the guard working exactly as intended: a column that
+  // appeared after the policy was written stopped the merge instead of being silently dropped.
+  image_error: `COALESCE(tokens.image_error, excluded.image_error)`,
   image_sha256: `COALESCE(tokens.image_sha256, excluded.image_sha256)`,
   image_bytes: `COALESCE(tokens.image_bytes, excluded.image_bytes)`,
   image_at: `COALESCE(tokens.image_at, excluded.image_at)`,
@@ -250,6 +269,34 @@ export async function mergeSeed(
                WHERE COALESCE(manual,0) = 0 OR cluster NOT IN (SELECT cluster FROM main.operator_policy WHERE COALESCE(manual,0) = 1)`);
       db.exec(`INSERT OR IGNORE INTO main.pool_map (pool, mint, created_at)
                SELECT pool, mint, created_at FROM seed.pool_map`);
+
+      /**
+       * Buyout evidence: the rows `findBuyout` reads and `servicedb` copies into the published record. This is the
+       * answer to who took each curve — the half of the product a contract scanner cannot produce.
+       *
+       * Without them a seeded collector builds a record that GROWS the launch count while carrying a quarter of the
+       * buyouts, and the pull guard waves it through because it counts `tokens` and nothing else. Measured
+       * 2026-09-08: 580 buyout trades on the collector against 2,099 here. The right number is not the right archive.
+       *
+       * `hist_trades` is created by `history.ts`, which has only ever run on the laptop, so on a collector the table
+       * does not exist and the rows would have nowhere to land. Created here rather than assumed — a missing table
+       * is exactly what made the record build produce a 94,208-byte file for the life of this deployment.
+       *
+       * `trades.id` is AUTOINCREMENT and collides, so rows go in without it and dedupe on the transaction signature
+       * with mint and wallet: one wallet's leg of one transaction on one mint, which is what a row here means.
+       * `hist_trades` has a real primary key of (mint, sig, idx) and needs no help.
+       */
+      db.exec(`CREATE TABLE IF NOT EXISTS main.hist_trades (mint TEXT NOT NULL, sig TEXT NOT NULL, idx INTEGER NOT NULL,
+        ts INTEGER, slot INTEGER, wallet TEXT, side TEXT, sol REAL, tokens REAL, vsol REAL, vtok REAL, is_dev INTEGER,
+        PRIMARY KEY (mint, sig, idx))`);
+      db.exec("CREATE INDEX IF NOT EXISTS main.hist_trades_mint ON hist_trades(mint, ts)");
+      db.exec(`INSERT INTO main.trades (mint, wallet, side, sol, tokens, price, ts, slot, sig, age_ms, buyer_rank, is_dev, venue)
+               SELECT s.mint, s.wallet, s.side, s.sol, s.tokens, s.price, s.ts, s.slot, s.sig, s.age_ms, s.buyer_rank, s.is_dev, s.venue
+               FROM seed.trades s
+               WHERE NOT EXISTS (SELECT 1 FROM main.trades m
+                 WHERE m.sig = s.sig AND m.mint = s.mint AND m.wallet = s.wallet)`);
+      db.exec(`INSERT OR IGNORE INTO main.hist_trades (mint, sig, idx, ts, slot, wallet, side, sol, tokens, vsol, vtok, is_dev)
+               SELECT mint, sig, idx, ts, slot, wallet, side, sol, tokens, vsol, vtok, is_dev FROM seed.hist_trades`);
 
       /**
        * `runs` is evidence: provenance.ts derives published coverage from it, so merging tokens without runs would

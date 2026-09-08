@@ -21,16 +21,49 @@ import { DatabaseSync } from "node:sqlite";
 import { statSync, rmSync, existsSync } from "node:fs";
 import { config } from "./config.ts";
 import { openDb } from "./db.ts";
+import { BUYOUT_SOL } from "./provenance.ts";
 
 const i = process.argv.indexOf("--out");
 const OUT = i > 0 ? process.argv[i + 1] : "data/seed.db";
 if (existsSync(OUT)) rmSync(OUT, { force: true });
 
-/** Every table the collector needs to inherit. `trades` is deliberately absent: it is the bulk and not the asset. */
-const tables = ["tokens", "operator_wallets", "operator_funders", "operator_policy", "pool_map", "runs", "signals"];
+/**
+ * Every table the collector needs to inherit, and the filter that makes two of them affordable.
+ *
+ * `trades` was deliberately absent on the grounds that it is bulk rather than asset. That was half right and the
+ * wrong half mattered: 17.5M trade rows are indeed bulk, but the curve buys at or above BUYOUT_SOL inside them are
+ * the buyout evidence — what `findBuyout` reads and what `servicedb` copies into the published record. Leaving them
+ * out produced a collector whose record carried 580 buyouts against the laptop's 2,099, so adopting it would have
+ * grown the launch count while destroying three quarters of the proof of who took the curves. The count guard on the
+ * pull sees only `tokens` and would have called that growth.
+ *
+ * `hist_trades` is the same evidence recovered from chain by `history.ts`, which has only ever run on the laptop. A
+ * collector cannot reconstruct it — the transactions are still on chain, but reaching back for them needs an
+ * archival node and time. Seeding it is the only way a cloud collector ever holds the buyout history that predates
+ * it, and without it the collector can never be the source of the record.
+ *
+ * Filtered rather than whole: 3,171 rows across both, against 18.4M unfiltered. The filter is exactly `servicedb`'s,
+ * so the seed carries precisely what the published record is built from and nothing else.
+ */
+const EVIDENCE_WHERE: Record<string, string> = {
+  trades: `WHERE venue = 'curve' AND side = 'buy' AND sol >= ${BUYOUT_SOL}`,
+  hist_trades: `WHERE side = 'buy' AND sol >= ${BUYOUT_SOL}`,
+};
+const tables = ["tokens", "operator_wallets", "operator_funders", "operator_policy", "pool_map", "runs", "signals",
+  "trades", "hist_trades"];
 
 const src = new DatabaseSync(config.dbPath, { readOnly: true });
 const w = openDb(OUT);   // creates the full, correct schema
+/**
+ * `openDb` does not create `hist_trades` — it is made by `history.ts`, which has only ever run on the laptop. The
+ * seed needs somewhere to put the rows, and the collector needs the table to exist before it can receive them, so
+ * the definition is stated here verbatim from the source database rather than assumed. `mergeSeed` creates it on the
+ * target the same way.
+ */
+w.exec(`CREATE TABLE IF NOT EXISTS hist_trades (mint TEXT NOT NULL, sig TEXT NOT NULL, idx INTEGER NOT NULL,
+  ts INTEGER, slot INTEGER, wallet TEXT, side TEXT, sol REAL, tokens REAL, vsol REAL, vtok REAL, is_dev INTEGER,
+  PRIMARY KEY (mint, sig, idx))`);
+w.exec("CREATE INDEX IF NOT EXISTS hist_trades_mint ON hist_trades(mint, ts)");
 
 const CHUNK = 5_000;
 for (const t of tables) {
@@ -40,12 +73,12 @@ for (const t of tables) {
     // drop `id`, which is AUTOINCREMENT in both databases and would collide on merge.
     const srcCols = (src.prepare(`SELECT name FROM pragma_table_info('${t}')`).all() as any[]).map((r) => r.name);
     const dstCols = new Set((w.prepare(`SELECT name FROM pragma_table_info('${t}')`).all() as any[]).map((r) => r.name));
-    const shared = srcCols.filter((c) => dstCols.has(c) && !(c === "id" && (t === "runs" || t === "signals")));
+    const shared = srcCols.filter((c) => dstCols.has(c) && !(c === "id" && (t === "runs" || t === "signals" || t === "trades")));
     if (!shared.length) { console.log(`  ${t}: no shared columns, skipped`); continue; }
 
     const list = shared.map((c) => `"${c}"`).join(", ");
     const insert = w.prepare(`INSERT OR REPLACE INTO ${t} (${list}) VALUES (${shared.map(() => "?").join(", ")})`);
-    const read = src.prepare(`SELECT ${list} FROM ${t} LIMIT ? OFFSET ?`);
+    const read = src.prepare(`SELECT ${list} FROM ${t} ${EVIDENCE_WHERE[t] ?? ""} LIMIT ? OFFSET ?`);
 
     let off = 0, n = 0;
     for (;;) {

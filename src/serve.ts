@@ -163,6 +163,27 @@ async function pullRecord(first: boolean): Promise<void> {
     const { DatabaseSync } = await import("node:sqlite");
     const probe = new DatabaseSync(tmp);
     const n = (probe.prepare("SELECT COUNT(*) c FROM tokens").get() as any).c as number;
+    /**
+     * Every dimension of the record, not just the row count of one table.
+     *
+     * A guard that reads `tokens` alone calls it growth whenever the launch count rises, and on 2026-09-08 that was
+     * about to be wrong in the way that matters: the collector's first working build held 169,100 launches against
+     * production's 165,025 — but 580 buyout trades against 2,099, and zero `hist_trades` against 1,072. Adopting it
+     * would have grown the headline number while destroying three quarters of the evidence of who took the curves,
+     * and this guard would have called it an improvement.
+     *
+     * `trades` and `hist_trades` are what `findBuyout` reads: the wallet pages, the operator attribution, the half
+     * of this product a contract scanner cannot reproduce. They are the record, not working data, which is also why
+     * retention no longer deletes them.
+     *
+     * The right count is not the right archive. A number rising is not a pipeline working.
+     */
+    const dims = ["tokens", "trades", "hist_trades", "operator_wallets", "pool_map"] as const;
+    const incoming: Record<string, number> = {};
+    for (const t of dims) {
+      try { incoming[t] = (probe.prepare(`SELECT COUNT(*) c FROM ${t}`).get() as any).c as number; }
+      catch { incoming[t] = 0; }   // a table the incoming file does not have holds nothing, which is what it means
+    }
     probe.close();
     if (n < 1000) throw new Error(`downloaded archive holds only ${n} launches`);
     /**
@@ -192,6 +213,28 @@ async function pullRecord(first: boolean): Promise<void> {
     if (process.env.RECORD_ALLOW_SHRINK !== "1" && n < holding * 0.9)
       throw new Error(`downloaded archive holds ${n.toLocaleString()} launches against the ${holding.toLocaleString()} already here, ` +
         `refusing to shrink the record. If this is intended, set RECORD_ALLOW_SHRINK=1.`);
+    /**
+     * The same 90% rule on every other dimension, checked against what is already being served. Separate from the
+     * launch check above so the error names the dimension that actually regressed — "fewer launches" and "the same
+     * launches with the buyout evidence gone" are different faults and want different fixes.
+     */
+    if (process.env.RECORD_ALLOW_SHRINK !== "1") {
+      const held: Record<string, number> = {};
+      try {
+        const cur = new DatabaseSync(DB_FILE, { readOnly: true });
+        for (const t of dims) {
+          try { held[t] = (cur.prepare(`SELECT COUNT(*) c FROM ${t}`).get() as any).c as number; } catch { held[t] = 0; }
+        }
+        cur.close();
+      } catch { /* nothing served yet: anything is an improvement, and the launch guard above still applies */ }
+      for (const t of dims) {
+        if (t === "tokens") continue;                       // already checked, with its own message
+        if ((held[t] ?? 0) > 0 && incoming[t] < held[t] * 0.9)
+          throw new Error(`downloaded archive holds ${incoming[t].toLocaleString()} rows of ${t} against the ` +
+            `${held[t].toLocaleString()} already here. The launch count may be higher, but this record carries less ` +
+            `evidence than the one it would replace — refusing. Set RECORD_ALLOW_SHRINK=1 to override deliberately.`);
+      }
+    }
     renameSync(tmp, DB_FILE);
     console.log(`[record] pulled ${(buf.length / 1048576).toFixed(1)} MB, ${n.toLocaleString()} launches`);
     // Renaming swaps the file, but an already-open SQLite handle keeps reading the old inode — so a refresh would be
