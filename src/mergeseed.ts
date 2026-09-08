@@ -290,13 +290,30 @@ export async function mergeSeed(
         ts INTEGER, slot INTEGER, wallet TEXT, side TEXT, sol REAL, tokens REAL, vsol REAL, vtok REAL, is_dev INTEGER,
         PRIMARY KEY (mint, sig, idx))`);
       db.exec("CREATE INDEX IF NOT EXISTS main.hist_trades_mint ON hist_trades(mint, ts)");
-      db.exec(`INSERT INTO main.trades (mint, wallet, side, sol, tokens, price, ts, slot, sig, age_ms, buyer_rank, is_dev, venue)
-               SELECT s.mint, s.wallet, s.side, s.sol, s.tokens, s.price, s.ts, s.slot, s.sig, s.age_ms, s.buyer_rank, s.is_dev, s.venue
-               FROM seed.trades s
-               WHERE NOT EXISTS (SELECT 1 FROM main.trades m
-                 WHERE m.sig = s.sig AND m.mint = s.mint AND m.wallet = s.wallet)`);
-      db.exec(`INSERT OR IGNORE INTO main.hist_trades (mint, sig, idx, ts, slot, wallet, side, sol, tokens, vsol, vtok, is_dev)
-               SELECT mint, sig, idx, ts, slot, wallet, side, sol, tokens, vsol, vtok, is_dev FROM seed.hist_trades`);
+      /**
+       * Only if the seed actually carries them. A seed written before these tables were exported has neither, and an
+       * unconditional copy throws `no such table: seed.hist_trades` and takes the whole merge down — including the
+       * tokens and operator rows that would otherwise have landed.
+       *
+       * This is the same assumption that broke `servicedb` for the entire life of the deployment: it copied
+       * `main.hist_trades` unconditionally, that table only exists where `history.ts` has run, and the build threw
+       * before writing a row and left a 94,208-byte file behind. Writing the identical bug into the importer while
+       * fixing it in the exporter would be difficult to explain, and it was caught only because a test used an older
+       * seed. An absent table is a seed that carries nothing here, not a reason to abandon the merge.
+       */
+      const seedHas = (t: string) =>
+        ((db.prepare("SELECT COUNT(*) c FROM seed.sqlite_master WHERE type='table' AND name = ?").get(t) as any).c as number) > 0;
+      if (seedHas("trades"))
+        db.exec(`INSERT INTO main.trades (mint, wallet, side, sol, tokens, price, ts, slot, sig, age_ms, buyer_rank, is_dev, venue)
+                 SELECT s.mint, s.wallet, s.side, s.sol, s.tokens, s.price, s.ts, s.slot, s.sig, s.age_ms, s.buyer_rank, s.is_dev, s.venue
+                 FROM seed.trades s
+                 WHERE NOT EXISTS (SELECT 1 FROM main.trades m
+                   WHERE m.sig = s.sig AND m.mint = s.mint AND m.wallet = s.wallet)`);
+      else log(`[seed] this seed carries no trades table — no buyout evidence to inherit`);
+      if (seedHas("hist_trades"))
+        db.exec(`INSERT OR IGNORE INTO main.hist_trades (mint, sig, idx, ts, slot, wallet, side, sol, tokens, vsol, vtok, is_dev)
+                 SELECT mint, sig, idx, ts, slot, wallet, side, sol, tokens, vsol, vtok, is_dev FROM seed.hist_trades`);
+      else log(`[seed] this seed carries no hist_trades table — reconstructed buyout history will be missing`);
 
       /**
        * `runs` is evidence: provenance.ts derives published coverage from it, so merging tokens without runs would
