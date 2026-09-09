@@ -92,6 +92,17 @@ export class TelegramWatcher extends EventEmitter {
         }
       } catch (e) {
         this.emit("status", `cannot resolve channel ${ch}: ${(e as Error).message}`);
+        /**
+         * A channel we can no longer reach is a fact, and the most perishable one here.
+         *
+         * @SolanaGemsChecked stopped existing on 2026-09-09 — not renamed as far as we can tell, gone — and because
+         * it had never been captured, nothing of what it called survives at any price. Dropping silently out of the
+         * watch loop is how that becomes invisible: the channel simply stops appearing, and a year later there is no
+         * way to tell a channel that went quiet from one that was deleted from one we stopped asking about.
+         *
+         * Recorded as an open gap, which is exactly what it is, and it stays open until the channel resolves again.
+         */
+        this.emit("gap", { channel: ch, at: Date.now(), reason: `cannot resolve: ${(e as Error).message}`.slice(0, 200) });
       }
     }
     // Polling fallback: push updates for channels are not always delivered to a fresh session.
