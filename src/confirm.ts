@@ -120,7 +120,7 @@ export function seedFromSnapshots(db: DatabaseSync): { confirmed: number; checks
   ensureCurveChecks(db);
   db.prepare("BEGIN IMMEDIATE").run();
   try {
-    const confirmed = db.prepare(`UPDATE tokens SET graduated_confirmed_by = 'curve_complete'
+    const confirmed = db.prepare(`UPDATE tokens SET graduated_confirmed_by = 'curve_complete', updated_at = ${Date.now()}
       WHERE graduated = 1 AND graduated_confirmed_by IS NULL AND pool IS NULL
         AND EXISTS (SELECT 1 FROM curve_snapshots s WHERE s.mint = tokens.mint AND s.complete = 1)`).run();
     // What curvepoll saw, recorded as checks so the sweep does not pay to re-read what has already been watched all
@@ -182,8 +182,21 @@ export async function confirmGraduations(db: DatabaseSync, opts: ConfirmOpts = {
   st.candidates = due.length;
   if (!due.length) return st;
 
+  /**
+   * `updated_at` moves with the confirmation, and it has to.
+   *
+   * `servicedb` copies incrementally on `WHERE COALESCE(updated_at, 0) >= watermark` — a row is carried into the
+   * published record when the collector last touched it. Writing `graduated_confirmed_by` without bumping that
+   * timestamp means the collector holds the confirmation and the public record never receives it: the first sweep
+   * confirmed 943 graduations and exactly 3 of them reached `record.db`, because the other 940 sat behind the
+   * watermark on rows nothing had otherwise modified.
+   *
+   * This is the failure this codebase has now produced for the fourth time — a value written where an incremental
+   * reader will never look for it — and it is invisible from the collector, which is correct, and from the record,
+   * which is silently a week out of date on the column. Touch the row, or do not consider the write done.
+   */
   const setConfirmed = db.prepare(
-    `UPDATE tokens SET graduated_confirmed_by = 'curve_complete' WHERE mint = ? AND graduated_confirmed_by IS NULL`);
+    `UPDATE tokens SET graduated_confirmed_by = 'curve_complete', updated_at = ? WHERE mint = ? AND graduated_confirmed_by IS NULL`);
   const noteCheck = db.prepare(`INSERT INTO curve_checks (mint, checked_at, checks, complete) VALUES (?,?,1,?)
     ON CONFLICT(mint) DO UPDATE SET checked_at = excluded.checked_at, checks = curve_checks.checks + 1, complete = excluded.complete`);
 
@@ -235,7 +248,7 @@ export async function confirmGraduations(db: DatabaseSync, opts: ConfirmOpts = {
       db.prepare("BEGIN IMMEDIATE").run();
       try {
         for (const w of writes) {
-          if (w.complete === 1) setConfirmed.run(w.mint);
+          if (w.complete === 1) setConfirmed.run(Date.now(), w.mint);
           noteCheck.run(w.mint, Date.now(), w.complete);
         }
         db.prepare("COMMIT").run();
