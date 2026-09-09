@@ -723,7 +723,15 @@ let tg: TelegramWatcher | null = null;
 if (telegramConfigured(config.telegramApiId, config.telegramApiHash) && channels.length) {
   for (const c of channels) watchedAccounts.add(`tg:${c.toLowerCase()}`);
   const client = createClient(config.telegramApiId, config.telegramApiHash);
-  tg = new TelegramWatcher(client, channels);
+  /**
+   * Resume from the newest message already archived, per channel, so a restart does not silently skip everything
+   * posted while this process was down. Returns 0 when we hold nothing for a channel, which starts it at "now" —
+   * the only honest option, since we cannot claim coverage of a period we were not watching.
+   */
+  const resumeAt = db.prepare("SELECT MAX(msg_id) m FROM tg_messages WHERE channel = ?");
+  tg = new TelegramWatcher(client, channels, (ch) => {
+    try { return Number((resumeAt.get(ch) as any)?.m ?? 0); } catch { return 0; }
+  });
   tg.on("status", (m) => log("[tg]", m));
   tg.on("signal", (s) => handleSignal("telegram", s));
   /**
@@ -752,8 +760,29 @@ if (telegramConfigured(config.telegramApiId, config.telegramApiHash) && channels
       views = MAX(COALESCE(excluded.views,0), COALESCE(tg_messages.views,0)),
       forwards = MAX(COALESCE(excluded.forwards,0), COALESCE(tg_messages.forwards,0)),
       edited_at = COALESCE(tg_messages.edited_at, excluded.edited_at)`);
+  /**
+   * An open gap per channel, closed by the next message that arrives from it. Written whether or not the archive is
+   * enabled: knowing we could not read a channel is not optional the way storing its messages is.
+   */
+  const gapOpen = db.prepare(`SELECT id FROM tg_gaps WHERE channel = ? AND to_at IS NULL ORDER BY id DESC LIMIT 1`);
+  const gapStart = db.prepare(`INSERT INTO tg_gaps (channel, from_at, polls, reason) VALUES (?,?,1,?)`);
+  const gapBump = db.prepare(`UPDATE tg_gaps SET polls = polls + 1, reason = ? WHERE id = ?`);
+  const gapClose = db.prepare(`UPDATE tg_gaps SET to_at = ? WHERE id = ?`);
+  tg.on("gap", (g) => {
+    try {
+      const open = gapOpen.get(g.channel) as { id: number } | undefined;
+      if (open) gapBump.run(g.reason, open.id);
+      else { gapStart.run(g.channel, g.at, g.reason); log(`[tg] coverage gap opened on @${g.channel}: ${g.reason}`); }
+    } catch { /* never fatal */ }
+  });
   let tgStored = 0;
   tg.on("message", (m: any) => {
+    // Close any open gap for this channel first: a message arriving proves we can read it again, and that is true
+    // whether or not we are storing what it said.
+    try {
+      const open = gapOpen.get(m.channel) as { id: number } | undefined;
+      if (open) { gapClose.run(Date.now(), open.id); log(`[tg] coverage restored on @${m.channel}`); }
+    } catch { /* never fatal */ }
     if (process.env.TELEGRAM_ARCHIVE !== "1") return;
     try {
       tgInsert.run(m.channel, m.id, m.postedAt ?? null, Date.now(), m.sender ?? null, m.text ?? null, m.url ?? null,
@@ -894,16 +923,30 @@ function pruneWorkingData(): void {
    * the same lesson KEEP_TRADE_EVIDENCE learned - and this is the pruner that actually runs unattended in the cloud,
    * deleting millions of trade rows a day. See prune.ts for why the window matters.
    */
-  if ((process.env.LEGAL_HOLD ?? "").trim()) {
-    if (!prunedHoldLogged) { prunedHoldLogged = true; log(`[prune] LEGAL HOLD set — retention suspended, nothing will be deleted`); }
+  const hold = (process.env.LEGAL_HOLD ?? "").trim();
+  if (hold) {
+    if (!prunedHoldLogged) {
+      prunedHoldLogged = true;
+      log(`[prune] LEGAL HOLD set — retention suspended, nothing will be deleted`);
+      // Recorded, not just logged: a hold that leaves no trace of when it began cannot be testified to afterwards.
+      try {
+        const open = db.prepare("SELECT id FROM legal_holds WHERE released_at IS NULL ORDER BY id DESC LIMIT 1").get() as any;
+        if (open) db.prepare("UPDATE legal_holds SET last_seen_at = ? WHERE id = ?").run(Date.now(), open.id);
+        else db.prepare("INSERT INTO legal_holds (note, set_at, last_seen_at, protect_before) VALUES (?,?,?,?)")
+          .run(hold, Date.now(), Date.now(), Date.now() - RETENTION_DAYS * 86400_000);
+      } catch (e) { log(`[prune] could not record the hold: ${(e as Error).message}`); }
+    }
     return;
   }
+  /** Anything older than the earliest hold ever set stays, released or not — see legal_holds.protect_before. */
+  let floor = 0;
+  try { floor = Number((db.prepare("SELECT MIN(protect_before) m FROM legal_holds").get() as any)?.m ?? 0) || 0; } catch {}
   const cutoff = Date.now() - RETENTION_DAYS * 86400_000;
   const batch = 50_000;
   let removed = 0;
   try {
     for (const sql of [
-      `DELETE FROM trades WHERE rowid IN (SELECT rowid FROM trades WHERE ts < ? ${KEEP_EVIDENCE} LIMIT ${batch})`,
+      `DELETE FROM trades WHERE rowid IN (SELECT rowid FROM trades WHERE ts < ? AND ts >= ${floor} ${KEEP_EVIDENCE} LIMIT ${batch})`,
       `DELETE FROM curve_snapshots WHERE rowid IN (SELECT rowid FROM curve_snapshots WHERE ts < ? LIMIT ${batch})`,
       `DELETE FROM tweets WHERE rowid IN (SELECT rowid FROM tweets WHERE fetched_at < ? LIMIT ${batch})`,
     ]) {

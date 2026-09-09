@@ -42,6 +42,7 @@ export interface TelegramWatcher {
   on(event: "signal", l: (s: KolSignal) => void): this;
   on(event: "status", l: (msg: string) => void): this;
   on(event: "message", l: (m: TelegramMessage) => void): this;
+  on(event: "gap", l: (g: { channel: string; at: number; reason: string }) => void): this;
 }
 
 /** Listens to new messages in the configured channels and emits KOL-style signals. */
@@ -56,6 +57,16 @@ export class TelegramWatcher extends EventEmitter {
   constructor(
     private client: TelegramClient,
     private channels: string[],
+    /**
+     * The newest message id already archived for a channel, if any.
+     *
+     * Without this, start() sets the cursor to whatever is newest RIGHT NOW, so every message posted while the
+     * process was down is skipped — silently, permanently, and invisibly, because a message we never fetched leaves
+     * nothing behind to notice. For a signal generator that was correct: stale calls are worthless. For an archive it
+     * is the whole failure this project keeps finding, since the gap is indistinguishable afterwards from a quiet
+     * channel.
+     */
+    private resumeFrom: (channel: string) => number = () => 0,
   ) {
     super();
   }
@@ -69,8 +80,13 @@ export class TelegramWatcher extends EventEmitter {
         this.entities.set(ch, ent);
         // remember the newest message id so polling only reports what arrives from now on
         const [latest] = await this.client.getMessages(ent, { limit: 1 });
-        if (latest) {
-          this.lastSeenId.set(ch, latest.id);
+        const resume = this.resumeFrom(ch);
+        if (resume > 0 && latest && latest.id > resume) {
+          // Pick up where the archive stops. The catch-up itself runs through the normal poll path below.
+          this.lastSeenId.set(ch, resume);
+          this.emit("status", `@${ch}: resuming from archived id ${resume}, ${latest.id - resume} message(s) behind`);
+        } else if (latest) {
+          this.lastSeenId.set(ch, resume > 0 ? resume : latest.id);
           const ageMin = (Date.now() / 1000 - (latest.date ?? 0)) / 60;
           this.emit("status", `@${ch}: last post ${ageMin < 90 ? ageMin.toFixed(0) + " min" : (ageMin / 60).toFixed(1) + " h"} ago`);
         }
@@ -101,7 +117,10 @@ export class TelegramWatcher extends EventEmitter {
     for (const [ch, ent] of this.entities) {
       this.stats.polls++;
       try {
-        const msgs = await this.client.getMessages(ent, { limit: 10 });
+        // Deeper than 10 when catching up: a restart after an outage has a backlog, and a limit tuned for steady
+        // state would leave the middle of it unfetched while advancing past it.
+        const behind = this.lastSeenId.get(ch) ?? 0;
+        const msgs = await this.client.getMessages(ent, { limit: behind ? 100 : 10 });
         const last = this.lastSeenId.get(ch) ?? 0;
         const fresh = msgs.filter((m: any) => m.id > last).sort((a: any, b: any) => a.id - b.id);
         for (const m of fresh) {
@@ -111,6 +130,9 @@ export class TelegramWatcher extends EventEmitter {
       } catch (e) {
         this.stats.pollErrors++;
         this.emit("status", `poll error @${ch}: ${(e as Error).message}`);
+        // A failed poll is a hole in coverage, and the cursor deliberately does NOT advance — but the failure has to
+        // be recorded too, or the hole is indistinguishable from a channel that said nothing.
+        this.emit("gap", { channel: ch, at: Date.now(), reason: (e as Error).message.slice(0, 200) });
       }
     }
   }

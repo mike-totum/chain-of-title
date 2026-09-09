@@ -201,6 +201,22 @@ export function openDb(path: string, opts: { migrate?: boolean } = {}): Database
     );
     CREATE INDEX IF NOT EXISTS tg_posted ON tg_messages(posted_at);
     CREATE INDEX IF NOT EXISTS tg_mints ON tg_messages(mints);
+    -- When we could NOT read a channel. The launch record has a runs table for exactly this reason: a gap that is not
+    -- written down is indistinguishable afterwards from a channel that said nothing, and the second reads as a
+    -- finding. Absence has to be able to prove it is absence.
+    CREATE TABLE IF NOT EXISTS tg_gaps (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, channel TEXT, from_at INTEGER, to_at INTEGER, polls INTEGER, reason TEXT
+    );
+    CREATE INDEX IF NOT EXISTS tg_gaps_channel ON tg_gaps(channel, from_at);
+    -- Every legal hold, and what it protected. A hold that leaves no trace of when it was set is hard to testify
+    -- about afterwards, and protect_before is the answer to the harder question: what happens on RELEASE. Without
+    -- it, unsetting the hold lets the next prune sweep the whole held period in one pass, so the moment of release
+    -- is the moment the evidence disappears. Rows older than the earliest recorded protect_before are never deleted
+    -- again by either pruner.
+    CREATE TABLE IF NOT EXISTS legal_holds (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, note TEXT, set_at INTEGER, last_seen_at INTEGER,
+      released_at INTEGER, protect_before INTEGER
+    );
   `);
   // `updated_at` is written on every token row update, but vault_sol is only replaced when a pool read actually
   // succeeded (COALESCE below). Reporting updated_at as the measurement time therefore advanced the timestamp while

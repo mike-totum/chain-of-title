@@ -34,12 +34,40 @@ const BATCH = 200_000;
  * seconds by someone who has just been told to preserve, without a deploy.
  */
 const LEGAL_HOLD = (process.env.LEGAL_HOLD ?? "").trim();
-if (LEGAL_HOLD) {
-  console.log(`LEGAL HOLD IS SET (${LEGAL_HOLD}) — nothing will be deleted. Unset LEGAL_HOLD to resume retention.`);
-  process.exit(0);
-}
 
 const db = openDb(config.dbPath);
+
+/**
+ * Record the hold, and remember what it protected.
+ *
+ * An env var alone is hard to testify about later: it says nothing about when the hold began or who set it. A row
+ * does. `protect_before` is the harder half — the retention cutoff at the moment the hold started. Without it,
+ * unsetting the hold lets the next prune sweep the entire held period in a single pass, so the moment of release
+ * becomes the moment the evidence disappears, which is the opposite of what a hold is for.
+ */
+export function noteHold(db2: any, note: string, retainDays: number): void {
+  const open = db2.prepare("SELECT id FROM legal_holds WHERE released_at IS NULL ORDER BY id DESC LIMIT 1").get();
+  if (open) { db2.prepare("UPDATE legal_holds SET last_seen_at = ? WHERE id = ?").run(Date.now(), (open as any).id); return; }
+  db2.prepare("INSERT INTO legal_holds (note, set_at, last_seen_at, protect_before) VALUES (?,?,?,?)")
+    .run(note, Date.now(), Date.now(), Date.now() - retainDays * 86400_000);
+}
+
+/** Rows older than the earliest hold ever recorded are never deleted again, released or not. */
+export function protectFloor(db2: any): number {
+  try {
+    const r = db2.prepare("SELECT MIN(protect_before) m FROM legal_holds").get() as any;
+    return Number(r?.m ?? 0) || 0;
+  } catch { return 0; }
+}
+
+if (LEGAL_HOLD) {
+  noteHold(db, LEGAL_HOLD, DAYS);
+  console.log(`LEGAL HOLD IS SET (${LEGAL_HOLD}) — nothing will be deleted, and the hold is recorded in legal_holds.`);
+  console.log(`Unset LEGAL_HOLD to resume retention. Data protected during a hold stays protected after release.`);
+  process.exit(0);
+}
+const FLOOR = protectFloor(db);
+if (FLOOR) console.log(`  a previous legal hold protects everything before ${new Date(FLOOR).toISOString().slice(0, 10)}; it will not be deleted.`);
 const cutoff = Date.now() - DAYS * 86400_000;
 const iso = new Date(cutoff).toISOString().slice(0, 16).replace("T", " ");
 const n = (x: number) => x.toLocaleString();
@@ -78,7 +106,7 @@ console.log("");
 // the published record. Deleting them leaves every count intact while destroying the proof of who took each curve.
 // See KEEP_EVIDENCE in index.ts — the same exemption, because the collector prunes itself and this prunes by hand,
 // and a rule that holds in only one of them is not a rule.
-purge("trades", `DELETE FROM trades WHERE rowid IN (SELECT rowid FROM trades WHERE ts < ?
+purge("trades", `DELETE FROM trades WHERE rowid IN (SELECT rowid FROM trades WHERE ts < ? AND ts >= ${FLOOR}
   ${KEEP_TRADE_EVIDENCE} LIMIT ${BATCH})`, [cutoff]);
 purge("wallet_token_stats", `DELETE FROM wallet_token_stats WHERE rowid IN (SELECT wts.rowid FROM wallet_token_stats wts JOIN tokens t ON t.mint = wts.mint WHERE t.created_at < ? LIMIT ${BATCH})`, [cutoff]);
 purge("curve_snapshots", `DELETE FROM curve_snapshots WHERE rowid IN (SELECT rowid FROM curve_snapshots WHERE ts < ? LIMIT ${BATCH})`, [cutoff]);

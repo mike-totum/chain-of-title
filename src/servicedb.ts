@@ -35,6 +35,26 @@ const FULL = process.argv.includes("--full");
  */
 const READ_ONLY = process.argv.includes("--read-only");
 
+/**
+ * A legal hold freezes the published record, not only the pruners.
+ *
+ * Holding deletion while still rebuilding would defeat itself: `servicedb` rebuilds `rec.trades` and
+ * `rec.wallet_flow` in full from whatever the collector currently holds, so evidence already published disappears
+ * from the artifact the moment the collector no longer has its source rows — a deletion by another route, arriving
+ * through the one path nobody would think to suspend. Raised by the other session while reviewing the hold, and it
+ * was right.
+ *
+ * So under a hold the record does not change at all. New launches stop being published for the duration, which is a
+ * real cost and the correct trade: a hold is exceptional and time-bounded, and "the file under dispute did not move
+ * while the dispute was live" is a sentence worth being able to say without qualification.
+ */
+const HOLD = (process.env.LEGAL_HOLD ?? "").trim();
+if (HOLD) {
+  console.log(`LEGAL HOLD IS SET (${HOLD}) — the published record is frozen and will not be rebuilt.`);
+  console.log(`Collection continues; only publication is suspended. Unset LEGAL_HOLD to resume.`);
+  process.exit(0);
+}
+
 const db = openDb(config.dbPath);
 const log = (...a: unknown[]) => console.log(...a);
 
