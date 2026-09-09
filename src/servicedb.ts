@@ -19,6 +19,7 @@
  * checkpoints. Those are how the record was derived, not the record. A launch fact, once established, never changes,
  * which is what makes this file cheap to cache, cheap to ship, and safe to treat as append-mostly.
  */
+import { createHash } from "node:crypto";
 import { openDb } from "./db.ts";
 import { config } from "./config.ts";
 import { statSync } from "node:fs";
@@ -180,8 +181,42 @@ try { db.exec("UPDATE rec.tokens SET graduated_confirmed_by = 'pool' WHERE gradu
  * the whole point of stating them separately.
  */
 for (const c of ["uri TEXT", "image TEXT", "description TEXT", "meta_at INTEGER",
-                 "image_sha256 TEXT", "image_bytes INTEGER", "image_at INTEGER", "meta_bytes INTEGER"])
+                 "image_sha256 TEXT", "image_bytes INTEGER", "image_at INTEGER", "meta_bytes INTEGER",
+                 "meta_sha256 TEXT"])
   try { db.exec(`ALTER TABLE rec.tokens ADD COLUMN ${c}`); } catch {}
+
+/**
+ * The commitment, not the document.
+ *
+ * `meta_json` stays in the collector: a kilobyte a launch against 24,000 launches a day would add tens of megabytes
+ * a day to a file whose entire value is that one person can mirror it. But holding a document nobody can verify we
+ * hold is a claim, and this project does not publish claims it cannot evidence.
+ *
+ * A sha256 costs 64 bytes and settles it. Anyone who later obtains the document — from us, lawfully, or by having
+ * archived the URI themselves before the creator repointed it — can prove it is the one we read at launch. It is
+ * the same trade already made for images: the proof rather than the picture.
+ *
+ * Computed over the UTF-8 bytes of the stored document, which is what we received; a NULL here means we hold no
+ * document to commit to, and `meta_bytes` still distinguishes "too large to store" from "never fetched".
+ */
+db.function("sha256", (v: unknown) =>
+  v == null ? null : createHash("sha256").update(String(v), "utf8").digest("hex"));
+
+/**
+ * And backfilled, because the copy below is incremental.
+ *
+ * A new column plus a watermark leaves every row that has not changed since the last run permanently NULL — the
+ * third time this file has been bitten by that, and the reason `uri` carries its own backfill a few lines down. The
+ * first run of this stamped 325 of 12,255 documents the collector was already holding. The commitment is worthless
+ * if it only covers launches that happened to be touched today.
+ */
+try {
+  const r = db.prepare(`UPDATE rec.tokens SET meta_sha256 = (
+      SELECT sha256(m.meta_json) FROM main.tokens m WHERE m.mint = rec.tokens.mint)
+    WHERE meta_sha256 IS NULL AND EXISTS (
+      SELECT 1 FROM main.tokens m WHERE m.mint = rec.tokens.mint AND m.meta_json IS NOT NULL)`).run();
+  if (Number(r.changes ?? 0) > 0) log(`  backfilled ${Number(r.changes).toLocaleString()} metadata commitments`);
+} catch (e) { log(`  WARNING: meta_sha256 backfill failed: ${String((e as any)?.message ?? e).slice(0, 120)}`); }
 /**
  * DO NOT add a DROP COLUMN here. It was tried and it does not hold.
  *
@@ -248,7 +283,7 @@ try {
        unique_buyers, curve_buyers, snap30_buyers, bundled_buyers, graduated, graduated_at,
        pool, vault_sol, vault_at, last_price, rebuilt_at, rebuilt_complete, updated_at,
        venue, graduated_confirmed_by, uri, image, description, meta_at,
-       image_sha256, image_bytes, image_at, meta_bytes)
+       image_sha256, image_bytes, image_at, meta_sha256, meta_bytes)
     SELECT mint, name, symbol, creator, created_at, COALESCE(late_discovery,0), dev_pct, dev_sold,
            unique_buyers,
            ${READ_ONLY ? `COALESCE(curve_buyers, (SELECT COUNT(DISTINCT tr.wallet) FROM trades tr
@@ -264,6 +299,7 @@ try {
            -- The launch claim, carried verbatim. Never re-derived: a later read of the URI is not what it said then.
            uri, image, description, meta_at,
            image_sha256, image_bytes, image_at,
+           sha256(meta_json),
            -- The document's size as served, which is what tells "too big to store" apart from "never fetched".
            -- meta_json itself is deliberately not published: see the DROP below.
            meta_bytes
