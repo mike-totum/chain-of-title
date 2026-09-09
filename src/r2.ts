@@ -49,19 +49,23 @@ const hmac = (key: Buffer | string, s: string) => createHmac("sha256", key).upda
  * store we already have it, so a PUT costs no extra hashing. Every header named in `signedHeaders` must be sent
  * exactly as signed — a mismatch fails with SignatureDoesNotMatch and no indication which header was wrong.
  */
-function sign(cfg: R2Config, method: string, key: string, payloadHash: string, extraHeaders: Record<string, string> = {}) {
+function sign(cfg: R2Config, method: string, key: string, payloadHash: string, extraHeaders: Record<string, string> = {}, query = "") {
   const host = `${cfg.accountId}.r2.cloudflarestorage.com`;
   const now = new Date();
   const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, "");   // 20260909T213000Z
   const dateStamp = amzDate.slice(0, 8);
-  const path = `/${cfg.bucket}/${key.split("/").map(encodeURIComponent).join("/")}`;
+  // An empty key means the bucket itself (a listing), whose path has no trailing slash. Building it as
+  // `/bucket/` + "" signs a path the request does not use, which fails as SignatureDoesNotMatch.
+  const path = key === "" ? `/${cfg.bucket}` : `/${cfg.bucket}/${key.split("/").map(encodeURIComponent).join("/")}`;
 
   const headers: Record<string, string> = { host, "x-amz-content-sha256": payloadHash, "x-amz-date": amzDate, ...extraHeaders };
   const names = Object.keys(headers).map((h) => h.toLowerCase()).sort();
   const canonicalHeaders = names.map((n) => `${n}:${String(headers[Object.keys(headers).find((k) => k.toLowerCase() === n)!]).trim()}\n`).join("");
   const signedHeaders = names.join(";");
 
-  const canonicalRequest = [method, path, "", canonicalHeaders, signedHeaders, payloadHash].join("\n");
+  // The canonical query string is part of what gets signed. Omitting it is invisible for PUT/HEAD/GET, which carry
+  // none, and fails only on the one call that does — with SignatureDoesNotMatch and no indication which part differed.
+  const canonicalRequest = [method, path, query, canonicalHeaders, signedHeaders, payloadHash].join("\n");
   const scope = `${dateStamp}/${REGION}/${SERVICE}/aws4_request`;
   const stringToSign = ["AWS4-HMAC-SHA256", amzDate, scope, sha(canonicalRequest)].join("\n");
 
@@ -98,6 +102,31 @@ export async function put(cfg: R2Config, sha256: string, body: Buffer, contentTy
   });
   const res = await fetch(url, { method: "PUT", headers, body: new Uint8Array(body), signal: AbortSignal.timeout(timeoutMs) });
   if (!res.ok) throw new Error(`PUT ${res.status} ${(await res.text().catch(() => "")).slice(0, 200)}`);
+}
+
+/**
+ * How many objects the store holds, and a page of their keys.
+ *
+ * Operational rather than part of the record: the archive never asks the store what it contains — it asks for a
+ * specific hash the record already commits to. This exists so a human can answer "is capture actually landing
+ * here", which turned out to be a question the logs could not settle.
+ */
+export async function list(cfg: R2Config, prefix = "img/", max = 1000, token?: string): Promise<{ keys: string[]; next?: string }> {
+  const params: Record<string, string> = { "list-type": "2", prefix, "max-keys": String(max) };
+  if (token) params["continuation-token"] = token;
+  // Sorted by name, each name and value percent-encoded — SigV4's canonical form, which is not what URLSearchParams
+  // produces (it encodes spaces as '+' and does not sort).
+  const enc = (v: string) => encodeURIComponent(v).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+  const query = Object.keys(params).sort().map((k) => `${enc(k)}=${enc(params[k])}`).join("&");
+  const host = `${cfg.accountId}.r2.cloudflarestorage.com`;
+  const { headers } = sign(cfg, "GET", "", "UNSIGNED-PAYLOAD", {}, query);
+  const res = await fetch(`https://${host}/${cfg.bucket}?${query}`, { method: "GET", headers, signal: AbortSignal.timeout(30_000) });
+  if (!res.ok) throw new Error(`LIST ${res.status} ${(await res.text().catch(() => "")).slice(0, 160)}`);
+  const xml = await res.text();
+  return {
+    keys: [...xml.matchAll(/<Key>([^<]+)<\/Key>/g)].map((m) => m[1]),
+    next: /<IsTruncated>true<\/IsTruncated>/.test(xml) ? (xml.match(/<NextContinuationToken>([^<]+)</) ?? [])[1] : undefined,
+  };
 }
 
 /**
