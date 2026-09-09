@@ -70,16 +70,16 @@ const DOCS: Record<string, Record<string, Doc>> = {
     image_sha256: { kind: "ours", desc: "sha256 of the image bytes, when we hold them — the proof rather than the picture. NULL means we did not fetch it, which is a disk-budget decision and not a finding about the launch." },
     image_bytes: { kind: "ours", desc: "Size of the fetched image in bytes." },
     image_at: { kind: "ours", desc: "When the image bytes were fetched, epoch ms." },
-    image_error: { kind: "ours", desc: "Why an image fetch failed, when it did. A gap we own rather than hide." },
-    meta_json: { kind: "live", desc: "The metadata document itself as served, not our reading of five fields out of it. The URI is the creator's to repoint, so everything else an operator wrote there is retrievable exactly once. NULL with meta_bytes set means the document was too large to store, never truncated — half a JSON document is not a JSON document." },
-    meta_bytes: { kind: "ours", desc: "Size of the metadata document as served. Set even when meta_json is NULL, which is how 'too big to store' is told apart from 'never fetched'." },
+    image_error: { kind: "ours", desc: "Always NULL here. It records why one of our image fetches failed, which describes us rather than the launch, so the published record does not carry it. The column exists because our own tooling migrates any database it opens to the collector's schema." },
+    meta_json: { kind: "ours", desc: "Always NULL here. The collector keeps the metadata document — it is retrievable exactly once, since the URI is the creator's to repoint — but publishing it would add roughly a kilobyte per launch to a file whose whole value is that one person can mirror it. The column exists because our own tooling migrates any database it opens; read meta_bytes to tell 'never fetched' from 'fetched and it exists'." },
+    meta_bytes: { kind: "ours", desc: "Size of the metadata document as served, in bytes. The document itself is kept by the collector but is not published here: at roughly a kilobyte a launch it would add tens of megabytes a day to a file whose whole point is that one person can mirror it. This column is what lets you tell 'we never fetched it' from 'we fetched it and it exists'." },
   },
   wallet_flow: {
     wallet: { kind: "chain", desc: "A wallet that has bought at least one bonding curve outright. One row each." },
     curve_sol: { kind: "chain", desc: "SOL this wallet spent buying bonding curves." },
-    amm_buy: { kind: "opaque", desc: "SOL this wallet spent on the open market, across EVERY token it traded — not only the curves it took. The market trades behind this figure are not in this file, so you cannot reproduce it here." },
-    amm_sell: { kind: "opaque", desc: "SOL this wallet received selling on the open market, across EVERY token it traded — not only the curves it took. Do not read it as proceeds from the curves in the same row. The market trades behind it are not in this file, so you cannot reproduce it here." },
-    tokens: { kind: "opaque", desc: "Distinct tokens this wallet traded on any venue, not the number of curves it took. For curve buyouts, count rows in trades instead." },
+    amm_buy: { kind: "ours", desc: "SOL this wallet spent buying back on the open market, on the curves it took. Sum the venue='amm', side='buy' rows in trades for this wallet and you will get this number." },
+    amm_sell: { kind: "ours", desc: "SOL this wallet received selling on the open market, on the curves it took — the tokens it bought the float of, not everything it ever traded. Sum the venue='amm', side='sell' rows in trades for this wallet and you will get this number. It used to count every token the wallet touched while the pages around it said 'sold after taking the curve'." },
+    tokens: { kind: "ours", desc: "Number of curves this wallet took. Count the distinct mints in trades for this wallet and you will get this number." },
   },
   trades: {
     mint: { kind: "chain", desc: "Token traded." },
@@ -87,7 +87,7 @@ const DOCS: Record<string, Record<string, Doc>> = {
     side: { kind: "chain", desc: "'buy' or 'sell'." },
     sol: { kind: "chain", desc: "Size of the trade in SOL." },
     ts: { kind: "chain", desc: "When we decoded the trade, epoch ms. Events arriving together carry the same timestamp, so ordering within a batch is not established." },
-    venue: { kind: "chain", desc: "'curve' for a bonding-curve trade. This table holds curve buys large enough to count as a buyout; it is not every trade on every token." },
+    venue: { kind: "chain", desc: "'curve' for a bonding-curve trade, 'amm' for one on the open market. This table holds two things and nothing else: curve buys large enough to count as a buyout, and the market trades those same wallets made on those same tokens afterwards. The second set is here so wallet_flow can be checked against it rather than believed." },
     is_dev: { kind: "chain", desc: "1 when the trading wallet is the token's creator." },
     slot: { kind: "chain", desc: "Solana slot, where known." },
   },
@@ -184,6 +184,8 @@ export function renderSchema(db: DatabaseSync): string {
       `site.ts leaves the previous pages up, so nothing is served wrong in the meantime.`);
   }
 
+  const anyOpaque = Object.entries(DOCS).some(([t, docs]) =>
+    columnsOf(db, t).some((c) => docs[c.name]?.kind === "opaque"));
   const legend = (Object.keys(KIND_NOTE) as Kind[]).map((k) =>
     `<tr><td><span class="kind k-${k}">${k}</span></td><td>${esc(KIND_NOTE[k])}</td></tr>`).join("");
 
@@ -195,7 +197,9 @@ export function renderSchema(db: DatabaseSync): string {
   <table><tr><th>Kind</th><th>Meaning</th></tr>${legend}</table>
   <p class="callout">Anything marked <span class="kind k-opaque">opaque</span> is a defect on our side, not a
   category we are content with: this file is meant to carry its own evidence, and a number you cannot check against
-  it does not belong in it. They are labelled rather than quietly left in.</p>
+  it does not belong in it. ${anyOpaque
+    ? "They are labelled rather than quietly left in."
+    : "<b>There are none in this build.</b> Every figure here can be recomputed from rows in the same file."}</p>
   ${sections.join("\n")}`;
 }
 

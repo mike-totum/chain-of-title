@@ -160,8 +160,37 @@ try { db.exec("UPDATE rec.tokens SET graduated_confirmed_by = 'pool' WHERE gradu
  * the whole point of stating them separately.
  */
 for (const c of ["uri TEXT", "image TEXT", "description TEXT", "meta_at INTEGER",
-                 "image_sha256 TEXT", "image_bytes INTEGER", "image_at INTEGER"])
+                 "image_sha256 TEXT", "image_bytes INTEGER", "image_at INTEGER", "meta_bytes INTEGER"])
   try { db.exec(`ALTER TABLE rec.tokens ADD COLUMN ${c}`); } catch {}
+/**
+ * DO NOT add a DROP COLUMN here. It was tried and it does not hold.
+ *
+ * `openDb()` runs the collector's schema migrations against whatever file it is handed, and both `site.ts` and
+ * `serve.ts` open the published record with it. So a column dropped at build time is back the moment anything of
+ * ours reads the file: dropped here, 31 columns; one `npm run site` later, 33 again. The drop was silently undone
+ * on every cycle and looked like it had never run.
+ *
+ * That is worth more attention than the two columns are. The web service migrating the artifact it serves means the
+ * file a reader downloads is not byte-identical to the file we built, and its hash moves after publication — which
+ * is the property an archive under a DOI most needs to keep. The fix belongs in `openDb` (a read-only open that
+ * does not migrate), not here, and it is not this file's to make.
+ *
+ * Until then both columns stay, empty, and the schema page says so rather than pretending they carry something.
+ *
+ * `image_error` describes our fetch, not the launch — the CREATE above says so and then the file carried it anyway.
+ *
+ * `meta_json` is the harder one and is a publication decision rather than a collection one. Keeping the metadata
+ * document in the collector is exactly the archaeology this project exists to do: the URI is the creator's to
+ * repoint and the document is retrievable once. Publishing it in record.db is a different act. It runs about a
+ * kilobyte a launch against roughly 24,000 launches a day, so it would add ~24 MB a day to a 75 MB file and destroy
+ * the property the archive is built on — that one person can mirror the whole thing. That is the same argument this
+ * file already makes for storing an image's sha256 rather than its bytes, pointed at a much larger column.
+ *
+ * So: collect it, do not publish it yet, and let it be decided deliberately rather than by an ALTER. Both columns
+ * hold no data today, so dropping them loses nothing; a schema that advertises holdings the file does not have is
+ * worse than one that says less.
+ */
+
 /**
  * `uri` gets a real backfill, because the collector has held it all along: 154,000 of 157,000 launches. Without this
  * the watermark leaves every historical row NULL while the value sits in the source database, which is the third time
@@ -185,7 +214,21 @@ log(`carrying launches ${since ? `changed since ${new Date(since).toISOString()}
 db.exec("BEGIN");
 try {
   // Launch facts. `updated_at` is the watermark: a row is carried when the collector last touched it.
+  /**
+   * Named columns, not positional — the same fix `rec.trades` already carries, arrived at the same way.
+   *
+   * A record database built by an earlier version of this file holds columns this one no longer writes:
+   * CREATE TABLE IF NOT EXISTS will not widen an existing table, and deleting an ALTER does not narrow one either.
+   * data/record.db had 33 columns against the 30 this SELECT supplies and every rebuild died on
+   * "table rec.tokens has 33 columns but 30 values were supplied" — on the collector, which is the only machine
+   * that matters. Naming the columns makes the copy indifferent to what else the file has accumulated.
+   */
   db.exec(`INSERT INTO rec.tokens
+      (mint, name, symbol, creator, created_at, late_discovery, dev_pct, dev_sold,
+       unique_buyers, curve_buyers, snap30_buyers, bundled_buyers, graduated, graduated_at,
+       pool, vault_sol, vault_at, last_price, rebuilt_at, rebuilt_complete, updated_at,
+       venue, graduated_confirmed_by, uri, image, description, meta_at,
+       image_sha256, image_bytes, image_at, meta_bytes)
     SELECT mint, name, symbol, creator, created_at, COALESCE(late_discovery,0), dev_pct, dev_sold,
            unique_buyers,
            ${READ_ONLY ? `COALESCE(curve_buyers, (SELECT COUNT(DISTINCT tr.wallet) FROM trades tr
@@ -200,8 +243,10 @@ try {
            COALESCE(graduated_confirmed_by, CASE WHEN graduated = 1 AND pool IS NOT NULL THEN 'pool' END),
            -- The launch claim, carried verbatim. Never re-derived: a later read of the URI is not what it said then.
            uri, image, description, meta_at,
-           -- Last again, and appended in the same order as the ALTER above: this is a positional INSERT ... SELECT.
-           image_sha256, image_bytes, image_at
+           image_sha256, image_bytes, image_at,
+           -- The document's size as served, which is what tells "too big to store" apart from "never fetched".
+           -- meta_json itself is deliberately not published: see the DROP below.
+           meta_bytes
     FROM main.tokens WHERE COALESCE(updated_at, 0) >= ${since}
       -- The quote asset is not a launch. Wrapped SOL was copied into the record as one and served as a token page.
       AND main.tokens.mint NOT IN ('So11111111111111111111111111111111111111112',
@@ -277,7 +322,7 @@ try {
     db.exec(`INSERT INTO rec.${t} SELECT ${cols} FROM main.${t}`);
   }
 
-  // one row per wallet that has ever taken a curve; the aggregate is over all of its trades, on both venues
+  // one row per wallet that has ever taken a curve, over the trades on the curves it actually took
   db.exec("DELETE FROM rec.wallet_flow");
   /**
    * Scoped to the mints the wallet actually took, which is what every label on it says.
