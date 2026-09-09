@@ -27,6 +27,34 @@ export function openDb(path: string, opts: { migrate?: boolean } = {}): Database
     db.exec("PRAGMA busy_timeout = 10000;");
     return db;
   }
+  /**
+   * Refuse to migrate a published record, whoever asked.
+   *
+   * Three callers were found doing it in one evening — serve.ts, site.ts twice — and the third was one line above a
+   * `PRAGMA query_only = 1`, a generator that declares itself read-only while rewriting what it was handed. Roughly
+   * forty tools in this repo open `config.dbPath`, every one of them honours a DB_PATH override, and two take a
+   * `--db` flag: so any of them can be pointed at the record by someone who has no idea this function migrates.
+   *
+   * Fixing the callers fixes today. This fixes the class, including the tool somebody writes next month, and it does
+   * it where the knowledge lives. A record is unmistakable: it carries a `meta` table with `built_at`, which the
+   * collector's own database has never had.
+   *
+   * Throws rather than quietly opening read-only, because a caller that wanted the record needs to say so — the
+   * whole failure was code doing something reasonable-looking to a file it did not own, silently.
+   */
+  const looksLikeRecord = (() => {
+    try {
+      const t = db.prepare("SELECT COUNT(*) c FROM sqlite_master WHERE type='table' AND name='meta'").get() as any;
+      if (!t?.c) return false;
+      const m = db.prepare("SELECT COUNT(*) c FROM meta WHERE k='built_at'").get() as any;
+      return !!m?.c;
+    } catch { return false; }
+  })();
+  if (looksLikeRecord) {
+    db.close();
+    throw new Error(`${path} is a published record (it carries meta.built_at), and openDb() would migrate it — ` +
+      `adding tables and columns, and changing its hash after publication. Open it with openDb(path, { migrate: false }).`);
+  }
   db.exec(`
     PRAGMA journal_mode = WAL;
     PRAGMA busy_timeout = 10000;
