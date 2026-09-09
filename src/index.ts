@@ -968,8 +968,21 @@ function pruneWorkingData(): void {
     for (const [table, sql] of [
       ["trades", `DELETE FROM trades WHERE rowid IN (SELECT rowid FROM trades WHERE ts < ? AND ts >= ${floor} ${KEEP_EVIDENCE} LIMIT ${batch})`],
       ["curve_snapshots", `DELETE FROM curve_snapshots WHERE rowid IN (SELECT rowid FROM curve_snapshots WHERE ts < ? LIMIT ${batch})`],
-      // Same rule as prune.ts, from the same function: a post cited as promotion evidence is archive, not residue.
-      ["tweets", `DELETE FROM tweets WHERE rowid IN (SELECT rowid FROM tweets WHERE fetched_at < ? ${keepTweetEvidence(db)} LIMIT ${batch})`],
+      /**
+       * Tweets are kept unless someone sets a retention period, the same footing as tg_messages.
+       *
+       * Until today this DELETE never ran here at all — the curve_snapshots throw above aborted the pass before
+       * reaching it — so fixing that fault would have ARMED the deletion of 88,133 posts as its first act. That
+       * corpus is the only sample of broad pump.fun X chatter anyone here holds; it is what showed this morning that
+       * promotion tracks attention rather than manufacture, and it cannot be re-collected at any price now the
+       * account has no credits.
+       *
+       * Deleting it to tidy up would be a one-way door opened by a bug fix. TWEETS_RETAIN_DAYS is the deliberate
+       * decision; unset means keep, and the cited-evidence guard still applies when it is set.
+       */
+      ...(Number(process.env.TWEETS_RETAIN_DAYS ?? 0) > 0
+        ? [["tweets", `DELETE FROM tweets WHERE rowid IN (SELECT rowid FROM tweets WHERE fetched_at < ${Date.now() - Number(process.env.TWEETS_RETAIN_DAYS) * 86400_000} ${keepTweetEvidence(db)} LIMIT ${batch})`] as const]
+        : []),
     ] as const) {
       const present = (() => {
         try { return !!(db.prepare("SELECT COUNT(*) c FROM sqlite_master WHERE type='table' AND name=?").get(table) as any)?.c; }

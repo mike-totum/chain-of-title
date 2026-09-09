@@ -110,7 +110,9 @@ const show = (v: number) => (v < 0 ? "absent".padStart(12) : n(v).padStart(12));
 console.log(`  trades              ${show(counts.trades)} to delete, ${counts.tradesKeep < 0 ? "absent" : n(counts.tradesKeep)} kept`);
 console.log(`  wallet_token_stats  ${show(counts.wts)} to delete (tokens launched before the cutoff)`);
 console.log(`  curve_snapshots     ${show(counts.snaps)} to delete`);
-console.log(`  tweets              ${show(counts.tweets)} to delete`);
+console.log(Number(process.env.TWEETS_RETAIN_DAYS ?? 0) > 0
+  ? `  tweets              ${show(counts.tweets)} to delete (TWEETS_RETAIN_DAYS=${process.env.TWEETS_RETAIN_DAYS})`
+  : `  tweets              ${show(counts.tweets)} older than the cutoff, RETAINED — set TWEETS_RETAIN_DAYS to delete them`);
 console.log(`\n  kept untouched: tokens, signals, operator_wallets/funders/policy, pool_map, positions, hist_*`);
 
 if (!APPLY) { console.log(`\ndry run — nothing deleted. Re-run with --apply to execute.`); process.exit(0); }
@@ -137,10 +139,19 @@ purge("trades", `DELETE FROM trades WHERE rowid IN (SELECT rowid FROM trades WHE
   ${KEEP_TRADE_EVIDENCE} LIMIT ${BATCH})`, [cutoff]);
 purge("wallet_token_stats", `DELETE FROM wallet_token_stats WHERE rowid IN (SELECT wts.rowid FROM wallet_token_stats wts JOIN tokens t ON t.mint = wts.mint WHERE t.created_at < ? LIMIT ${BATCH})`, [cutoff]);
 purge("curve_snapshots", `DELETE FROM curve_snapshots WHERE rowid IN (SELECT rowid FROM curve_snapshots WHERE ts < ? LIMIT ${BATCH})`, [cutoff]);
-/** Firehose residue goes; a post cited as evidence for a flagged launch stays. See keepTweetEvidence. */
-const KEEP_TWEETS = keepTweetEvidence(db);
-if (KEEP_TWEETS) console.log("  tweets cited by token_promotion_hit are evidence and will be kept");
-purge("tweets", `DELETE FROM tweets WHERE rowid IN (SELECT rowid FROM tweets WHERE fetched_at < ? ${KEEP_TWEETS} LIMIT ${BATCH})`, [cutoff]);
+/**
+ * Tweets are kept unless TWEETS_RETAIN_DAYS says otherwise — the same footing as tg_messages, and for the same
+ * reason. The 88,133 posts already here are the only sample of broad pump.fun X chatter this project holds, they
+ * cannot be re-collected now the account has no credits, and deleting them to tidy up is a one-way door.
+ */
+const TWEET_DAYS = Number(process.env.TWEETS_RETAIN_DAYS ?? 0);
+if (TWEET_DAYS > 0) {
+  const KEEP_TWEETS = keepTweetEvidence(db);
+  if (KEEP_TWEETS) console.log("  tweets cited by token_promotion_hit are evidence and will be kept");
+  purge("tweets", `DELETE FROM tweets WHERE rowid IN (SELECT rowid FROM tweets WHERE fetched_at < ${Date.now() - TWEET_DAYS * 86400_000} ${KEEP_TWEETS} LIMIT ${BATCH})`, []);
+} else {
+  console.log("  tweets: retained (TWEETS_RETAIN_DAYS unset) — the only X sample this project holds");
+}
 /**
  * Telegram messages are NOT pruned on the working-data timer, and that is deliberate: they are the archive, not
  * working data, and the retention period for personal data is a legal decision rather than an operational one.
