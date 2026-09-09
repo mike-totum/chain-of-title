@@ -52,7 +52,7 @@ const DOCS: Record<string, Record<string, Doc>> = {
     curve_buyers: { kind: "live", desc: "Distinct wallets that bought on the bonding curve before it graduated. NULL means unknown, which never certifies as clean." },
     snap30_buyers: { kind: "live", desc: "Distinct buyers within the first 30 seconds. Meaningful only for an observed launch." },
     bundled_buyers: { kind: "live", desc: "Buyers landing in the creation block itself — bought before anyone outside could have seen the token exist." },
-    graduated: { kind: "ours", desc: "1 if the curve is recorded as having completed. Written from two sources this column cannot tell apart; read graduated_confirmed_by before relying on it." },
+    graduated: { kind: "ours", desc: "1 if the curve is recorded as having completed — an inference from decoded trade volume, not a reading of the curve. Measured 2026-09-09: of rows where graduated_confirmed_by IS NULL, the curve account was read directly and returned complete=0 on 5,187 of them. Count graduations with graduated_confirmed_by IS NOT NULL; this column alone overstates them by about three quarters." },
     graduated_at: { kind: "ours", desc: "When the curve is recorded as completing, epoch ms. Subject to the same caveat as graduated." },
     pool: { kind: "chain", desc: "The PumpSwap pool address, once discovered. NULL is not evidence a curve did not complete: pool discovery has its own coverage gaps." },
     vault_sol: { kind: "reading", desc: "SOL in the pool at the last successful read. One value, not a history. Always read it with vault_at." },
@@ -62,7 +62,7 @@ const DOCS: Record<string, Record<string, Doc>> = {
     rebuilt_complete: { kind: "ours", desc: "1 when a rebuild read the curve's entire transaction history. 0 or NULL means signature paging hit its cap or transactions could not be fetched, so the rebuild is partial and its counts are floors." },
     updated_at: { kind: "ours", desc: "Last time any field on this row changed, epoch ms." },
     venue: { kind: "chain", desc: "Which launchpad the token came from." },
-    graduated_confirmed_by: { kind: "ours", desc: "How graduation was confirmed: 'pool' (a PumpSwap pool was found), 'curve_complete' (the curve account's own complete bit), or NULL for an inference from decoded trade volume that nobody ever confirmed. NULL means we say less, never that we say the opposite." },
+    graduated_confirmed_by: { kind: "ours", desc: "How graduation was confirmed: 'pool' (a PumpSwap pool was found), 'curve_complete' (the curve account's own complete bit), or NULL for an inference from decoded trade volume that nobody ever confirmed. NULL means we say less, never that we say the opposite — but it is not neutral: where the curve account has since been read, the great majority of NULL rows returned complete=0. This column, not graduated, is the graduation flag." },
     uri: { kind: "ours", desc: "Metadata URI the launch declared." },
     image: { kind: "ours", desc: "Image URL from that metadata. A NULL here with meta_at set means the launch declared no picture — a different statement from us not fetching one." },
     description: { kind: "ours", desc: "Description the launch declared off-chain, at the time we read it." },
@@ -243,9 +243,9 @@ export function renderSamples(db: DatabaseSync): string {
   };
   const cases: { label: string; note: string; row: any }[] = [
     { label: "Manufactured", note: "creator took the supply, nobody else bought",
-      row: pick("graduated=1 AND late_discovery=0 AND dev_pct>=50 AND curve_buyers=0") },
+      row: pick("graduated_confirmed_by IS NOT NULL AND late_discovery=0 AND dev_pct>=50 AND curve_buyers=0") },
     { label: "Clean at birth", note: "small creator share, real spread of buyers",
-      row: pick("graduated=1 AND late_discovery=0 AND dev_pct<20 AND curve_buyers>=30") },
+      row: pick("graduated_confirmed_by IS NOT NULL AND late_discovery=0 AND dev_pct<20 AND curve_buyers>=30") },
     { label: "Not observed", note: "found late; the first block was never seen",
       row: pick("late_discovery=1") },
   ].filter((c) => c.row);

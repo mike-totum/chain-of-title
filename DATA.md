@@ -19,7 +19,7 @@ Released with each version at
 and served live at `https://chainoftitle.org/data/record.db`.
 
 ```
-sqlite3 record.db "SELECT mint, symbol, dev_pct, curve_buyers FROM tokens WHERE graduated = 1 LIMIT 5;"
+sqlite3 record.db "SELECT mint, symbol, dev_pct, curve_buyers FROM tokens WHERE graduated_confirmed_by IS NOT NULL LIMIT 5;"
 ```
 
 ---
@@ -39,6 +39,16 @@ record is not evidence about the launch. Reconstructed rows are marked (`rebuilt
 launch is a fact about a moment and stays true. `vault_sol` is a balance that was read at
 `vault_at` and may be wildly wrong now. Two tokens in this dataset held 2,677 and 2,050 SOL when
 measured and about $20 each hours later. Never quote `vault_sol` without `vault_at`.
+
+**`graduated` is an inference, and it is wrong on about two rows in five.** The collector records a
+curve as completing when its own feed reaches the graduation threshold. Curves cross that mark and fall
+back, and until 2026-09-09 nothing ever re-read the curve to check. On that date the curve account was
+read directly for every unconfirmed graduation the collector held: 943 had in fact completed and are now
+confirmed, and **5,187 returned `complete = 0`** — read and disconfirmed, not merely unwitnessed. Against
+12,349 rows carrying `graduated = 1`, 6,945 are confirmed. **Count graduations with
+`graduated_confirmed_by IS NOT NULL`**; `WHERE graduated = 1` returns roughly 1.8x the true number. Those
+confirmations reach this file at the next rebuild, and `graduated` itself is unchanged pending a decision
+recorded on the corrections page — the flag stays as it was written rather than being quietly repaired.
 
 **A null is not a zero.** Throughout this file, missing means unknown. `curve_buyers IS NULL` means
 no trade rows were available, not that nobody bought. `graduated_confirmed_by IS NULL` means a
@@ -61,9 +71,9 @@ graduation was never confirmed, not that it did not happen.
 | `unique_buyers` | distinct buyers including post-graduation AMM activity. Not the same question as `curve_buyers`; prefer `curve_buyers` for provenance |
 | `snap30_buyers` | distinct outside buyers within 30 seconds of creation |
 | `bundled_buyers` | distinct non-creator buyers in the creation slot or the next one, a bundling heuristic |
-| `graduated` | 1 if the curve was recorded as completing. **See `graduated_confirmed_by` before relying on it** |
+| `graduated` | 1 if the curve was **recorded** as completing — an inference from decoded trade events, never a reading of the curve. Wrong on most rows where `graduated_confirmed_by IS NULL`; see the warning above. Do not count it alone |
 | `graduated_at` | when, ms since epoch |
-| `graduated_confirmed_by` | how completion was confirmed: `pool` (a PumpSwap pool exists, which cannot happen unless the curve completed), `curve_complete` (the curve account's own flag was read), or NULL for an inference from decoded trade events that was never confirmed. NULL is not disconfirmation |
+| `graduated_confirmed_by` | how completion was confirmed: `pool` (a PumpSwap pool exists, which cannot happen unless the curve completed), `curve_complete` (the curve account's own flag was read), or NULL for an inference from decoded trade events that was never confirmed. NULL is not disconfirmation — but it is no longer neutral either: where the curve account has since been read, the great majority of NULL rows returned `complete = 0`. **This column, not `graduated`, is the graduation flag** |
 | `pool` | PumpSwap pool address, when known |
 | `vault_sol` | SOL in the pool at the moment it was read |
 | `vault_at` | when that balance was read. Written only on an actual read, never inferred |
