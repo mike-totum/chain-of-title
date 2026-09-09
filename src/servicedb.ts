@@ -371,6 +371,35 @@ try {
   db.exec("COMMIT");
 } catch (e) { db.exec("ROLLBACK"); throw e; }
 
+/**
+ * Publish nothing but the record.
+ *
+ * `openDb` migrates whatever database it is handed, and until 2026-09-08 both the site generator and the web service
+ * pointed it at the published record — so the file the public downloads had accumulated ten empty tables from the
+ * collector's schema: tweets, signals, positions, buzz, smart_wallets, wallet_teams, wallet_token_stats,
+ * operator_funders and platform_snapshots. Every one of them held zero rows.
+ *
+ * Empty is not harmless. A file that ships a `tweets` table tells a reader we publish tweets, and the schema page
+ * generated from this file would have published that claim in a table of its own. An archive is allowed to hold
+ * nothing about a subject; it is not allowed to imply it holds something and then be empty, which is the same
+ * absence-reads-as-a-finding failure this project keeps catching in its own data.
+ *
+ * openDb({ migrate: false }) stops new ones appearing. This removes the ones already there, on every build, so a
+ * record inherited from any older version converges on the declared shape rather than carrying its history forever.
+ * sqlite_sequence is SQLite's own and cannot be dropped.
+ */
+const RECORD_TABLES = new Set(["tokens", "trades", "hist_trades", "operator_wallets", "operator_policy",
+  "pool_map", "runs", "wallet_flow", "meta", "sqlite_sequence"]);
+for (const r of db.prepare("SELECT name FROM rec.sqlite_master WHERE type='table'").all() as { name: string }[]) {
+  if (RECORD_TABLES.has(r.name)) continue;
+  const rows = (db.prepare(`SELECT COUNT(*) c FROM rec.${r.name}`).get() as any).c as number;
+  // Refuse to drop anything holding data. A table with rows in it is either a table this list has gone stale about
+  // or a mistake much larger than a stray schema, and silently deleting published rows to tidy a shape is not a
+  // trade this file gets to make on its own.
+  if (rows > 0) { log(`  WARNING: rec.${r.name} is not a record table but holds ${rows} rows — left alone, fix the list`); continue; }
+  try { db.exec(`DROP TABLE rec.${r.name}`); log(`  dropped stray empty table rec.${r.name}`); } catch { /* view, or in use */ }
+}
+
 const n = (t: string) => (db.prepare(`SELECT COUNT(*) c FROM rec.${t}`).get() as any).c as number;
 const rows = { launches: n("tokens"), buyouts: n("trades") + n("hist_trades"), wallet_flow: n("wallet_flow"), operators: n("operator_wallets"), pools: n("pool_map") };
 db.exec("DETACH DATABASE rec");
