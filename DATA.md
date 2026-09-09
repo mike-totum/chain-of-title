@@ -46,9 +46,13 @@ back, and until 2026-09-09 nothing ever re-read the curve to check. On that date
 read directly for every unconfirmed graduation the collector held: 943 had in fact completed and are now
 confirmed, and **5,187 returned `complete = 0`** — read and disconfirmed, not merely unwitnessed. Against
 12,349 rows carrying `graduated = 1`, 6,945 are confirmed. **Count graduations with
-`graduated_confirmed_by IS NOT NULL`**; `WHERE graduated = 1` returns roughly 1.8x the true number. Those
-confirmations reach this file at the next rebuild, and `graduated` itself is unchanged pending a decision
-recorded on the corrections page — the flag stays as it was written rather than being quietly repaired.
+`graduated_confirmed_by IS NOT NULL`**, or simply `SELECT * FROM graduations`, which is a view over exactly that
+set. `WHERE graduated = 1` returns roughly 1.8x the true number.
+
+`graduated` itself is left exactly as it was recorded. Repairing it would overwrite an observation with a later
+reading and destroy the evidence that the error happened, which is the one thing a correction must not do. The
+reading is published beside it instead, as `curve_checked_at` and `curve_complete`, and the whole episode is in
+the `corrections` table in this file.
 
 **A null is not a zero.** Throughout this file, missing means unknown. `curve_buyers IS NULL` means
 no trade rows were available, not that nobody bought. `graduated_confirmed_by IS NULL` means a
@@ -74,6 +78,8 @@ graduation was never confirmed, not that it did not happen.
 | `graduated` | 1 if the curve was **recorded** as completing — an inference from decoded trade events, never a reading of the curve. Wrong on most rows where `graduated_confirmed_by IS NULL`; see the warning above. Do not count it alone |
 | `graduated_at` | when, ms since epoch |
 | `graduated_confirmed_by` | how completion was confirmed: `pool` (a PumpSwap pool exists, which cannot happen unless the curve completed), `curve_complete` (the curve account's own flag was read), or NULL for an inference from decoded trade events that was never confirmed. NULL is not disconfirmation — but it is no longer neutral either: where the curve account has since been read, the great majority of NULL rows returned `complete = 0`. **This column, not `graduated`, is the graduation flag** |
+| `curve_checked_at` | when we read the bonding curve account itself, ms since epoch. NULL means we hold no reading — which covers both a read we never attempted and one that failed, because a failed call writes nothing rather than recording our own RPC trouble as an observation about a token |
+| `curve_complete` | what that reading said: `1` the curve had completed, `0` it had not, NULL the account no longer existed. Read it **with** `curve_checked_at`: the pair distinguishes "we looked and it had not completed" (a disconfirmation) from "we looked and learned nothing" from "we never looked". A NULL here is never a zero |
 | `pool` | PumpSwap pool address, when known |
 | `vault_sol` | SOL in the pool at the moment it was read |
 | `vault_at` | when that balance was read. Written only on an actual read, never inferred |
@@ -133,6 +139,34 @@ Pool address to mint, from PumpSwap's own pool-creation events. `meta` holds `bu
 timestamp of the build that produced the file, and `watermark`.
 
 ---
+
+## `graduations` — a view, not a table
+
+`SELECT * FROM graduations` is `tokens` restricted to `graduated_confirmed_by IS NOT NULL`: the launches whose
+completion we can actually evidence. It exists because the obvious query against the raw column returns a number
+about three quarters too large, and a warning in a data dictionary only helps the people who read it. The raw
+column is untouched and still there; this is an affordance beside it, not a replacement for it.
+
+## `corrections` — every correction, carried by the record
+
+Corrections used to live only as prose at `chainoftitle.org/corrections`. The stated reason this file is deposited
+under a DOI is that the record outlives the site — and the corrections did not. Someone who mirrors the file and
+never visits the site could not learn that a column they were counting is wrong. Now they can.
+
+| column | meaning |
+|---|---|
+| `id` | stable slug, so a correction can be cited |
+| `issued_at` | when it was published, ms since epoch |
+| `scope` | `column`, `row` or `record` |
+| `subject` | the column name or mint it concerns; NULL when record-wide |
+| `finding` | what was wrong |
+| `effect` | what a reader who trusted it would have wrongly concluded |
+| `remedy` | what was done, and what to read instead |
+| `supersedes` | the id of a correction this one replaces, when it replaces one |
+
+**Append-only, and that is structural rather than a promise.** A correction that turns out to be wrong is not
+edited; a new row is added naming the old one in `supersedes`. Nothing in the build ever updates a row here, so a
+correction already present in a mirrored copy cannot be silently reworded afterwards.
 
 ## Reproducing it
 

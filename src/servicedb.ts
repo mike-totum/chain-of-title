@@ -82,7 +82,7 @@ if (!READ_ONLY) {
 // ---------- 2. build the record ----------
 db.exec(`ATTACH DATABASE '${OUT.replace(/'/g, "''")}' AS rec`);
 if (FULL) {
-  for (const t of ["tokens", "trades", "hist_trades", "operator_wallets", "operator_policy", "pool_map", "runs", "meta"])
+  for (const t of ["tokens", "trades", "hist_trades", "operator_wallets", "operator_policy", "pool_map", "runs", "meta", "corrections"])
     db.exec(`DROP TABLE IF EXISTS rec.${t}`);
 }
 db.exec(`
@@ -108,7 +108,23 @@ db.exec(`
     -- image is the one we saw; the bytes average a few hundred KB and would inflate a 334-bytes-per-launch archive
     -- by four orders of magnitude, destroying the property that makes it mirrorable. The files travel separately.
     -- image_error is deliberately NOT carried: it describes our fetch, not the launch.
-    image_sha256 TEXT, image_bytes INTEGER, image_at INTEGER
+    image_sha256 TEXT, image_bytes INTEGER, image_at INTEGER,
+    -- The curve account's own complete bit, and when we read it. graduated is an inference from decoded trade
+    -- volume and it is wrong on about two rows in five; this is the reading that says so, published as evidence
+    -- rather than used to quietly rewrite the inference.
+    --
+    -- Four states, and the pair is what tells them apart — the same shape as image/meta_at:
+    --   curve_checked_at NULL                         we hold no reading. Covers a read never attempted and one
+    --                                                 that failed: a failed RPC call writes nothing, deliberately,
+    --                                                 so it is retried rather than recorded as an observation
+    --   curve_checked_at set, curve_complete NULL     we read it and the account was gone: we looked, learned nothing
+    --   curve_checked_at set, curve_complete 0        we read it and the curve had not completed. A disconfirmation
+    --   curve_checked_at set, curve_complete 1        we read it and the curve had completed
+    --
+    -- A mint we hold no reading for must serialise NULL and must never default to 0. Defaulting would publish our
+    -- own RPC failures as findings about someone else's token — this project's recurring failure with the sign
+    -- flipped. The sync below is guarded on EXISTS for exactly that reason: rows we hold nothing for are untouched.
+    curve_checked_at INTEGER, curve_complete INTEGER
   );
   CREATE INDEX IF NOT EXISTS rec.tokens_created ON tokens(created_at);
   CREATE INDEX IF NOT EXISTS rec.tokens_creator ON tokens(creator);
@@ -142,6 +158,32 @@ db.exec(`
     wallet TEXT PRIMARY KEY, curve_sol REAL, amm_buy REAL, amm_sell REAL, tokens INTEGER
   );
   CREATE TABLE IF NOT EXISTS rec.meta (k TEXT PRIMARY KEY, v TEXT);
+  -- Every correction this project has issued, carried by the record itself.
+  --
+  -- Until now they existed only as prose on chainoftitle.org/corrections. DATA.md states that the reason this file
+  -- is deposited under a DOI is that "the record outlives the site" — and the corrections did not. Someone who
+  -- mirrors the CC0 file and never visits the site could not learn that a column they were counting is wrong.
+  --
+  -- Append-only, and the shape enforces it: a correction that is itself wrong is not edited, it is superseded by a
+  -- new row naming the old one in supersedes. Nothing in this file ever UPDATEs a row here.
+  CREATE TABLE IF NOT EXISTS rec.corrections (
+    id TEXT PRIMARY KEY,           -- stable slug, so a correction can be cited
+    issued_at INTEGER NOT NULL,    -- when it was published, ms since epoch
+    scope TEXT NOT NULL,           -- 'column', 'row' or 'record'
+    subject TEXT,                  -- the column name or mint it concerns; NULL when record-wide
+    finding TEXT NOT NULL,         -- what was wrong
+    effect TEXT NOT NULL,          -- what a reader who trusted it would have wrongly concluded
+    remedy TEXT NOT NULL,          -- what was done, and what to read instead
+    supersedes TEXT                -- the id of a correction this one replaces, when it replaces one
+  );
+  -- The confirmed set, as a view, so the obvious query returns the defensible answer.
+  --
+  -- tokens.graduated is an inference and it stays exactly as it was recorded; nothing in this file rewrites it.
+  -- But a reader who runs SELECT COUNT(*) FROM tokens WHERE graduated = 1 gets a number about three quarters too
+  -- large, and telling them so in a data dictionary they may never open is not enough. This adds a correct
+  -- affordance beside the raw column rather than editing the column: SELECT * FROM graduations is the confirmed set.
+  CREATE VIEW IF NOT EXISTS rec.graduations AS
+    SELECT * FROM tokens WHERE graduated_confirmed_by IS NOT NULL;
 `);
 
 /**
@@ -185,7 +227,7 @@ try { db.exec("UPDATE rec.tokens SET graduated_confirmed_by = 'pool' WHERE gradu
  */
 for (const c of ["uri TEXT", "image TEXT", "description TEXT", "meta_at INTEGER",
                  "image_sha256 TEXT", "image_bytes INTEGER", "image_at INTEGER", "meta_bytes INTEGER",
-                 "meta_sha256 TEXT"])
+                 "meta_sha256 TEXT", "curve_checked_at INTEGER", "curve_complete INTEGER"])
   try { db.exec(`ALTER TABLE rec.tokens ADD COLUMN ${c}`); } catch {}
 
 /**
@@ -436,6 +478,37 @@ try {
    */
   const builder = process.env.RAILWAY_SERVICE_NAME ? `railway:${process.env.RAILWAY_SERVICE_NAME}` : "local";
   const builtBy = `${builder} ${process.argv.slice(1).map((a) => a.replace(/^.*\//, "")).join(" ")}`.slice(0, 200).replace(/'/g, "''");
+  /**
+   * The curve reading, re-synced in full on every build rather than backfilled once.
+   *
+   * Placed here, after every INSERT, and not beside the backfills above: those run before the incremental copy
+   * because their columns are also supplied by it, so a fresh file gets them on insert and an existing file
+   * gets them from the backfill. These two columns are supplied by neither — nothing in the copy below reads
+   * curve_checks — so running them up there updated a table that was still empty and published 205,217 NULLs.
+   *
+   * This deliberately does NOT join the list above, and the reason is the difference between a fact and a reading.
+   * Every column in that list is written once and never revised — a document's hash, a picture's size — so filling it
+   * only `WHERE col IS NULL` is right. A curve reading is not like that. `curve_checks` is rechecked on a cooldown
+   * while a launch is still settling, and a curve that read `complete = 0` last week can read 1 today: slow fills
+   * happen, which is the entire reason the recheck exists.
+   *
+   * Under `WHERE col IS NULL` that flip could never reach the published file. The row would carry 0 for the life of
+   * the archive while the collector held 1, and a published disconfirmation that cannot be withdrawn is a worse
+   * artefact than no column at all. So both columns are rewritten from the collector every build. It costs a join
+   * over a few thousand rows and it cannot go stale.
+   *
+   * `graduated` itself is untouched here and everywhere else. The inference stays exactly as it was recorded and the
+   * reading is published beside it; a reader gets both and can see them disagree. Repairing the column would destroy
+   * the evidence that the error happened, which is the one thing a correction must not do.
+   */
+  try {
+    const r = db.prepare(`UPDATE rec.tokens SET
+        curve_checked_at = (SELECT c.checked_at FROM main.curve_checks c WHERE c.mint = rec.tokens.mint),
+        curve_complete   = (SELECT c.complete   FROM main.curve_checks c WHERE c.mint = rec.tokens.mint)
+      WHERE EXISTS (SELECT 1 FROM main.curve_checks c WHERE c.mint = rec.tokens.mint)`).run();
+    if (Number(r.changes ?? 0) > 0) log(`  synced ${Number(r.changes).toLocaleString()} curve readings`);
+  } catch (e) { log(`  WARNING: curve reading sync failed: ${String((e as any)?.message ?? e).slice(0, 120)}`); }
+
   db.exec(`INSERT INTO rec.meta (k, v) VALUES ('watermark', '${Date.now()}'), ('built_at', '${Date.now()}'),
       ('built_by', '${builtBy}'), ('built_pid', '${process.pid}')
     ON CONFLICT(k) DO UPDATE SET v = excluded.v`);
@@ -459,8 +532,44 @@ try {
  * record inherited from any older version converges on the declared shape rather than carrying its history forever.
  * sqlite_sequence is SQLite's own and cannot be dropped.
  */
+/**
+ * The corrections themselves, written into the record.
+ *
+ * INSERT OR IGNORE on a stable id: seeding is idempotent, and because nothing here ever UPDATEs, a correction that
+ * is already in a mirrored copy of the file can never be silently reworded afterwards. Amending one means adding a
+ * row that names it in `supersedes`.
+ *
+ * Both of these were already published as prose on chainoftitle.org/corrections. Neither is new; what is new is that
+ * the file carries them, so a mirror is self-describing.
+ */
+{
+  const ins = db.prepare(`INSERT OR IGNORE INTO rec.corrections
+    (id, issued_at, scope, subject, finding, effect, remedy, supersedes) VALUES (?,?,?,?,?,?,?,NULL)`);
+  const at = (d: string) => Date.parse(`${d}T00:00:00Z`);
+  ins.run("zero-buyers-ungated", at("2026-09-07"), "record", null,
+    "The rule that flags a launch for having no outside buyers was never made conditional on the curve having "
+    + "completed. It was written for graduations and applied to every launch, including the great majority that "
+    + "simply die without a buyer, which is the ordinary end of a token and not evidence of manufacture.",
+    "Up to 34,242 launch records were in a state where a page could say the token completed its bonding curve with "
+    + "zero outside buyers, and that its graduation was funded by the creator rather than by demand. For a launch "
+    + "that never completed a curve the first statement is false and the second asserts conduct the record does not "
+    + "establish.",
+    "The rule is now gated on confirmed completion. Launches carrying a danger flag fell from 866 to 457, which is "
+    + "a correction and not a change in the market.");
+  ins.run("graduated-inferred", at("2026-09-09"), "column", "graduated",
+    "tokens.graduated is written when the collector's own feed sees a decoded trade reach the graduation threshold. "
+    + "Curves cross that mark and fall back, and until 2026-09-09 nothing ever re-read the curve account to check.",
+    "A reader counting WHERE graduated = 1 gets roughly 1.8x the number of curves that actually completed. Measured "
+    + "on 2026-09-09: of 12,351 rows carrying the flag, 6,945 are confirmed, and 5,187 unconfirmed graduations were "
+    + "read directly and returned complete = 0 — disconfirmed, not merely unwitnessed.",
+    "graduated is left exactly as recorded, because repairing it would overwrite an observation with a later reading "
+    + "and destroy the evidence that the error happened. The reading is published beside it as curve_checked_at and "
+    + "curve_complete, and the graduations view carries the confirmed set. Count with graduated_confirmed_by IS NOT "
+    + "NULL, or select from graduations.");
+}
+
 const RECORD_TABLES = new Set(["tokens", "trades", "hist_trades", "operator_wallets", "operator_policy",
-  "pool_map", "runs", "wallet_flow", "meta", "sqlite_sequence"]);
+  "pool_map", "runs", "wallet_flow", "meta", "corrections", "sqlite_sequence"]);
 for (const r of db.prepare("SELECT name FROM rec.sqlite_master WHERE type='table'").all() as { name: string }[]) {
   if (RECORD_TABLES.has(r.name)) continue;
   const rows = (db.prepare(`SELECT COUNT(*) c FROM rec.${r.name}`).get() as any).c as number;
