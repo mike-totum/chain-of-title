@@ -10,7 +10,7 @@ import { Tracker, fetchMeta } from "./tracker.ts";
 import { PaperBroker } from "./paper.ts";
 import { strategies, type OperatorActivity } from "./strategies/index.ts";
 import { rpc as rpcHttpCall } from "./rpc-http.ts";
-import { BUYOUT_SOL, TOKEN_COLUMNS, KEEP_TRADE_EVIDENCE, coverageWindows, assess } from "./provenance.ts";
+import { BUYOUT_SOL, TOKEN_COLUMNS, KEEP_TRADE_EVIDENCE, keepTweetEvidence, coverageWindows, assess } from "./provenance.ts";
 import { base58 } from "./feed/rpc.ts";
 import type { TokenState } from "./tracker.ts";
 import { KolWatcher, StreetListener, loadKols, parseTags, parseTweet, twitterApiIoProvider, xApiProvider } from "./signals/twitter.ts";
@@ -957,15 +957,34 @@ function pruneWorkingData(): void {
   const batch = 50_000;
   let removed = 0;
   try {
-    for (const sql of [
-      `DELETE FROM trades WHERE rowid IN (SELECT rowid FROM trades WHERE ts < ? AND ts >= ${floor} ${KEEP_EVIDENCE} LIMIT ${batch})`,
-      `DELETE FROM curve_snapshots WHERE rowid IN (SELECT rowid FROM curve_snapshots WHERE ts < ? LIMIT ${batch})`,
-      `DELETE FROM tweets WHERE rowid IN (SELECT rowid FROM tweets WHERE fetched_at < ? LIMIT ${batch})`,
-    ]) {
-      for (let i = 0; i < 40; i++) { // bounded so a huge backlog is spread over several passes, never blocking the feed
-        const c = Number((db.prepare(sql).run(cutoff) as any).changes ?? 0);
-        removed += c;
-        if (c < batch) break;
+    /**
+     * Each table in its own try, because one missing table used to abort the whole pass.
+     *
+     * `curve_snapshots` is created by curvepoll.ts, which has only ever run on the laptop — so on this collector the
+     * table does not exist, the DELETE threw, the single surrounding catch swallowed it, and every statement AFTER
+     * it was skipped. Trades were pruned, tweets never were, and the log said one line about a failure. A retention
+     * pass that half-runs looks exactly like one that ran.
+     */
+    for (const [table, sql] of [
+      ["trades", `DELETE FROM trades WHERE rowid IN (SELECT rowid FROM trades WHERE ts < ? AND ts >= ${floor} ${KEEP_EVIDENCE} LIMIT ${batch})`],
+      ["curve_snapshots", `DELETE FROM curve_snapshots WHERE rowid IN (SELECT rowid FROM curve_snapshots WHERE ts < ? LIMIT ${batch})`],
+      // Same rule as prune.ts, from the same function: a post cited as promotion evidence is archive, not residue.
+      ["tweets", `DELETE FROM tweets WHERE rowid IN (SELECT rowid FROM tweets WHERE fetched_at < ? ${keepTweetEvidence(db)} LIMIT ${batch})`],
+    ] as const) {
+      const present = (() => {
+        try { return !!(db.prepare("SELECT COUNT(*) c FROM sqlite_master WHERE type='table' AND name=?").get(table) as any)?.c; }
+        catch { return false; }
+      })();
+      if (!present) continue;
+      try {
+        for (let i = 0; i < 40; i++) { // bounded so a huge backlog is spread over several passes, never blocking the feed
+          const c = Number((db.prepare(sql).run(cutoff) as any).changes ?? 0);
+          removed += c;
+          if (c < batch) break;
+        }
+      } catch (e) {
+        // Named, and the pass continues. The point of the per-table try is that one broken table cannot silence the rest.
+        log(`[prune] ${table} failed: ${(e as Error).message}`);
       }
     }
     if (removed) log(`[prune] removed ${removed.toLocaleString()} working-data rows older than ${RETENTION_DAYS} days`);

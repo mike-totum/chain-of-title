@@ -31,6 +31,31 @@ export const BUYOUT_SOL = 40;
  * finding, in the direction that makes an operator look clean, which is the direction this project cannot afford.
  * 1,916 rows across the whole archive: it costs nothing to keep and cannot be rebuilt once dropped.
  */
+/**
+ * What retention must never delete from `tweets`.
+ *
+ * `tweets` was written by the old street/KOL firehose — a sample nobody uses, for a strategy that measured -13.8%,
+ * and pruning that residue is correct. But `xevidence` now writes promotion evidence into the SAME table, keyed from
+ * `token_promotion_hit`, and those rows are archive rather than working data: a post about a launch we have flagged
+ * is retrievable exactly once, and its deletion is itself the event worth recording.
+ *
+ * Without this guard the outcome is worse than losing them. `token_promotion` and `token_promotion_hit` are not
+ * pruned, so what survives is a row saying "we found 7 posts about this manufactured launch" pointing at seven rows
+ * that no longer exist — evidence replaced by our own claim about evidence, by our own housekeeping. That is the
+ * fourth time today that a bookkeeping step manufactured an absence.
+ *
+ * The clause is empty when `token_promotion_hit` does not exist, which is the case on any collector that has never
+ * run xevidence — a subquery against a missing table throws, and a prune that dies is a prune that silently stops
+ * happening. Found by the other session, who owns the data it protects.
+ */
+export function keepTweetEvidence(db: { prepare(sql: string): { get(...a: unknown[]): unknown } }): string {
+  try {
+    const t = db.prepare("SELECT COUNT(*) c FROM sqlite_master WHERE type='table' AND name='token_promotion_hit'").get() as any;
+    if (!t?.c) return "";
+  } catch { return ""; }
+  return "AND id NOT IN (SELECT tweet_id FROM token_promotion_hit WHERE tweet_id IS NOT NULL)";
+}
+
 export const KEEP_TRADE_EVIDENCE = `AND NOT (
     (venue = 'curve' AND side = 'buy' AND sol >= ${BUYOUT_SOL})
     OR (venue = 'amm' AND EXISTS (

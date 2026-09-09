@@ -12,9 +12,16 @@
  */
 import { config } from "./config.ts";
 import { openDb } from "./db.ts";
-import { BUYOUT_SOL, KEEP_TRADE_EVIDENCE } from "./provenance.ts";
+import { BUYOUT_SOL, KEEP_TRADE_EVIDENCE, keepTweetEvidence } from "./provenance.ts";
 
 const arg = (k: string, d: number) => { const i = process.argv.indexOf(k); return i > 0 ? Number(process.argv[i + 1]) : d; };
+/**
+ * Which database to prune. Defaults to the configured one, and exists because without it this tool could only ever
+ * be pointed at production — so the only way to test a retention rule was to run it on the real archive and hope.
+ * A destructive tool that cannot be rehearsed is one whose guards are verified by reasoning alone, which is how
+ * every check found broken today got shipped.
+ */
+const DB_ARG = (() => { const i = process.argv.indexOf("--db"); return i > 0 ? process.argv[i + 1] : ""; })();
 const DAYS = arg("--days", 7);
 const APPLY = process.argv.includes("--apply");
 const VACUUM = process.argv.includes("--vacuum");
@@ -35,7 +42,7 @@ const BATCH = 200_000;
  */
 const LEGAL_HOLD = (process.env.LEGAL_HOLD ?? "").trim();
 
-const db = openDb(config.dbPath);
+const db = openDb(DB_ARG || config.dbPath);
 
 /**
  * Record the hold, and remember what it protected.
@@ -68,29 +75,49 @@ if (LEGAL_HOLD) {
 }
 const FLOOR = protectFloor(db);
 if (FLOOR) console.log(`  a previous legal hold protects everything before ${new Date(FLOOR).toISOString().slice(0, 10)}; it will not be deleted.`);
+if (DB_ARG) console.log(`  (pruning ${DB_ARG}, not the configured database)`);
+/**
+ * Does this database have that table? Neither pruner may assume one into existence.
+ *
+ * `curve_snapshots` is created by curvepoll.ts, which has only ever run on the laptop — so on the cloud collector
+ * the table does not exist, this script died on its first COUNT, and the collector's own pruner threw partway
+ * through its loop and skipped everything after it. A retention job that half-runs is worse than one that fails,
+ * because it looks like it ran.
+ */
+const hasTable = (t: string): boolean => {
+  try { return !!(db.prepare("SELECT COUNT(*) c FROM sqlite_master WHERE type='table' AND name=?").get(t) as any)?.c; }
+  catch { return false; }
+};
 const cutoff = Date.now() - DAYS * 86400_000;
 const iso = new Date(cutoff).toISOString().slice(0, 16).replace("T", " ");
 const n = (x: number) => x.toLocaleString();
 
 console.log(`retention ${DAYS} days — anything older than ${iso} UTC is working data past its window\n`);
 
-const counts = {
-  trades: (db.prepare("SELECT COUNT(*) c FROM trades WHERE ts < ?").get(cutoff) as any).c as number,
-  tradesKeep: (db.prepare("SELECT COUNT(*) c FROM trades WHERE ts >= ?").get(cutoff) as any).c as number,
-  wts: (db.prepare(`SELECT COUNT(*) c FROM wallet_token_stats WHERE mint IN (SELECT mint FROM tokens WHERE created_at < ?)`).get(cutoff) as any).c as number,
-  snaps: (db.prepare("SELECT COUNT(*) c FROM curve_snapshots WHERE ts < ?").get(cutoff) as any).c as number,
-  tweets: (db.prepare("SELECT COUNT(*) c FROM tweets WHERE fetched_at < ?").get(cutoff) as any).c as number,
+/** -1 means the table is not in this database, which prints as "absent" rather than as a zero that looks like work done. */
+const countOf = (table: string, sql: string): number => {
+  if (!hasTable(table)) return -1;
+  try { return (db.prepare(sql).get(cutoff) as any).c as number; } catch { return -1; }
 };
-console.log(`  trades              ${n(counts.trades).padStart(12)} to delete, ${n(counts.tradesKeep)} kept`);
-console.log(`  wallet_token_stats  ${n(counts.wts).padStart(12)} to delete (tokens launched before the cutoff)`);
-console.log(`  curve_snapshots     ${n(counts.snaps).padStart(12)} to delete`);
-console.log(`  tweets              ${n(counts.tweets).padStart(12)} to delete`);
+const counts = {
+  trades: countOf("trades", "SELECT COUNT(*) c FROM trades WHERE ts < ?"),
+  tradesKeep: countOf("trades", "SELECT COUNT(*) c FROM trades WHERE ts >= ?"),
+  wts: countOf("wallet_token_stats", `SELECT COUNT(*) c FROM wallet_token_stats WHERE mint IN (SELECT mint FROM tokens WHERE created_at < ?)`),
+  snaps: countOf("curve_snapshots", "SELECT COUNT(*) c FROM curve_snapshots WHERE ts < ?"),
+  tweets: countOf("tweets", "SELECT COUNT(*) c FROM tweets WHERE fetched_at < ?"),
+};
+const show = (v: number) => (v < 0 ? "absent".padStart(12) : n(v).padStart(12));
+console.log(`  trades              ${show(counts.trades)} to delete, ${counts.tradesKeep < 0 ? "absent" : n(counts.tradesKeep)} kept`);
+console.log(`  wallet_token_stats  ${show(counts.wts)} to delete (tokens launched before the cutoff)`);
+console.log(`  curve_snapshots     ${show(counts.snaps)} to delete`);
+console.log(`  tweets              ${show(counts.tweets)} to delete`);
 console.log(`\n  kept untouched: tokens, signals, operator_wallets/funders/policy, pool_map, positions, hist_*`);
 
 if (!APPLY) { console.log(`\ndry run — nothing deleted. Re-run with --apply to execute.`); process.exit(0); }
 
 /** delete in batches so the writer is never blocked for long while the monitor is live */
 function purge(label: string, sql: string, params: unknown[]): void {
+  if (!hasTable(label)) { console.log(`  ${label}: absent from this database, skipped`); return; }
   let total = 0;
   for (;;) {
     const r = db.prepare(sql).run(...params as any) as any;
@@ -110,7 +137,10 @@ purge("trades", `DELETE FROM trades WHERE rowid IN (SELECT rowid FROM trades WHE
   ${KEEP_TRADE_EVIDENCE} LIMIT ${BATCH})`, [cutoff]);
 purge("wallet_token_stats", `DELETE FROM wallet_token_stats WHERE rowid IN (SELECT wts.rowid FROM wallet_token_stats wts JOIN tokens t ON t.mint = wts.mint WHERE t.created_at < ? LIMIT ${BATCH})`, [cutoff]);
 purge("curve_snapshots", `DELETE FROM curve_snapshots WHERE rowid IN (SELECT rowid FROM curve_snapshots WHERE ts < ? LIMIT ${BATCH})`, [cutoff]);
-purge("tweets", `DELETE FROM tweets WHERE rowid IN (SELECT rowid FROM tweets WHERE fetched_at < ? LIMIT ${BATCH})`, [cutoff]);
+/** Firehose residue goes; a post cited as evidence for a flagged launch stays. See keepTweetEvidence. */
+const KEEP_TWEETS = keepTweetEvidence(db);
+if (KEEP_TWEETS) console.log("  tweets cited by token_promotion_hit are evidence and will be kept");
+purge("tweets", `DELETE FROM tweets WHERE rowid IN (SELECT rowid FROM tweets WHERE fetched_at < ? ${KEEP_TWEETS} LIMIT ${BATCH})`, [cutoff]);
 /**
  * Telegram messages are NOT pruned on the working-data timer, and that is deliberate: they are the archive, not
  * working data, and the retention period for personal data is a legal decision rather than an operational one.
