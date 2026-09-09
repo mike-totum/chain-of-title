@@ -307,6 +307,18 @@ const recCounts = (() => {
     return { held, observed };
   } catch { return null; }
 })();
+/**
+ * Counted from the file the page describes, not asserted. A page that states a number about the archive and gets it
+ * from anywhere but the archive is the exact failure this site reports in other people.
+ */
+const nameRefs = (() => {
+  const n = (sql: string) => { try { return (db.prepare(sql).get() as any).c as number; } catch { return 0; } };
+  return {
+    handles: n("SELECT COUNT(*) c FROM tokens WHERE description LIKE '%@%'"),
+    links: n("SELECT COUNT(*) c FROM tokens WHERE lower(description) LIKE '%x.com/%' OR lower(description) LIKE '%twitter.com/%'"),
+    described: n("SELECT COUNT(description) c FROM tokens"),
+  };
+})();
 writeFileSync(join(OUT, "data.html"), page("The data", `
   <h1 class="headline">Take the whole archive</h1>
   <p class="lede">Everything this site knows is one file. It is the same database the service reads, not an export,
@@ -345,6 +357,19 @@ writeFileSync(join(OUT, "data.html"), page("The data", `
   If that happens to a launch we did not fetch, the picture is gone and this file will not have it. The URLs are all
   in the record and nothing stops you fetching them yourself — the only reason we did not is that we could not
   afford the disk.</p>
+
+  <div class="sec"><h2>When a launch names a person</h2></div>
+  <p class="lede">Some launches write a handle into their own metadata. In this file ${fmt(nameRefs.handles)} descriptions
+  contain an <span class="mono">@</span> and ${fmt(nameRefs.links)} link to x.com or twitter.com, out of
+  ${fmt(nameRefs.described)} descriptions in total. They are published exactly as the launch wrote them.</p>
+  <p class="lede">The reason is that those are the creator's words, not ours and not the named account's. When a launch
+  claims someone is behind it, that claim <b>is</b> the evidence — and when the claim is false it is usually the only
+  surviving evidence that the impersonation happened at all. A launch can be edited or unpinned at its source; what it
+  said at the moment we read it cannot be recovered anywhere else. Redacting the sentence would remove the thing a
+  reader most needs from the record.</p>
+  <p class="callout">A handle appearing in this file is <b>not a statement by us about the person who owns it</b>. We do
+  not say who is behind a launch, and we publish no conclusions about intent. If a launch used your name,
+  <a href="corrections.html">tell us</a> and we will publish your statement on that record.</p>
 
   ${renderSchema(db)}
   ${renderSamples(db)}
@@ -505,6 +530,10 @@ writeFileSync(join(OUT, "corrections.html"), page("Corrections", `
     <tr><th>What we will not remove</th><td>A record that is accurate is not removed because it is unwelcome. We
     publish what the chain shows. We do not publish conclusions about intent: we do not say "scam", "rug" or "fraud",
     and we do not claim to know who controls a wallet.</td></tr>
+    <tr><th>If a launch used your name</th><td>A launch can write anything into its own description, including a
+    handle that is not theirs, and we publish that text as the launch wrote it because it is the evidence that the
+    claim was made. It is not our claim about you. Write to us and we will publish your statement on that record,
+    alongside the text in question. You do not have to control any wallet to ask for this.</td></tr>
     <tr><th>If you control a wallet we wrote about</th><td>Sign a message from that address and we will publish your
     statement on that wallet's page, in full and unedited. A signature from the address is proof we cannot fake and
     that nobody else can impersonate you on.</td></tr>
