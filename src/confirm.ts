@@ -133,7 +133,13 @@ export function seedFromSnapshots(db: DatabaseSync): { confirmed: number; checks
       ON CONFLICT(mint) DO UPDATE SET
         checked_at = MAX(curve_checks.checked_at, excluded.checked_at),
         checks = MAX(curve_checks.checks, excluded.checks),
-        complete = MAX(COALESCE(curve_checks.complete, 0), COALESCE(excluded.complete, 0))`).run();
+        -- A complete reading is permanent, so 1 always wins. Otherwise take the newer reading and fall back to the
+        -- older, and NEVER let COALESCE turn a NULL into a 0: NULL here means the account was gone when we looked,
+        -- and 0 means we read the account and it was not complete. Coercing the first into the second publishes
+        -- "we could not read this" as "we read this and it had not graduated" — this project's whole failure mode,
+        -- in the one table an outside reader is about to be invited to treat as evidence.
+        complete = CASE WHEN curve_checks.complete = 1 OR excluded.complete = 1 THEN 1
+                        ELSE COALESCE(excluded.complete, curve_checks.complete) END`).run();
     db.prepare("COMMIT").run();
     return { confirmed: Number(confirmed.changes), checks: Number(checks.changes) };
   } catch (e) {
