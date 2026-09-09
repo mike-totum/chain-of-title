@@ -596,19 +596,20 @@ try {
     + "and destroy the evidence that the error happened. The reading is published beside it as curve_checked_at and "
     + "curve_complete, and the graduations view carries the confirmed set. Count with graduated_confirmed_by IS NOT "
     + "NULL, or select from graduations.");
-  ins.run("create-sig-dropped", at("2026-09-09"), "column", "create_sig",
-    "Every launch figure in this archive is computed from the token's creation transaction, and the decoder had the "
-    + "signature of that transaction in hand and dropped it at capture. Until 2026-09-09 no launch row cited the "
-    + "transaction its dev_pct came from.",
-    "Nothing published was wrong, but nothing was checkable either: a reader could believe our decoder or not. The "
-    + "gap that remains is not random and a reader must not treat it as such. 24,545 launches of 206,019 — including "
-    + "1,529 confirmed graduations, among them WOFI — had the trade rows the backfill reads pruned before this "
-    + "existed, so they are permanently without a signature here. A NULL in this column means we did not record one. "
-    + "It never means the launch has no creation transaction, and it is not a statement about the launch at all.",
-    "Recorded at capture from 2026-09-09, and backfilled to 181,474 launches from the creator's own first-block "
-    + "trade, which is that same transaction. The remainder are recoverable only from an archival node, and the hole "
-    + "is dated, bounded and published as NULL rather than closed by re-deriving a plausible signature after the "
-    + "fact.");
+  ins.run("uncheckable-figures", at("2026-09-09"), "record", null,
+    "Every record page carried the sentence \"Everything here is read from the Solana chain and can be checked "
+    + "against it\", and until 2026-09-09 the record withheld what was needed to check it. No launch row cited the "
+    + "creation transaction its figures were computed from, so dev_pct, the outside-buyer count and the graduation "
+    + "were checkable in principle and take-our-word-for-it in fact.",
+    "A reader who relied on that assurance — a grant reviewer, a journalist, anyone citing a figure — was relying on "
+    + "our decoder rather than on the chain, and had no way to tell the difference. That is the opposite of what the "
+    + "sentence promised and it was on every page we published.",
+    "create_sig and create_slot now cite the transaction each launch is decoded from, backfilled to 181,474 of "
+    + "206,019 launches from the creator's own first-block trade, which is that same transaction. 24,545 launches "
+    + "and 1,529 confirmed graduations — WOFI among them — had those trade rows pruned before the column existed and "
+    + "are permanently unbacked here; they are recoverable only from an archival node. A NULL means we did not record "
+    + "a signature. It never means the launch has no creation transaction, and it is not a statement about the launch "
+    + "at all. The assurance above still overstates the position for those rows.");
 }
 
 const RECORD_TABLES = new Set(["tokens", "trades", "hist_trades", "operator_wallets", "operator_policy",
