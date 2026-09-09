@@ -100,6 +100,15 @@ db.exec(`
     -- Nullable on purpose: NULL means the graduation was inferred and never confirmed, which is a real third state
     -- and must not be collapsed into a boolean. See db.ts.
     graduated_confirmed_by TEXT,
+    -- The transaction the launch record was decoded from: the one carrying the creator's initial buy, and therefore
+    -- the one dev_pct is computed from. This is what turns every row above from a figure a reader must take on
+    -- trust into one they can decode for themselves against the chain.
+    --
+    -- NULL has three innocent causes and none of them is "no creation transaction exists": the launch predates the
+    -- column (2026-09-09), we found the token late and never saw its creation, or its trade rows were pruned by
+    -- retention before the backfill reached them. 24,494 launches are in that last group permanently, recoverable
+    -- only from an archival node. Absence here is our coverage, never a finding about the token.
+    create_sig TEXT, create_slot INTEGER,
     -- What the token claimed to be at launch. The only fields in this file that cannot be rebuilt from chain by
     -- anyone willing to pay for archival RPC: they live behind a URI the creator controls and vanish when it is
     -- repointed or unpinned. meta_at distinguishes "declared none" from "we never looked". See db.ts.
@@ -209,6 +218,11 @@ try { db.exec("ALTER TABLE rec.tokens ADD COLUMN venue TEXT NOT NULL DEFAULT 'pu
  * and `openDb` has already upgraded rows there that have an observed pool.
  */
 try { db.exec("ALTER TABLE rec.tokens ADD COLUMN graduated_confirmed_by TEXT"); } catch {}
+// Added 2026-09-09. The incremental copy only carries rows changed since the watermark, so the backfill that
+// populated these in the collector also bumped updated_at on every row it touched — without that, 181,474
+// signatures would sit in the collector and never reach this file. See backfillsig.ts.
+try { db.exec("ALTER TABLE rec.tokens ADD COLUMN create_sig TEXT"); } catch {}
+try { db.exec("ALTER TABLE rec.tokens ADD COLUMN create_slot INTEGER"); } catch {}
 /**
  * Upgrade the rows already in the file from evidence they already carry.
  *
@@ -265,6 +279,12 @@ for (const [col, expr] of [
   ["image_sha256", "m.image_sha256"],
   ["image_bytes", "m.image_bytes"],
   ["image_at", "m.image_at"],
+  // The creation transaction. It arrives by bulk backfill (backfillsig.ts) long after the rows stopped changing,
+  // which is exactly the shape this list exists for: 181,474 signatures sat in the collector and 523 reached the
+  // record, because a crashed build had already moved the watermark past them. Bumping updated_at by hand would
+  // have fixed that run and not the next one.
+  ["create_sig", "m.create_sig"],
+  ["create_slot", "m.create_slot"],
 ] as const) {
   try {
     const r = db.prepare(`UPDATE rec.tokens SET ${col} = (
@@ -339,7 +359,7 @@ try {
       (mint, name, symbol, creator, created_at, late_discovery, dev_pct, dev_sold,
        unique_buyers, curve_buyers, snap30_buyers, bundled_buyers, graduated, graduated_at,
        pool, vault_sol, vault_at, last_price, rebuilt_at, rebuilt_complete, updated_at,
-       venue, graduated_confirmed_by, uri, image, description, meta_at,
+       venue, graduated_confirmed_by, create_sig, create_slot, uri, image, description, meta_at,
        image_sha256, image_bytes, image_at, meta_sha256, meta_bytes)
     SELECT mint, name, symbol, creator, created_at, COALESCE(late_discovery,0), dev_pct, dev_sold,
            unique_buyers,
@@ -353,6 +373,9 @@ try {
            -- No COALESCE: NULL here means "inferred, never confirmed" and must survive the copy as NULL. A pool we
            -- observed is confirmation, so upgrade on the way through rather than losing it.
            COALESCE(graduated_confirmed_by, CASE WHEN graduated = 1 AND pool IS NOT NULL THEN 'pool' END),
+           -- The creation transaction, carried as recorded. Never synthesised: a row without one is published
+           -- without one, because a citation we cannot stand behind is worse than none.
+           create_sig, create_slot,
            -- The launch claim, carried verbatim. Never re-derived: a later read of the URI is not what it said then.
            uri, image, description, meta_at,
            image_sha256, image_bytes, image_at,

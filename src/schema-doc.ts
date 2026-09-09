@@ -62,6 +62,10 @@ const DOCS: Record<string, Record<string, Doc>> = {
     rebuilt_complete: { kind: "ours", desc: "1 when a rebuild read the curve's entire transaction history. 0 or NULL means signature paging hit its cap or transactions could not be fetched, so the rebuild is partial and its counts are floors." },
     updated_at: { kind: "ours", desc: "Last time any field on this row changed, epoch ms." },
     venue: { kind: "chain", desc: "Which launchpad the token came from." },
+    curve_checked_at: { kind: "reading", desc: "When we last read this token's bonding curve account directly, epoch ms. NULL means we have never read it — not that anything was found. Read this column before curve_complete: together they distinguish four states, and only two of them say anything about the token." },
+    curve_complete: { kind: "reading", desc: "The curve account's own `complete` bit at curve_checked_at. 1 = we read the account and the curve had completed. 0 = we read it and it had not. NULL WITH a curve_checked_at = the account no longer existed when we looked, which tells you nothing about whether the curve filled. NULL WITH NO curve_checked_at = we never looked. A 0 here is a direct observation and is the basis for the correction against `graduated`; the two NULL cases are our coverage and are never evidence about a launch." },
+    create_sig: { kind: "live", desc: "Signature of the transaction this launch was decoded from — the one carrying the creator's initial buy, and therefore the transaction dev_pct is computed from. Fetch it and you can check every launch figure in this row against the chain rather than trusting us. NULL means we did not record one: the launch predates the column (2026-09-09), or we found the token late and never saw its creation, or its trade rows were pruned before the backfill reached them. NULL is never a claim that no creation transaction exists." },
+    create_slot: { kind: "live", desc: "The slot create_sig landed in. Present exactly when create_sig is." },
     graduated_confirmed_by: { kind: "ours", desc: "How graduation was confirmed: 'pool' (a PumpSwap pool was found), 'curve_complete' (the curve account's own complete bit), or NULL for an inference from decoded trade volume that nobody ever confirmed. NULL means we say less, never that we say the opposite — but it is not neutral: where the curve account has since been read, the great majority of NULL rows returned complete=0. This column, not graduated, is the graduation flag." },
     uri: { kind: "ours", desc: "Metadata URI the launch declared." },
     image: { kind: "ours", desc: "Image URL from that metadata. A NULL here with meta_at set means the launch declared no picture — a different statement from us not fetching one." },
@@ -126,6 +130,16 @@ const DOCS: Record<string, Record<string, Doc>> = {
     source_mint: { kind: "ours", desc: "The launch that first brought this wallet to our attention." },
     added_at: { kind: "ours", desc: "When we added the row, epoch ms." },
   },
+  corrections: {
+    id: { kind: "ours", desc: "Stable slug, so a correction can be cited by name." },
+    issued_at: { kind: "ours", desc: "When the correction was published, epoch ms." },
+    scope: { kind: "ours", desc: "What it concerns: 'column', 'row' or 'record'." },
+    subject: { kind: "ours", desc: "The column name or mint the correction is about; NULL when it applies to the whole record." },
+    finding: { kind: "ours", desc: "What was wrong." },
+    effect: { kind: "ours", desc: "What a reader who trusted the uncorrected record would have wrongly concluded. This is the field to read if you have already published something derived from an earlier copy of this file." },
+    remedy: { kind: "ours", desc: "What was done about it, and what to read instead." },
+    supersedes: { kind: "ours", desc: "The id of a correction this one replaces. The table is append-only: corrections are superseded, never edited or deleted." },
+  },
   meta: {
     k: { kind: "ours", desc: "Key. The published record carries built_at (when this file was assembled), built_by (which machine and script — 'local' or the cloud service name, never a personal hostname), built_pid, and watermark (how far the incremental copy had reached)." },
     v: { kind: "ours", desc: "Value, as text. Timestamps are epoch ms." },
@@ -150,6 +164,8 @@ const TABLE_NOTE: Record<string, string> = {
   pool_map: "Which PumpSwap pool belongs to which token.",
   operator_wallets: "Wallets grouped by who funded them.",
   operator_policy: "What each cluster's plays look like taken together.",
+  corrections: "Every correction this project has issued against its own record, so a reader who mirrors this file and never visits the site still learns what was wrong. Append-only: a correction is superseded by a new row naming it, never edited.",
+  graduations: "A view, not a table: the launches whose curve completion was actually confirmed. `SELECT * FROM graduations` is the defensible answer to a question `tokens.graduated` overstates.",
   meta: "What built this file, and when. A record that cannot account for its own origin is a strange thing for a provenance project to publish.",
 };
 

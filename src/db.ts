@@ -64,6 +64,7 @@ export function openDb(path: string, opts: { migrate?: boolean } = {}): Database
       created_at INTEGER, late_discovery INTEGER DEFAULT 0,
       launch_price REAL, last_price REAL, peak_price REAL, peak_at INTEGER,
       dev_pct REAL, dev_sold INTEGER, dev_sold_at INTEGER,
+      create_sig TEXT, create_slot INTEGER,
       buys INTEGER, sells INTEGER, buy_vol_sol REAL, sell_vol_sol REAL,
       unique_buyers INTEGER, unique_sellers INTEGER, bundled_buyers INTEGER,
       snap30_buyers INTEGER, snap30_buys INTEGER, snap30_sells INTEGER, snap30_vol REAL,
@@ -265,6 +266,15 @@ export function openDb(path: string, opts: { migrate?: boolean } = {}): Database
    */
   try { db.exec("ALTER TABLE tokens ADD COLUMN graduated_confirmed_by TEXT"); } catch {}
   /**
+   * The creation transaction, added 2026-09-09. NULL means we did not record one, and that has three innocent
+   * causes — the launch predates this column, we found the token late and never saw its creation, or the row was
+   * rebuilt from chain history rather than watched. **NULL never means the token has no creation transaction.**
+   * The paired backfill is `npm run backfillsig`, which recovers it for older rows from the dev's first-block trade
+   * while those rows survive retention; what retention has already taken is recoverable only from an archival node.
+   */
+  try { db.exec("ALTER TABLE tokens ADD COLUMN create_sig TEXT"); } catch {}
+  try { db.exec("ALTER TABLE tokens ADD COLUMN create_slot INTEGER"); } catch {}
+  /**
    * What the token claimed to be at launch: its image, its description, and when we read them.
    *
    * `uri`, `twitter`, `telegram` and `website` were already stored. The image never was — `fetchMeta` did not read the
@@ -340,10 +350,11 @@ export function upsertToken(db: DatabaseSync, t: TokenState): void {
   if (NOT_LAUNCHES.has(t.mint)) return;
   db.prepare(`
     INSERT INTO tokens (mint, name, symbol, uri, creator, created_at, late_discovery, launch_price, last_price, peak_price, peak_at,
+      create_sig, create_slot,
       dev_pct, dev_sold, dev_sold_at, buys, sells, buy_vol_sol, sell_vol_sol, unique_buyers, unique_sellers, bundled_buyers,
       snap30_buyers, snap30_buys, snap30_sells, snap30_vol, graduated, graduated_at, p_1m, p_5m, p_15m, p_60m,
       twitter, telegram, website, image, description, meta_at, kol_signals, pool, amm_trusted, vault_sol, vault_at, finalized, updated_at, venue, graduated_confirmed_by, meta_json, meta_bytes)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(mint) DO UPDATE SET
       name=excluded.name, symbol=excluded.symbol, launch_price=excluded.launch_price, last_price=excluded.last_price,
       peak_price=excluded.peak_price, peak_at=excluded.peak_at, dev_sold=excluded.dev_sold, dev_sold_at=excluded.dev_sold_at,
@@ -362,6 +373,10 @@ export function upsertToken(db: DatabaseSync, t: TokenState): void {
       snap30_buys=COALESCE(tokens.snap30_buys, excluded.snap30_buys),
       snap30_sells=COALESCE(tokens.snap30_sells, excluded.snap30_sells),
       snap30_vol=COALESCE(tokens.snap30_vol, excluded.snap30_vol),
+      -- A launch fact: written once, never revised. A later writer (a detector restoring a token, a rebuild) has no
+      -- creation transaction to offer and must not blank the one we recorded live.
+      create_sig=COALESCE(tokens.create_sig, excluded.create_sig),
+      create_slot=COALESCE(tokens.create_slot, excluded.create_slot),
       graduated=excluded.graduated, graduated_at=excluded.graduated_at,
       -- Monotonic: confirmation can arrive late (a pool found hours afterwards is still proof) but never un-arrives.
       -- A writer that has not confirmed anything must not erase a confirmation another path already earned.
@@ -379,6 +394,7 @@ export function upsertToken(db: DatabaseSync, t: TokenState): void {
       finalized=excluded.finalized, updated_at=excluded.updated_at
   `).run(
     t.mint, t.name, t.symbol, t.uri, t.creator, t.createdAt, t.lateDiscovery ? 1 : 0, t.launchPrice, t.lastPrice, t.peakPrice, t.peakAt,
+    t.createSig || null, t.createdSlot || null,
     t.devPct, t.devSold ? 1 : 0, t.devSoldAt, t.buys, t.sells, t.buyVolSol, t.sellVolSol, t.buyers.size, t.sellers.size, t.bundledBuyers,
     t.snap30?.buyers ?? null, t.snap30?.buys ?? null, t.snap30?.sells ?? null, t.snap30?.volSol ?? null,
     t.graduated ? 1 : 0, t.graduatedAt,

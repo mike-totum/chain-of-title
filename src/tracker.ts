@@ -14,6 +14,12 @@ export interface TokenState {
   creator: string;
   createdAt: number; // ms, receipt time
   createdSlot: number;
+  /**
+   * The signature of the transaction this launch was decoded from — the one that carries the creator's initial buy,
+   * and therefore the one `devPct` is computed from. Empty for a token we found late, where no such observation
+   * exists. Kept because a number the reader cannot trace back to a transaction is an assertion, not a record.
+   */
+  createSig: string;
   /** Launchpad slug, e.g. "pumpfun". Omitted by the pump.fun collector, which is the default in `upsertToken`. */
   venue?: string;
   /**
@@ -182,6 +188,7 @@ export class Tracker extends EventEmitter {
       creator: e.traderPublicKey,
       createdAt: now,
       createdSlot: e.slot ?? 0,
+      createSig: e.signature ?? "",
       lastTrade: null,
       lateDiscovery: false,
       curve,
@@ -251,6 +258,7 @@ export class Tracker extends EventEmitter {
       creator: "",
       createdAt: prior?.createdAt ?? now,
       createdSlot: 0,
+      createSig: "",   // found late: we never saw the creation transaction, so there is nothing to cite
       lastTrade: null,
       lateDiscovery: true,
       curve: { vSol: 0, vTokens: 1 },
