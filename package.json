@@ -58,7 +58,8 @@
     "xevidence": "tsx --no-warnings=ExperimentalWarning src/xevidence.ts",
     "confirm": "tsx --no-warnings=ExperimentalWarning src/confirm.ts",
     "backfillsig": "tsx --no-warnings=ExperimentalWarning src/backfillsig.ts",
-    "backfillmeta": "tsx --no-warnings=ExperimentalWarning src/backfillmeta.ts"
+    "backfillmeta": "tsx --no-warnings=ExperimentalWarning src/backfillmeta.ts",
+    "imagesync": "tsx --no-warnings=ExperimentalWarning src/imagesync.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

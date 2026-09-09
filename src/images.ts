@@ -23,6 +23,7 @@
  * job to roughly 1,400 a day rather than 24,000. `--all` widens it; the storage arithmetic is yours to accept.
  */
 import { mkdirSync, writeFileSync, existsSync } from "node:fs";
+import { r2Config, head, put } from "./r2.ts";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -80,6 +81,8 @@ export async function captureImages(
 
   const st: CaptureStats = { attempted: pending.length, kept: 0, skipped: 0, failed: 0, bytes: 0, reused: 0 };
   if (pending.length === 0) return st;
+  // Resolved once. A half-configured store must not look enabled, so r2Config returns null unless all four are set.
+  const store = r2Config();
 
   const done = db.prepare("UPDATE tokens SET image_sha256=?, image_bytes=?, image_at=? WHERE mint=?");
   const failed = db.prepare("UPDATE tokens SET image_error=?, image_at=? WHERE mint=?");
@@ -98,12 +101,27 @@ export async function captureImages(
       if (buf.length > MAX_BYTES) { failed.run(`too large: ${buf.length}`, Date.now(), mint); st.skipped++; return; }
 
       const sha = createHash("sha256").update(buf).digest("hex");
-      // Content-addressed, two-character fan-out: many launches reuse the same picture, and this stores it once.
-      const sub = join(opts.dir, sha.slice(0, 2));
       const ext = EXT[type] ?? "bin";
-      const path = join(sub, `${sha}.${ext}`);
-      if (existsSync(path)) st.reused++;
-      else { mkdirSync(sub, { recursive: true }); writeFileSync(path, buf); }
+      /**
+       * Where the bytes go, and why the record does not care.
+       *
+       * With R2 configured the picture store is object storage and the collector volume stays flat — which is the
+       * only way "keep every launch's picture" and "never fill the disk" are both true at ~1 GB/day against 20 GB.
+       * Without it, local disk, unchanged. Either way the row records the same sha256, so the published record is
+       * identical and a reader verifying a picture never learns, or needs to learn, where we happened to put it.
+       *
+       * Content-addressed in both, so the 47% of launches reusing another launch's image cost one HEAD and no
+       * transfer. A store that already holds the bytes is the dedup check; there is no second index to drift.
+       */
+      if (store) {
+        if (await head(store, sha).catch(() => false)) st.reused++;
+        else await put(store, sha, buf, type || "application/octet-stream");
+      } else {
+        const sub = join(opts.dir, sha.slice(0, 2));
+        const path = join(sub, `${sha}.${ext}`);
+        if (existsSync(path)) st.reused++;
+        else { mkdirSync(sub, { recursive: true }); writeFileSync(path, buf); }
+      }
       done.run(sha, buf.length, Date.now(), mint);
       st.kept++; st.bytes += buf.length;
     } catch (e: any) {
@@ -115,7 +133,8 @@ export async function captureImages(
   };
 
   mkdirSync(opts.dir, { recursive: true });
-  log(`fetching ${pending.length} launch image${pending.length === 1 ? "" : "s"}${opts.all ? " (all launches)" : " (graduated only)"}…`);
+  log(`fetching ${pending.length} launch image${pending.length === 1 ? "" : "s"}${opts.all ? " (all launches)" : " (graduated only)"}` +
+    ` → ${store ? `r2://${store.bucket}` : opts.dir}…`);
   let cursor = 0;
   await Promise.all(Array.from({ length: opts.concurrency }, async () => {
     for (;;) {
