@@ -73,6 +73,12 @@ Not decided, and needing counsel:
 ## Operational notes
 
 - **Enabling:** `TELEGRAM_ARCHIVE=1`, plus `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` and a session.
+- **A session may run in exactly ONE place.** Running the same string on the laptop and in the cloud produced
+  `406: AUTH_KEY_DUPLICATED` on every channel within minutes on 2026-09-09, and Telegram can revoke a duplicated key
+  outright — which would kill both copies, not just the second one. The cloud collector holds it; the laptop's
+  `TELEGRAM_API_ID`/`TELEGRAM_API_HASH` are commented out for that reason and re-enabling them means unsetting
+  `TELEGRAM_SESSION` on the collector first. The failure is visible rather than silent only because a failed poll
+  opens a `tg_gaps` row: twenty of them, in one pass, is what surfaced it.
 - **The session is an account credential, not an API key.** A gramjs session string is full access to the Telegram
   account that made it. `TELEGRAM_SESSION` sets it as a platform secret so it is never written to disk or baked into
   an image layer; `data/telegram.session` remains the local default that `npm run telegram:login` writes.
