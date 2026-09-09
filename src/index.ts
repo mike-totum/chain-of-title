@@ -1034,6 +1034,40 @@ if (process.env.IMAGES_CAPTURE === "1") {
 }
 
 /**
+ * Keep the launchpad's own record of each launch, and keep it as it changes.
+ *
+ * pump.fun knows things the chain does not: whether it has BANNED a token, whether it flagged it nsfw, the all-time
+ * high it showed people, how many replies it drew. None of it is on chain, none of it can be bought back from an
+ * archival node, and all of it can be revised or deleted by the platform without notice. A ban in particular is the
+ * closest thing to an admission this market produces and it is never announced.
+ *
+ * The re-check half is the point. One snapshot at graduation cannot show a ban, because the ban comes later; only a
+ * second look does, and only if it is kept beside the first rather than overwriting it. See platform.ts.
+ */
+if (process.env.PLATFORM_CAPTURE === "1") {
+  const EVERY_MS = Number(process.env.PLATFORM_EVERY_MINUTES ?? 10) * 60_000;
+  const LIMIT = Number(process.env.PLATFORM_LIMIT ?? 60);
+  const RECHECK = Number(process.env.PLATFORM_RECHECK ?? 40);
+  let running = false;
+  const run = async () => {
+    if (running) return;
+    running = true;
+    try {
+      const { capturePlatform } = await import("./platform.ts");
+      const st = await capturePlatform(db, { limit: LIMIT, recheck: RECHECK, concurrency: 3, log });
+      if (st.attempted > 0)
+        log(`[platform] ${st.kept} stored (${st.changed} changed), ${st.unchanged} unchanged, ${st.failed} failed, of ${st.attempted}`);
+    } catch (e) {
+      // Never fatal, for the same reason as images: this runs inside the process whose only real obligation is to
+      // keep watching launches.
+      log(`[platform] capture failed: ${(e as Error).message}`);
+    } finally { running = false; }
+  };
+  setTimeout(() => void run(), 150_000);
+  setInterval(() => void run(), EVERY_MS);
+}
+
+/**
  * Hand the record to the web service. Private network only in normal operation — Railway routes
  * `collector.railway.internal` between services without exposing anything publicly.
  */

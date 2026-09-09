@@ -53,7 +53,8 @@
     "repair": "tsx --no-warnings=ExperimentalWarning src/repair.ts",
     "freshness": "sh scripts/freshness.sh",
     "refresh": "npm run servicedb && npm run preflight && railway up",
-    "images": "tsx --no-warnings=ExperimentalWarning src/images.ts"
+    "images": "tsx --no-warnings=ExperimentalWarning src/images.ts",
+    "platform": "tsx --no-warnings=ExperimentalWarning src/platform.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

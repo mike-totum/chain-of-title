@@ -114,6 +114,22 @@ export function openDb(path: string): DatabaseSync {
       pool TEXT PRIMARY KEY, mint TEXT NOT NULL, created_at INTEGER
     );
     CREATE INDEX IF NOT EXISTS pool_map_mint ON pool_map(mint);
+    -- The launchpad's own record of a launch, versioned. pump.fun holds facts that exist nowhere on chain and
+    -- nowhere in the metadata document — whether it BANNED the token, whether it was flagged nsfw, its all-time-high
+    -- market cap, how many replies it drew — and can revise or delete any of them without notice or trace. A ban is
+    -- the closest thing to an admission this market produces and it is never announced.
+    --
+    -- Keyed on (mint, sha256) so an unchanged document writes nothing and a changed one is kept BESIDE its
+    -- predecessors rather than replacing them. That is the whole difference between a cache and an archive: a cache
+    -- answers what the platform says now, this answers what it said then, which is the only question anyone can ask
+    -- afterwards. Error rows are versioned the same way, because a delisting is a change worth recording.
+    CREATE TABLE IF NOT EXISTS platform_snapshots (
+      mint TEXT NOT NULL, sha256 TEXT NOT NULL, json TEXT, bytes INTEGER, fetched_at INTEGER,
+      is_banned INTEGER, nsfw INTEGER, reply_count INTEGER, ath_market_cap REAL, ath_at INTEGER,
+      is_live INTEGER, error TEXT,
+      PRIMARY KEY (mint, sha256)
+    );
+    CREATE INDEX IF NOT EXISTS platform_fetched ON platform_snapshots(fetched_at);
   `);
   // `updated_at` is written on every token row update, but vault_sol is only replaced when a pool read actually
   // succeeded (COALESCE below). Reporting updated_at as the measurement time therefore advanced the timestamp while
