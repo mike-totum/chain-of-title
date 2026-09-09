@@ -268,6 +268,27 @@ if (RECORD_URL) setInterval(() => void pullRecord(false), REFRESH_MS);
  * journal_mode are withheld.
  */
 const db = openDb(DB_FILE, { migrate: false });
+
+/**
+ * The guard runs FIRST, before anything else touches a table.
+ *
+ * It used to sit fifty lines below `coverageWindows(db)`, which was harmless only while `openDb` created the tables
+ * it needed: a missing record produced empty tables and the guard caught it with a clear message. Opening without
+ * migrating removes that floor — there is no `runs` table either — so a missing or truncated file threw inside
+ * `coverageWindows` and the refusal below could never be reached. The message the guard exists to print was
+ * replaced by a stack trace, on the one path where the service must fail comprehensibly.
+ */
+const count = (sql: string): number => {
+  try { return (db.prepare(sql).get() as any).c as number; } catch { return 0; }
+};
+const held = count("SELECT COUNT(*) c FROM tokens");
+const observed = count("SELECT COUNT(*) c FROM tokens WHERE COALESCE(late_discovery,0)=0");
+if (held < 1000) {
+  console.error(`refusing to start: ${DB_FILE} holds ${held} launches, which cannot be a real archive.`);
+  console.error(`build one with \`npm run servicedb\` and make sure it is present at that path.`);
+  process.exit(1);
+}
+
 const win = coverageWindows(db);
 const covered = (ts: number) => win.some((w) => ts >= w.a && ts <= w.b);
 const chrome: Chrome = {
@@ -314,16 +335,6 @@ const COV: Coverage = { from: win.length ? win[0].a : null, downtimeMinutes: chr
  * file therefore has no `tokens` table at all rather than an empty one. That must reach the guard below as "holds
  * nothing", which is what it is, instead of an unhandled exception in a stack trace nobody reads.
  */
-const count = (sql: string): number => {
-  try { return (db.prepare(sql).get() as any).c as number; } catch { return 0; }
-};
-const held = count("SELECT COUNT(*) c FROM tokens");
-const observed = count("SELECT COUNT(*) c FROM tokens WHERE COALESCE(late_discovery,0)=0");
-if (held < 1000) {
-  console.error(`refusing to start: ${DB_FILE} holds ${held} launches, which cannot be a real archive.`);
-  console.error(`build one with \`npm run servicedb\` and make sure it is present at that path.`);
-  process.exit(1);
-}
 
 /**
  * Is the archive the public is being given still advancing?
