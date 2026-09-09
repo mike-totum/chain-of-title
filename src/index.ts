@@ -10,7 +10,7 @@ import { Tracker, fetchMeta } from "./tracker.ts";
 import { PaperBroker } from "./paper.ts";
 import { strategies, type OperatorActivity } from "./strategies/index.ts";
 import { rpc as rpcHttpCall } from "./rpc-http.ts";
-import { BUYOUT_SOL, TOKEN_COLUMNS, coverageWindows, assess } from "./provenance.ts";
+import { BUYOUT_SOL, TOKEN_COLUMNS, KEEP_TRADE_EVIDENCE, coverageWindows, assess } from "./provenance.ts";
 import { base58 } from "./feed/rpc.ts";
 import type { TokenState } from "./tracker.ts";
 import { KolWatcher, StreetListener, loadKols, parseTags, parseTweet, twitterApiIoProvider, xApiProvider } from "./signals/twitter.ts";
@@ -847,7 +847,7 @@ const RETENTION_DAYS = Number(process.env.RETENTION_DAYS || 14);
  * over the whole archive this costs nothing to keep and cannot be rebuilt once dropped — the transactions remain on
  * chain, but only an archival node can reach back for them, and by then we are reconstructing what we watched.
  */
-const KEEP_EVIDENCE = `AND NOT (venue = 'curve' AND side = 'buy' AND sol >= ${BUYOUT_SOL})`;
+const KEEP_EVIDENCE = KEEP_TRADE_EVIDENCE;
 function pruneWorkingData(): void {
   const cutoff = Date.now() - RETENTION_DAYS * 86400_000;
   const batch = 50_000;

@@ -174,6 +174,20 @@ tbody tr:hover{background:var(--card)}
   background:none;border:1px solid var(--line);padding:6px 9px;cursor:pointer;text-decoration:none;white-space:nowrap}
 .addr a:hover,.addr button:hover{color:var(--fg);border-color:var(--fg)}
 .headline b.q{border-bottom:0}
+/* The published schema. The kind pill is the column that matters: it says whether a reader could reproduce the
+   value themselves. "live" is the irreplaceable half of this archive, so it reads as emphasis rather than as a
+   warning; "opaque" is a defect we are admitting to, so it reads as one. */
+td.mut,.mut{color:var(--mut)}
+/* .mono breaks anywhere, which is right for a 44-character mint and wrong for a column name: the schema table was
+   rendering "late_discove / ry". Identifiers wrap at the underscore or not at all. */
+.data td.mono.id{word-break:normal;overflow-wrap:anywhere}
+.kind{display:inline-block;font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;font-weight:700;
+  padding:2px 7px;border:1px solid currentColor;white-space:nowrap}
+.k-live{color:var(--fg)}
+.k-chain{color:var(--ok)}
+.k-reading{color:var(--warn)}
+.k-ours{color:var(--mut)}
+.k-opaque{color:var(--bad)}
 /* A sample of the actual output. A visitor who has never seen a record cannot tell what pasting a mint will get
    them, and a description of a verdict is not a verdict. */
 .sample{display:block;margin:22px 0 0;padding:16px 18px;border:1px solid var(--line);background:var(--card);

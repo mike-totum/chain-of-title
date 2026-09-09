@@ -12,7 +12,7 @@
  */
 import { config } from "./config.ts";
 import { openDb } from "./db.ts";
-import { BUYOUT_SOL } from "./provenance.ts";
+import { BUYOUT_SOL, KEEP_TRADE_EVIDENCE } from "./provenance.ts";
 
 const arg = (k: string, d: number) => { const i = process.argv.indexOf(k); return i > 0 ? Number(process.argv[i + 1]) : d; };
 const DAYS = arg("--days", 7);
@@ -60,7 +60,7 @@ console.log("");
 // See KEEP_EVIDENCE in index.ts — the same exemption, because the collector prunes itself and this prunes by hand,
 // and a rule that holds in only one of them is not a rule.
 purge("trades", `DELETE FROM trades WHERE rowid IN (SELECT rowid FROM trades WHERE ts < ?
-  AND NOT (venue = 'curve' AND side = 'buy' AND sol >= ${BUYOUT_SOL}) LIMIT ${BATCH})`, [cutoff]);
+  ${KEEP_TRADE_EVIDENCE} LIMIT ${BATCH})`, [cutoff]);
 purge("wallet_token_stats", `DELETE FROM wallet_token_stats WHERE rowid IN (SELECT wts.rowid FROM wallet_token_stats wts JOIN tokens t ON t.mint = wts.mint WHERE t.created_at < ? LIMIT ${BATCH})`, [cutoff]);
 purge("curve_snapshots", `DELETE FROM curve_snapshots WHERE rowid IN (SELECT rowid FROM curve_snapshots WHERE ts < ? LIMIT ${BATCH})`, [cutoff]);
 purge("tweets", `DELETE FROM tweets WHERE rowid IN (SELECT rowid FROM tweets WHERE fetched_at < ? LIMIT ${BATCH})`, [cutoff]);

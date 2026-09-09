@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { config } from "./config.ts";
 import { openDb } from "./db.ts";
 import { profile, verdictLine } from "./operator.ts";
+import { renderSchema, renderSamples } from "./schema-doc.ts";
 import { rpcStats } from "./rpc-http.ts";
 import { tokenRecord, walletRecord, API_VERSION, PER_IP_PER_HOUR, type Coverage } from "./api.ts";
 import { BRAND, CANONICAL_HOST, CONTACT, CSS, FAVICON, SEARCH, page, tokenBody, walletBody, tokenPreview, esc, fmt, when, dur, ago, type Chrome, type Reading } from "./render.ts";
@@ -338,6 +339,9 @@ writeFileSync(join(OUT, "data.html"), page("The data", `
   in the record and nothing stops you fetching them yourself — the only reason we did not is that we could not
   afford the disk.</p>
 
+  ${renderSchema(db)}
+  ${renderSamples(db)}
+
   <div class="sec"><h2>Live JSON</h2></div>
   <table>
     <tr><td class="k"><a href="api/${API_VERSION}/token/{mint}" class="mono">api/${API_VERSION}/token/{mint}</a></td><td>one launch record: free, keyless, CORS-open. <a href="api.html">How to read it</a>, and the one rule that matters.</td></tr>
@@ -357,9 +361,14 @@ WHERE graduated=1 AND dev_pct >= 50;</td><td>graduations where the creator took 
     <tr><td class="mono" style="white-space:pre-wrap">SELECT symbol, dev_pct, curve_buyers
 FROM tokens WHERE graduated=1
   AND curve_buyers = 0;</td><td>curves that completed with no outside buyer at all</td></tr>
-    <tr><td class="mono" style="white-space:pre-wrap">SELECT wallet, amm_sell, curve_sol
-FROM wallet_flow
-ORDER BY amm_sell DESC LIMIT 20;</td><td>who sold the most into buyers after taking a curve</td></tr>
+    <tr><td class="mono" style="white-space:pre-wrap">SELECT t.wallet, COUNT(*) curves,
+  ROUND(SUM(t.sol)) sol
+FROM trades t
+WHERE t.venue='curve' AND t.side='buy'
+GROUP BY t.wallet ORDER BY curves DESC;</td><td>who takes the most curves, counted from the trade rows in this file rather than from an aggregate you cannot check</td></tr>
+    <tr><td class="mono" style="white-space:pre-wrap">SELECT COUNT(*) FROM tokens
+WHERE graduated=1
+  AND graduated_confirmed_by IS NULL;</td><td>graduations our feed inferred but never confirmed against a pool or the curve account — where we say less</td></tr>
   </table>`, chrome, 0,
   `The whole Chain of Title archive as one CC0 SQLite file: ${recCounts ? `${fmt(recCounts.held)} ` : ""}Solana launch records, one row each, no key or sign-up.`, "/data.html"));
 

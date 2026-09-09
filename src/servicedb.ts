@@ -230,6 +230,25 @@ try {
     SELECT mint, wallet, side, sol, ts, slot, venue, COALESCE(is_dev,0)
     FROM main.trades WHERE venue='curve' AND side='buy' AND sol >= ${BUYOUT_SOL}`);
   /**
+   * The AMM trades that `wallet_flow` is computed from, on the mints those wallets actually took.
+   *
+   * Without them `amm_sell` was the one column in the published file that could not be reproduced FROM the published
+   * file: the record carried no `venue='amm'` rows at all, so a reader could see "this wallet sold 4,515 SOL into
+   * buyers" and had no way to check it, or to disagree. For a project whose entire claim is that you should not have
+   * to take its word, that is the wrong column to have.
+   *
+   * Scoped to the same (wallet, mint) pairs as the aggregate, so it is exactly the evidence behind the number and not
+   * a second, larger claim. 1,916 rows measured 2026-09-08 against 10,773 for the wallet-wide version — small enough
+   * that there was never a size reason not to publish it.
+   */
+  db.exec(`INSERT INTO rec.trades (mint, wallet, side, sol, ts, slot, venue, is_dev)
+    SELECT t.mint, t.wallet, t.side, t.sol, t.ts, t.slot, t.venue, COALESCE(t.is_dev,0)
+    FROM main.trades t
+    JOIN (SELECT DISTINCT wallet, mint FROM main.trades
+           WHERE venue='curve' AND side='buy' AND sol >= ${BUYOUT_SOL}) b
+      ON b.wallet = t.wallet AND b.mint = t.mint
+    WHERE t.venue='amm'`);
+  /**
    * `hist_trades` is optional, and assuming otherwise is what has produced every 94 KB record the cloud collector has
    * ever built. The table is created by `history.ts`, which only ever runs on the laptop - so on a collector it does
    * not exist, this statement throws, the whole build dies before writing a single row, and the child process reports
@@ -260,6 +279,18 @@ try {
 
   // one row per wallet that has ever taken a curve; the aggregate is over all of its trades, on both venues
   db.exec("DELETE FROM rec.wallet_flow");
+  /**
+   * Scoped to the mints the wallet actually took, which is what every label on it says.
+   *
+   * It used to select on `wallet IN (...)` — the wallet had taken SOME curve, and then every trade that wallet ever
+   * made anywhere was summed into the total. So `amm_sell`, rendered as "sold after taking the curve" on the wallet
+   * page and used as a worked example on the data page captioned "who sold the most into buyers after taking a
+   * curve", included sells on tokens the wallet had never touched the curve of. The number was real and the sentence
+   * around it was not, which is worse than either being wrong on its own.
+   *
+   * Joining on the (wallet, mint) pairs makes the figure mean what it is captioned. `tokens` becomes the count of
+   * curves that wallet took, which is also what the page has always claimed it was.
+   */
   db.exec(`INSERT INTO rec.wallet_flow
     SELECT t.wallet,
       COALESCE(SUM(CASE WHEN t.venue='curve' AND t.side='buy' THEN t.sol END),0),
@@ -267,7 +298,9 @@ try {
       COALESCE(SUM(CASE WHEN t.venue='amm'   AND t.side='sell' THEN t.sol END),0),
       COUNT(DISTINCT t.mint)
     FROM main.trades t
-    WHERE t.wallet IN (SELECT DISTINCT wallet FROM main.trades WHERE venue='curve' AND side='buy' AND sol >= ${BUYOUT_SOL})
+    JOIN (SELECT DISTINCT wallet, mint FROM main.trades
+           WHERE venue='curve' AND side='buy' AND sol >= ${BUYOUT_SOL}) b
+      ON b.wallet = t.wallet AND b.mint = t.mint
     GROUP BY t.wallet`);
 
   /**

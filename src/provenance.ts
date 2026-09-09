@@ -17,6 +17,27 @@ import { profile, verdictLine, findBuyout } from "./operator.ts";
 
 /** A single large buy that completes a curve is a buyout, not demand. */
 export const BUYOUT_SOL = 40;
+
+/**
+ * What retention must never delete from `trades`, as one SQL fragment used by both pruners.
+ *
+ * The collector prunes itself (`pruneWorkingData` in index.ts) and `npm run prune` prunes by hand, and a rule that
+ * holds in only one of them is not a rule — the buyout exemption lived as two copies of a string for exactly one day
+ * before this needed a second clause.
+ *
+ * That second clause: the AMM trades on the mints a buyout wallet actually took. `wallet_flow.amm_sell` is computed
+ * from them, and with only the buyout clause they aged out on the retention timer — so a wallet that sold 4,515 SOL
+ * into buyers four days ago published a 0, silently, and read as a wallet that never sold. Absence of data as a
+ * finding, in the direction that makes an operator look clean, which is the direction this project cannot afford.
+ * 1,916 rows across the whole archive: it costs nothing to keep and cannot be rebuilt once dropped.
+ */
+export const KEEP_TRADE_EVIDENCE = `AND NOT (
+    (venue = 'curve' AND side = 'buy' AND sol >= ${BUYOUT_SOL})
+    OR (venue = 'amm' AND EXISTS (
+          SELECT 1 FROM trades b
+           WHERE b.wallet = trades.wallet AND b.mint = trades.mint
+             AND b.venue = 'curve' AND b.side = 'buy' AND b.sol >= ${BUYOUT_SOL}))
+  )`;
 /** Above this share of supply in the first block, the creator is the market. */
 export const MAX_DEV_PCT = 20;
 /** Distinct non-dev wallets that had to buy on the curve before it graduated. */
