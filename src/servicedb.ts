@@ -268,6 +268,13 @@ db.function("sha256", (v: unknown) =>
  * run of meta_sha256 stamped 325 of 12,255 documents the collector was already holding, and `uri` carries its own
  * backfill a few lines down for the same reason.
  *
+ * And the watermark can be AHEAD of a write that already happened, not only behind it. A bulk backfill that
+ * correctly bumped `updated_at` still lost 180,951 of 181,474 rows, because a build had crashed after stamping the
+ * watermark and before finishing: the next run's `since` was later than timestamps the backfill had already written.
+ * So "the writer bumps updated_at" is not sufficient on its own for anything written in bulk or written long after
+ * a launch — only a full-rewrite sync or an entry in this list is. That is why create_sig is here rather than
+ * relying on the timestamp its backfill sets.
+ *
  * Generalised after fixing it once and not learning from it: with meta_sha256 backfilled the record still published
  * ZERO image commitments while the collector held them, because the image columns were added the same way and never
  * got the same treatment. Anything the collector fills in long after a launch — a picture fetched hours later, a
