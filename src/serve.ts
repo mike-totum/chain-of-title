@@ -1129,6 +1129,22 @@ const server = createServer(async (req, res) => {
     const img = /^\/i\/([0-9a-f]{64})$/.exec(safe);
     if (img) {
       const sha = img[1];
+      /**
+       * The record is the attestation, and it is checked BEFORE anything is read or fetched.
+       *
+       * This check was believed to be here and was not. The other session merged two /i/ routes on the
+       * understanding that mine already refused a hash the record did not carry; mine only ever checked the local
+       * filesystem, and the 404 that cost an hour of misdiagnosis came from a missing file rather than from a
+       * refusal. Writing it now so the belief and the behaviour agree.
+       *
+       * It matters beyond tidiness. The page says "this is the picture the launch published", and the only thing
+       * that makes that claim checkable by a reader is the commitment published beside it in record.db. Serving
+       * bytes for a hash the archive never attested is serving evidence nobody can verify against the archive —
+       * the exact property the whole commitment scheme exists to provide. Prepared inline rather than hoisted,
+       * because `db` is swapped in place by reloadRecord and a hoisted statement would outlive its connection.
+       */
+      if (!db.prepare("SELECT 1 FROM tokens WHERE image_sha256 = ? LIMIT 1").get(sha))
+        return send(404, "no record attests this picture", "text/plain; charset=utf-8", "none");
       const dir = join(IMAGE_DIR, sha.slice(0, 2));
       const hit = (() => {
         for (const ext of ["webp", "png", "jpg", "gif", "svg", "avif", "bin"]) {

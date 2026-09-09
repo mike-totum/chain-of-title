@@ -117,6 +117,9 @@ db.exec(`
     mint TEXT NOT NULL, wallet TEXT NOT NULL, side TEXT, sol REAL, ts INTEGER, slot INTEGER, venue TEXT, is_dev INTEGER
   );
   CREATE INDEX IF NOT EXISTS rec.trades_mint ON trades(mint, ts);
+  -- The image route refuses any hash the record does not attest, on every request; without this that is a scan of
+  -- every launch on file. Partial, so it costs nothing for the rows that hold no picture.
+  CREATE INDEX IF NOT EXISTS rec.tokens_image ON tokens(image_sha256) WHERE image_sha256 IS NOT NULL;
   CREATE INDEX IF NOT EXISTS rec.trades_wallet ON trades(wallet);
   CREATE TABLE IF NOT EXISTS rec.hist_trades (
     mint TEXT NOT NULL, sig TEXT NOT NULL, idx INTEGER, ts INTEGER, slot INTEGER, wallet TEXT,
