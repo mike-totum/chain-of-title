@@ -97,10 +97,24 @@ export const MAX_READING_AGE_MS = 5 * 60_000;
  * and is not the same as a warning.
  */
 export const readingCertifies = (at: number | null | undefined, sol: number | null | undefined, now: number): boolean =>
-  at != null && sol != null && now - at <= MAX_READING_AGE_MS && sol >= MIN_POOL_SOL;
+  readingIsFresh(at, now) && sol != null && sol >= MIN_POOL_SOL;
+
+/**
+ * Whether a stored reading is recent enough to quote at all — the age half of `readingCertifies`, without the
+ * threshold. The two were one test, and merging them meant a pool we had just read and found thin was reported the
+ * same way as a pool we had not read: both simply vanished. "We read it and it holds 26 SOL" and "we have not read
+ * it" are different sentences and the page now has to be able to say each.
+ */
+export const readingIsFresh = (at: number | null | undefined, now: number): boolean =>
+  at != null && now - at <= MAX_READING_AGE_MS;
 
 export type Level = "DANGER" | "CAUTION" | "UNKNOWN";
-export type Flag = { level: Level; text: string };
+/**
+ * `kind` marks a flag that describes the present rather than the launch. Only liquidity does today. It exists so a
+ * consumer can tell the two apart without parsing English: a thin pool right now is a real warning and belongs on
+ * the page, but it is not evidence about how the token was created and must never retract a finding about that.
+ */
+export type Flag = { level: Level; text: string; kind?: "liquidity" };
 export type Assessment = {
   flags: Flag[];
   /** we watched this launch happen, so its creator share and buyer count are real observations */

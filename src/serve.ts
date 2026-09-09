@@ -18,7 +18,7 @@ import { join, normalize } from "node:path";
 import { config } from "./config.ts";
 import { openDb } from "./db.ts";
 import { type Assessment, assess, cleanAtBirth, coverageWindows, TOKEN_COLUMNS, MIN_POOL_SOL,
-  readingCertifies, MAX_READING_AGE_MS, MAX_DEV_PCT, MIN_BUYERS, BUYOUT_SOL } from "./provenance.ts";
+  readingCertifies, readingIsFresh, MAX_READING_AGE_MS, MAX_DEV_PCT, MIN_BUYERS, BUYOUT_SOL } from "./provenance.ts";
 import { profile, verdictLine, walletVerdict } from "./operator.ts";
 import { poolReservesPooled } from "./outcomes.ts";
 import { rebuild, store, curveExists } from "./backfill.ts";
@@ -646,16 +646,34 @@ async function runRefreshCycle(): Promise<void> {
  * Wrapped SOL was served exactly this way: title "?", a DANGER telling the reader a position could not be sold. On a
  * site whose whole claim is that it says UNKNOWN rather than guess, that is the worst sentence it could emit.
  */
-type TokenRead = { a: Assessment; reading: Reading | null; origin: "observed" | "rebuilt"; clean: boolean };
+/**
+ * `clean` is a claim about the launch. `liquid` is a claim about right now. They were one boolean and should never
+ * have been — see the note on `readRecord`.
+ */
+type TokenRead = { a: Assessment; reading: Reading | null; origin: "observed" | "rebuilt"; clean: boolean; liquid: boolean };
 
 /**
  * Everything we are prepared to say about one launch, computed once. The HTML page and the JSON record are both built
  * from this — they must never be able to disagree about the same token, and the JSON is the copy nobody proof-reads.
  *
  * The pool is read from chain on every judgeable record rather than quoted from storage, and a read we could not make
- * costs the token its clean certificate: `clean` requires a *fresh* reading above the threshold. That is deliberately
- * fail-closed. It means a stretch of RPC trouble downgrades good tokens to "not certified" (UNKNOWN), which is a cost
- * we accept — the opposite error, certifying on a balance we could not confirm, is the one that ends the project.
+ * is never reported as a balance. That is deliberately fail-closed, and the opposite error — quoting a balance we
+ * could not confirm — is the one that ends the project.
+ *
+ * **`clean` and `liquid` are two claims and this function returns them separately.** They used to be one boolean:
+ * a launch was "clean" only if its birth record was spotless *and* a pool reading under five minutes old showed at
+ * least MIN_POOL_SOL. That conflated the one thing this archive can say that nobody else can with the one thing
+ * every scanner on Solana already says.
+ *
+ * Clean-at-birth is a fact about the first blocks. It is permanent, it is unrecoverable once the float is spread,
+ * and it is the reason this project exists. Present liquidity decays by the minute, is readable by anyone with an
+ * RPC key, and on public RPC we currently fail about a third of the reads. Gating the first on the second meant a
+ * stretch of RPC trouble silently deleted findings the archive holds forever: over the last seven days 423 launches
+ * passed every birth test and the front page published 10 of them.
+ *
+ * So the birth claim now stands on the birth record alone, and liquidity is reported beside it with the age of the
+ * reading, or reported as unread. Nothing is certified on a balance we could not confirm — that rule is unchanged.
+ * What changed is that failing to read a pool no longer retracts a statement about the past.
  */
 async function readRecord(t: any, judgeable: boolean, precomputed?: any): Promise<TokenRead> {
   /**
@@ -673,10 +691,20 @@ async function readRecord(t: any, judgeable: boolean, precomputed?: any): Promis
     const fresh = await poolReservesPooled(t.pool, t.mint);
     if (fresh) reading = { sol: fresh.quoteSol, at: Date.now(), fresh: true };
   }
+  /**
+   * The birth claim is settled BEFORE the pool reading is allowed to add anything, and the order is the whole point.
+   *
+   * `cleanAtBirth` refuses any launch carrying a DANGER flag, and this function pushes a DANGER flag when the pool is
+   * thin. Computing `clean` after the push therefore let a balance read seconds ago decide what the record says about
+   * the first block — which is the conflation this split exists to end, and it produced a live disagreement: the
+   * front page listed a launch as clean while the launch's own page said "carries a danger flag", because only one of
+   * the two paths had read a pool. Settle the past first; then say what the present looks like.
+   */
+  const clean = cleanAtBirth(t, a);
   if (reading && reading.sol < MIN_POOL_SOL)
-    a.flags.push({ level: "DANGER", text: `Only ${reading.sol.toFixed(1)} SOL of liquidity was in the pool ${reading.fresh ? "just now" : "when it was last read"}; a position cannot be sold near the quoted price.` });
-  const clean = cleanAtBirth(t, a) && !!reading?.fresh && reading.sol >= MIN_POOL_SOL;
-  return { a, reading, origin: rebuilt ? "rebuilt" : "observed", clean };
+    a.flags.push({ level: "DANGER", kind: "liquidity", text: `Only ${reading.sol.toFixed(1)} SOL of liquidity was in the pool ${reading.fresh ? "just now" : "when it was last read"}; a position cannot be sold near the quoted price.` });
+  const liquid = !!reading?.fresh && reading.sol >= MIN_POOL_SOL;
+  return { a, reading, origin: rebuilt ? "rebuilt" : "observed", clean, liquid };
 }
 
 async function renderToken(t: any, judgeable: boolean, precomputed?: any): Promise<string> {
@@ -853,9 +881,22 @@ function buildHome(now: number): Home {
   const toks = db.prepare(`SELECT ${TOKEN_COLUMNS} FROM tokens WHERE graduated = 1 AND created_at >= ?`).all(since) as any[];
   const assessed = toks.map((t) => ({ t, a: assess(db, t, covered) }));
 
-  const certified = assessed.filter(({ t, a }) => cleanAtBirth(t, a) && readingCertifies(t.vault_at, t.vault_sol, now));
-  const uncertified = assessed.filter(({ t, a }) => cleanAtBirth(t, a) && !readingCertifies(t.vault_at, t.vault_sol, now));
+  /**
+   * Two populations, and the front page now leads with the first rather than the second.
+   *
+   * `birthClean` is every launch whose record shows no sign of manufacture. That is the archive's own finding and it
+   * does not expire. `certified` is the subset we have also just read a healthy pool for, which is a different and
+   * much more perishable claim. Publishing only the intersection meant the headline number tracked our RPC luck: it
+   * said "5 launched clean" out of 1,656 while the record held 423 clean launches for the week, and a reader has no
+   * way to tell a strict bar from a broken one.
+   */
+  const birthClean = assessed.filter(({ t, a }) => cleanAtBirth(t, a));
+  const certified = birthClean.filter(({ t }) => readingCertifies(t.vault_at, t.vault_sol, now));
+  const uncertified = birthClean.filter(({ t }) => !readingCertifies(t.vault_at, t.vault_sol, now));
   const unchecked = uncertified.length;
+  // Of those, the ones we simply have no recent reading for — as distinct from the ones we read and found thin.
+  // The page says different things about each, so it cannot count them together.
+  const unread = birthClean.filter(({ t }) => !readingIsFresh(t.vault_at, now)).length;
 
   /**
    * The 24-hour window ends where the archive ends, not where the clock is.
@@ -885,15 +926,25 @@ function buildHome(now: number): Home {
   return {
     now, builtAt: recordBuiltAt, windowEnd,
     graduated24h: day.length,
+    cleanBirth24h: birthClean.filter(({ t }) => inDay(t)).length,
     clean24h: certified.filter(({ t }) => inDay(t)).length,
     danger24h: day.filter(({ a }) => a.flags.some((f) => f.level === "DANGER")).length,
     onFile: (db.prepare("SELECT COUNT(*) c FROM tokens WHERE late_discovery=0").get() as any).c,
-    windowDays: HOME_DAYS, gradWindow: toks.length, unchecked,
+    windowDays: HOME_DAYS, gradWindow: toks.length, cleanBirthWindow: birthClean.length, unchecked, unread,
     unchecked24h: uncertified.filter((x) => inDay(x.t)).length,
-    cleanRows: certified.sort((x, y) => y.t.created_at - x.t.created_at).slice(0, 40).map(({ t, a }) => ({
+    /**
+     * Every clean launch, liquid or not, newest first — with the liquidity reading carried as nullable rather than
+     * used as a filter. A row whose pool we have not read recently belongs on this list with its liquidity column
+     * saying so; leaving it off published our RPC coverage as if it were a finding about the token.
+     */
+    cleanRows: birthClean.sort((x, y) => y.t.created_at - x.t.created_at).slice(0, 40).map(({ t, a }) => ({
       mint: t.mint, symbol: t.symbol, devPct: t.dev_pct, buyers: a.curveBuyers ?? 0,
       fillMs: t.graduated_at && t.created_at ? t.graduated_at - t.created_at : null,
-      poolSol: t.vault_sol, readAt: t.vault_at,
+      // Quote any reading recent enough to quote, thin or not, and say separately whether it clears the threshold.
+      // Nulling a thin-but-fresh balance would report "we read it and it is nearly empty" as "we have not read it".
+      poolSol: readingIsFresh(t.vault_at, now) ? t.vault_sol : null,
+      readAt: readingIsFresh(t.vault_at, now) ? t.vault_at : null,
+      liquid: readingCertifies(t.vault_at, t.vault_sol, now),
     })),
     wallets: walletCount,
     opRows: ops.map((w) => ({ wallet: w.wallet, taken: w.tokens, spent: w.curve_sol, sold: w.amm_sell, bought: w.amm_buy })),
@@ -913,6 +964,7 @@ function buildHome(now: number): Home {
       verdict: verdict(proofRow.t, proofRow.a, false),
     } : null,
     maxDevPct: MAX_DEV_PCT, minBuyers: MIN_BUYERS, buyoutSol: BUYOUT_SOL, minPoolSol: MIN_POOL_SOL,
+    maxReadingAgeMs: MAX_READING_AGE_MS,
   };
 }
 
@@ -939,11 +991,19 @@ function summaryJson(): string {
   return JSON.stringify({
     generatedAt: Date.now(), asOf: h.builtAt, coverageFrom: COV.from, downtimeMinutes: Math.round(COV.downtimeMinutes),
     maxReadingAgeMs: MAX_READING_AGE_MS,
-    graduated24h: h.graduated24h, clean24h: h.clean24h, uncertified24h: h.unchecked24h,
+    graduated24h: h.graduated24h,
+    /**
+     * Two counts, because they answer two questions and used to be one number answering neither cleanly.
+     * `cleanAtBirth24h` is how many launches in the window show no sign of manufacture — a permanent finding about
+     * the first blocks. `clean24h` is the subset we have also just read a healthy pool for, which decays. A consumer
+     * wanting the archive's own judgement wants the first; the second tracks our RPC coverage as much as the market.
+     */
+    cleanAtBirth24h: h.cleanBirth24h, clean24h: h.clean24h, uncertified24h: h.unchecked24h,
     uncertified: h.unchecked, archivedLaunches: h.onFile,
     clean: h.cleanRows.map((r) => ({
       mint: r.mint, symbol: r.symbol, creatorSupplyPct: r.devPct, curveBuyers: r.buyers,
-      poolSol: r.poolSol, poolReadAt: r.readAt,
+      // null = no reading fresh enough to quote. Not zero liquidity, and not a finding about the token.
+      poolSol: r.poolSol, poolReadAt: r.readAt, liquidityVerified: r.liquid,
     })),
   }, null, 2);
 }

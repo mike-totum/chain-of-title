@@ -47,6 +47,8 @@ a{color:inherit}h1{font-size:22px;margin:0 0 4px}h2{font-size:15px;text-transfor
 a:focus-visible,button:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid var(--fg);outline-offset:2px}
 .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;word-break:break-all}
 .sub{color:var(--mut);font-size:13px;margin-bottom:24px}
+td.mut{color:var(--mut)}
+td.thin{color:var(--bad)}
 table{width:100%;border-collapse:collapse;font-size:14px}th{text-align:left;font-weight:600;color:var(--mut);font-size:12px;text-transform:uppercase;letter-spacing:.05em}
 th,td{padding:7px 10px 7px 0;border-bottom:1px solid var(--line);vertical-align:top}
 .k{color:var(--mut);width:180px}
@@ -416,8 +418,18 @@ export function verdict(t: any, a: Assessment, clean: boolean): Verdict {
   if (!a.watched) return { level: "UNKNOWN", label: "Launch not observed",
     why: "We have no record of this launch, so we cannot say what it was at birth. That is not a clean result. Once the float has been spread, a manufactured launch is indistinguishable from a real one." };
   // The "not a prediction" half of this moved to `.vscope`, which every verdict now carries.
+  /**
+   * A claim about the first blocks, and it says so. It is no longer conditioned on present liquidity — that is a
+   * different question with a different shelf life — but a thin pool right now is still a warning a reader needs,
+   * and a green all-clear printed above "a position cannot be sold" would be true in the letter and false in the
+   * effect. So a clean launch whose pool is currently thin keeps the finding and loses the green: one line, both
+   * facts, neither one deleting the other.
+   */
+  const thinNow = a.flags.some((f) => f.kind === "liquidity" && f.level === "DANGER");
+  if (clean && thinNow) return { level: "CAUTION", label: "Launched clean, thin pool now",
+    why: "The launch record shows no sign of manufacture — that part is settled and does not change. But the pool was nearly empty when we last read it, so whatever this was at birth, you may not be able to sell it now." };
   if (clean) return { level: "OK", label: "Launched clean",
-    why: "The launch record shows no sign of manufacture." };
+    why: "The launch record shows no sign of manufacture. That is a fact about how this token was created, not about what it is worth or whether you could sell it now." };
   const headline = manufactureHeadline(t, a);
   if (headline) return { level: "DANGER", label: "Manufactured launch", why: `The record shows ${headline}.` };
   if (a.flags.some((f) => f.level === "DANGER")) return { level: "DANGER", label: "Carries a danger flag",
@@ -450,10 +462,17 @@ export function tokenBody(
     <p>Bought <b>${a.buyout.sol.toFixed(0)} SOL</b> of this curve in a single transaction${t.created_at ? `, ${curveAge(a.buyout.ts - t.created_at)}` : ""}.</p>
     ${t.created_at && a.buyout.ts - t.created_at <= 0 ? `<p class="sub">Our launch and trade timestamps are both taken when the events are decoded, so events that arrived together carry the same one. That it was taken at or near launch is on the record; how many seconds after is not.</p>` : ""}` : "";
 
+  /**
+   * The pool, always stated separately from the verdict above and always carrying the age of the reading.
+   *
+   * The third branch is new and is the point of the split: a launch can be clean and its pool unread, and the page
+   * has to be able to say both things at once without one silently cancelling the other.
+   */
   const nowBlock = r ? `<h2>Pool</h2><table>
     <tr><td class="k">Liquidity</td><td>${r.sol.toFixed(1)} SOL</td></tr>
     <tr><td class="k">Read from chain</td><td>${when(r.at)}, ${ago(now - r.at)}${r.fresh ? "" : ". Pool balances move; treat an old reading as an old reading."}</td></tr></table>`
-    : t.vault_sol != null ? `<h2>Pool</h2><p class="sub">A balance of ${t.vault_sol.toFixed(1)} SOL is on file but we cannot say when it was read, so it is not quoted here.</p>` : "";
+    : t.vault_sol != null ? `<h2>Pool</h2><p class="sub">A balance of ${t.vault_sol.toFixed(1)} SOL is on file but we cannot say when it was read, so it is not quoted here.</p>`
+    : a.watched ? `<h2>Pool</h2><p class="sub">We have no pool balance for this token that we can date, so none is quoted. That is a gap in our reading coverage and says nothing about the launch record above, which does not depend on it.</p>` : "";
 
   // How the record was obtained is part of the record. A rebuild is the same transactions, read later — but it cannot
   // include what the token claimed to be at launch, because that lives off-chain and the operator can change it.
@@ -532,18 +551,27 @@ export function tokenBody(
  * refreshed continuously and are minutes old at most. A single "now" covering both would be false about one of them,
  * and the honest version reads better anyway: nobody else can print when their number was taken.
  */
-export interface CleanRow { mint: string; symbol: string | null; devPct: number; buyers: number; fillMs: number | null; poolSol: number; readAt: number }
+/**
+ * `poolSol` and `readAt` are null when there is no reading fresh enough to quote. That is not a fact about the
+ * token — it is a fact about our pool coverage — so the row still appears and says which it is.
+ */
+export interface CleanRow { mint: string; symbol: string | null; devPct: number; buyers: number; fillMs: number | null; poolSol: number | null; readAt: number | null; liquid: boolean }
 export interface OpRow { wallet: string; taken: number; spent: number; sold: number; bought: number }
 export interface Home {
   now: number; builtAt: number | null;
   /** end of the 24h window: the archive's own build time, not the request clock. See `inDay` in serve.ts. */
   windowEnd?: number | null;
-  graduated24h: number; clean24h: number; danger24h: number; onFile: number;
-  windowDays: number; gradWindow: number; unchecked: number; unchecked24h: number;
+  graduated24h: number;
+  /** launches in the window whose birth record shows no sign of manufacture. Permanent; this is the archive's claim. */
+  cleanBirth24h: number;
+  /** the subset of those we have also just read a healthy pool for. Perishable; this is a courtesy, not the finding. */
+  clean24h: number;
+  danger24h: number; onFile: number;
+  windowDays: number; gradWindow: number; cleanBirthWindow: number; unchecked: number; unread: number; unchecked24h: number;
   cleanRows: CleanRow[]; wallets: number; opRows: OpRow[];
   proof: null | { mint: string; symbol: string | null; devPct: number; gradMs: number | null;
     nowSol: number; nowAt: number; verdict: Verdict };
-  maxDevPct: number; minBuyers: number; buyoutSol: number; minPoolSol: number;
+  maxDevPct: number; minBuyers: number; buyoutSol: number; minPoolSol: number; maxReadingAgeMs: number;
 }
 
 /**
@@ -561,7 +589,9 @@ export function homeBody(h: Home): string {
   const rows = h.cleanRows.map((r) => `<tr>
     <td><a href="t/${esc(r.mint)}.html">${esc(r.symbol ?? "?")}</a></td><td class="num">${r.devPct.toFixed(1)}%</td>
     <td class="num">${fmt(r.buyers)}</td><td class="num">${r.fillMs === null ? "?" : dur(r.fillMs)}</td>
-    <td class="num">${r.poolSol.toFixed(0)} SOL</td><td class="num">${ago(h.now - r.readAt)}</td></tr>`).join("");
+    ${r.poolSol !== null && r.readAt !== null
+      ? `<td class="num${r.liquid ? "" : " thin"}">${r.poolSol.toFixed(0)} SOL</td><td class="num">${ago(h.now - r.readAt)}</td>`
+      : `<td class="num mut">not read</td><td class="num mut">&mdash;</td>`}</tr>`).join("");
   const ops = h.opRows.map((x) => `<tr><td class="mono"><a href="w/${esc(x.wallet)}.html">${esc(x.wallet.slice(0, 12))}…</a></td>
     <td class="num">${x.taken}</td><td class="num">${fmt(x.spent)} SOL</td>
     <td class="num">${fmt(x.sold)} SOL</td><td class="num">${fmt(x.bought)} SOL</td></tr>`).join("");
@@ -569,7 +599,7 @@ export function homeBody(h: Home): string {
   <div class="hero">
     <div class="col-a">
     <h1 class="headline">${h.windowEnd && h.now - h.windowEnd > 3600_000 ? `In the 24 hours to ${when(h.windowEnd)}` : "In the last 24 hours"} ${fmt(h.graduated24h)} tokens finished their bonding curve.
-    <b>${fmt(h.danger24h)}</b> carry a danger flag. ${h.clean24h === 0 ? `<b class="q">None</b> launched clean.` : `Only <b class="q">${fmt(h.clean24h)}</b> launched clean.`}</h1>
+    <b>${fmt(h.danger24h)}</b> carry a danger flag. ${h.cleanBirth24h === 0 ? `<b class="q">None</b> launched clean.` : `Only <b class="q">${fmt(h.cleanBirth24h)}</b> launched clean.`}</h1>
     <p class="lede">Most were manufactured. The creator took the supply, or a single wallet bought the whole curve and
     called it demand. That evidence exists for about thirty seconds and is unrecoverable afterwards, so we watch every
     launch on pump.fun and keep the record.</p>
@@ -591,7 +621,7 @@ export function homeBody(h: Home): string {
     <div class="col-b">
     <div class="stats" style="margin:4px 0 0">
       <div class="stat"><span>graduated, 24h to ${h.windowEnd ? when(h.windowEnd) : "now"}</span><b class="big">${fmt(h.graduated24h)}</b></div>
-      <div class="stat"><span>launched clean</span><b class="big">${fmt(h.clean24h)}</b></div>
+      <div class="stat"><span>launched clean</span><b class="big">${fmt(h.cleanBirth24h)}</b></div>
       <div class="stat"><span>carrying a danger flag</span><b class="big">${fmt(h.danger24h)}</b></div>
       <div class="stat"><span>launches recorded</span><b class="big" id="rec" data-n="${h.onFile}">${fmt(h.onFile)}</b></div>
     </div>
@@ -675,15 +705,25 @@ export function homeBody(h: Home): string {
   contract scanner can produce, because it needs a wallet's history across many tokens rather than one token's state.</p>
   <table class="data"><tr><th>Wallet</th><th class="num">Curves taken</th><th class="num">Spent</th><th class="num">Sold after</th><th class="num">Bought back</th></tr>${ops}</table>
 
-  <div class="sec"><h2>Launched clean, last ${h.windowDays === 1 ? "24 hours" : `${h.windowDays} days`}</h2><span class="cnt">${fmt(h.cleanRows.length)} of ${fmt(h.gradWindow)} graduations${h.unchecked ? ` · ${fmt(h.unchecked)} unchecked` : ""}</span></div>
+  <div class="sec"><h2>Launched clean, last ${h.windowDays === 1 ? "24 hours" : `${h.windowDays} days`}</h2><span class="cnt">${fmt(h.cleanBirthWindow)} of ${fmt(h.gradWindow)} graduations${h.cleanRows.length < h.cleanBirthWindow ? ` · newest ${fmt(h.cleanRows.length)} shown` : ""}</span></div>
   <p class="lede">Creator kept under ${h.maxDevPct}% and has not sold, at least ${h.minBuyers} distinct buyers on the curve,
-  the curve took over a minute to fill and was not taken by a single ${h.buyoutSol}+ SOL buy, and at least ${h.minPoolSol} SOL
-  in the pool on a reading no older than five minutes. That means <b>not manufactured</b>. It is not a recommendation, and most of these will still lose money.</p>
+  and the curve took over a minute to fill and was not taken by a single ${h.buyoutSol}+ SOL buy. That means
+  <b>not manufactured</b>. It is a statement about the launch, not about the price: it is not a recommendation, and
+  most of these will still lose money.</p>
   ${h.cleanRows.length ? `<table class="data"><tr><th>Token</th><th class="num">Creator kept</th><th class="num">Buyers</th><th class="num">Time to fill</th><th class="num">Liquidity</th><th class="num">Read</th></tr>${rows}</table>`
-    : `<p class="callout">No launch in this window passed every test with a pool reading fresh enough to certify. That is a
-    statement about what we can certify right now, not a finding about any particular token.</p>`}
-  <p class="callout">Launch figures are permanent; a pool balance is not. Every balance above carries the moment it was
-  taken, and a token whose pool has not been read recently enough is left off rather than carried on an old number.${h.unchecked ? ` <b>${fmt(h.unchecked)}</b> passed every launch test but have no reading fresh enough to certify. Absent here means unchecked, not manufactured.` : ""}</p>`;
+    : `<p class="callout">No launch in this window passed every test on the launch record. That is a finding about the
+    window, not about any particular token.</p>`}
+  ${/*
+      These were one claim until 2026-09-09 and should not have been. A launch record is permanent and is the thing
+      this archive holds that nobody can reconstruct; a pool balance decays by the minute and anyone with an RPC key
+      can read it. Requiring both to call a launch clean meant an hour of RPC trouble deleted findings about the
+      past: 423 launches passed every birth test over seven days and ten were published. The liquidity column is now
+      reported beside the claim rather than gating it, and "not read" says so in the row instead of removing it.
+    */ ""}
+  <p class="callout">Two different claims, kept apart. <b>Launched clean</b> is a fact about the first blocks and does
+  not expire. <b>Liquidity</b> is one balance read at one moment, shown with its age. ${h.unread
+    ? `<b>${fmt(h.unread)}</b> of these have no reading under ${Math.round(h.maxReadingAgeMs / 60000)} minutes old and say <i>not read</i> — a gap in our pool coverage, never a finding about the token. `
+    : `Every row here carries a reading under ${Math.round(h.maxReadingAgeMs / 60000)} minutes old. `}A balance shown in red is one we did read, and it is under ${h.minPoolSol} SOL. We never quote a balance we could not confirm.</p>`;
 }
 
 /** A wallet's record: every curve it bought outright, and what it did with the tokens afterwards. */

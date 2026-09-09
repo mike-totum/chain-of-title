@@ -89,7 +89,14 @@ const look = (t: any): Assessment => assess(db, t, covered);
 const reading = (t: any): Reading | null =>
   t.vault_sol == null || t.vault_at == null ? null
     : { sol: t.vault_sol, at: t.vault_at, fresh: now - t.vault_at <= MAX_READING_AGE_MS };
-const isClean = (t: any, a: Assessment) => cleanAtBirth(t, a) && readingCertifies(t.vault_at, t.vault_sol, now);
+/**
+ * Clean is a claim about the launch, and nothing else. It used to also require a pool reading under five minutes old
+ * showing MIN_POOL_SOL, which made a permanent finding about the first blocks contingent on our present RPC luck —
+ * over seven days that gate removed 413 of 423 clean launches from the list. Liquidity is still read and still shown,
+ * beside the claim and with the age of the reading, but it no longer retracts a statement about the past.
+ * `serve.ts` makes the same split; if these two ever disagree the offline tree becomes a second API.
+ */
+const isClean = (t: any, a: Assessment) => cleanAtBirth(t, a);
 
 // ---------- token pages ----------
 const wallets = new Map<string, { mints: string[] }>();
@@ -225,11 +232,14 @@ writeFileSync(join(OUT, "method.html"), page("How this is decided", `
     <tr><td>Time to complete the curve</td><td class="num">over ${MIN_GRAD_MS / 1000}s</td><td>a curve that fills faster than this was taken before anyone could buy at a normal price</td></tr>
     <tr><td>Largest single buy on the curve</td><td class="num">under ${BUYOUT_SOL} SOL</td><td>one buy that completes a curve is a purchase of the float, not a market</td></tr>
     <tr><td>Creator sold</td><td class="num">no</td><td>self-explanatory</td></tr>
-    <tr><td>Liquidity in the pool</td><td class="num">at least ${MIN_POOL_SOL} SOL</td><td>read from the chain at the moment the claim is made, never from a stored number</td></tr>
   </table>
-  <p class="callout">Launch facts are permanent; a pool balance is not. The liquidity test is deliberately separate
-  from the rest and is applied against a balance read during the build that produced the page. A token whose pool
-  could not be read is left off the clean list rather than carried forward on an old figure.</p>
+  <p class="callout"><b>Liquidity is not one of these tests, and until 2026-09-09 it was.</b> Every test above is a
+  fact about the first blocks of a token's life: once true, always true, and unrecoverable once the float has been
+  spread. A pool balance is a reading taken at one moment and it decays. Requiring both before calling a launch clean
+  meant an hour of unanswered RPC calls silently withdrew findings about the past — over seven days, 423 launches
+  passed every test above and ten were published. We still read the pool, still refuse to quote a balance we could
+  not confirm, and now show it beside the launch record with the age of the reading instead of gating the record on
+  it. A row reading <i>not read</i> is a gap in our pool coverage, never a finding about the token.</p>
 
   ${labelled ? `<div class="sec"><h2>Has it been tested?</h2><span class="cnt">${fmt(labelled.checked)} known-manufactured tokens</span></div>
   <p class="lede">Yes, and the test is one-sided on purpose. A missed warning costs a reader nothing; a wrong
@@ -255,7 +265,7 @@ writeFileSync(join(OUT, "method.html"), page("How this is decided", `
     <tr><th>Situation</th><th>What you get</th></tr>
     <tr><td>The launch happened before coverage, or while the collector was down</td><td>UNKNOWN, with an offer to rebuild the record from chain history</td></tr>
     <tr><td>A rebuild could not read every transaction</td><td>UNKNOWN, because a truncated history looks exactly like a quiet launch</td></tr>
-    <tr><td>The pool balance could not be read</td><td>no clean certificate, and no liquidity figure quoted</td></tr>
+    <tr><td>The pool balance could not be read</td><td>no liquidity figure quoted, and the row says <i>not read</i>. The launch record is unaffected</td></tr>
     <tr><td>We hold no record and the address has no pump.fun bonding curve</td><td>we say so, rather than guess</td></tr>
   </table>
 
@@ -389,9 +399,11 @@ writeFileSync(join(OUT, "data.html"), page("The data", `
   point of publishing it.</p>
   <table>
     <tr><td class="mono" style="white-space:pre-wrap">SELECT COUNT(*) FROM tokens
-WHERE graduated=1 AND dev_pct >= 50;</td><td>graduations where the creator took at least half the supply</td></tr>
+WHERE graduated_confirmed_by IS NOT NULL
+  AND dev_pct >= 50;</td><td>graduations where the creator took at least half the supply</td></tr>
     <tr><td class="mono" style="white-space:pre-wrap">SELECT symbol, dev_pct, curve_buyers
-FROM tokens WHERE graduated=1
+FROM tokens
+WHERE graduated_confirmed_by IS NOT NULL
   AND curve_buyers = 0;</td><td>curves that completed with no outside buyer at all</td></tr>
     <tr><td class="mono" style="white-space:pre-wrap">SELECT t.wallet, COUNT(*) curves,
   ROUND(SUM(t.sol)) sol
