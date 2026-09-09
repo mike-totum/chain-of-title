@@ -1205,6 +1205,42 @@ if (process.env.PLATFORM_CAPTURE === "1") {
 }
 
 /**
+ * Confirm recorded graduations against the bonding curve account, continuously.
+ *
+ * Confirmation used to arrive only through pool discovery, so it inherited pool discovery's coverage and stalled
+ * near half of all graduations — and `assess()` withholds every statement about how a curve filled until a
+ * graduation is confirmed. This closes the loop in the process that records them: the backlog is a few dozen
+ * `getMultipleAccounts` calls, and a pass costs less than a single image fetch.
+ *
+ * Newest-first here on purpose. The old end of the backlog is a one-off backfill worth running by hand
+ * (`npm run confirm -- --oldest`); what the collector needs is for today's graduations to stop accumulating
+ * unconfirmed behind it. Bounded per pass, never fatal, and it shares this process's database connection for the
+ * same reason images does — a second writer against the busy timeout costs dropped launches, and a launch dropped
+ * is the one loss here that cannot be repaired.
+ */
+if (process.env.CONFIRM_SWEEP === "1") {
+  const EVERY_MS = Number(process.env.CONFIRM_EVERY_MINUTES ?? 15) * 60_000;
+  const LIMIT = Number(process.env.CONFIRM_LIMIT ?? 500);
+  const BATCH = Number(process.env.CONFIRM_BATCH ?? 100);
+  let running = false;
+  const run = async () => {
+    if (running) return;
+    running = true;
+    try {
+      const { confirmGraduations } = await import("./confirm.ts");
+      const st = await confirmGraduations(db, { limit: LIMIT, batch: BATCH, log: () => {} });
+      if (st.read > 0)
+        log(`[confirm] ${st.confirmed} confirmed, ${st.notComplete} not complete, ${st.missing} account gone, ` +
+          `${st.unreadable} unreadable, of ${st.candidates} due`);
+    } catch (e) {
+      log(`[confirm] sweep failed: ${(e as Error).message}`);
+    } finally { running = false; }
+  };
+  setTimeout(() => void run(), 120_000);
+  setInterval(() => void run(), EVERY_MS);
+}
+
+/**
  * Hand the record to the web service. Private network only in normal operation — Railway routes
  * `collector.railway.internal` between services without exposing anything publicly.
  */

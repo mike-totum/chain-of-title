@@ -55,7 +55,8 @@
     "refresh": "npm run servicedb && npm run preflight && railway up",
     "images": "tsx --no-warnings=ExperimentalWarning src/images.ts",
     "platform": "tsx --no-warnings=ExperimentalWarning src/platform.ts",
-    "xevidence": "tsx --no-warnings=ExperimentalWarning src/xevidence.ts"
+    "xevidence": "tsx --no-warnings=ExperimentalWarning src/xevidence.ts",
+    "confirm": "tsx --no-warnings=ExperimentalWarning src/confirm.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
