@@ -882,11 +882,24 @@ setInterval(() => {
  * process has is to keep watching the chain, and a sweep for old pictures must never compete with it.
  */
 const META_SWEEP_BATCH = Number(process.env.META_SWEEP_BATCH ?? 25);
+/**
+ * The three-day window is gone, and it was doing real damage.
+ *
+ * It read as a sensible bound on a sweep running beside ingestion. What it actually did was make the loss permanent
+ * for anything it fell behind: live capture only started working on 2026-09-08, and by then 116,739 launches with a
+ * URI and no document were already older than three days, so this sweep could never see them again however long it
+ * ran. A launch's metadata document is the one artefact in this archive that nobody can rebuild from chain at any
+ * price — the creator owns the URI and the pin — so a window here is not a bound on cost, it is a decision to lose
+ * the record of everything older than it.
+ *
+ * The cost it was bounding is also not real: the documents average 306 bytes. Every launch this project has ever
+ * seen is 63 MB. The batch size, not the age, is what keeps this from competing with ingestion.
+ */
 async function sweepMissingMeta(): Promise<void> {
   try {
     const rows = db.prepare(`SELECT mint, uri FROM tokens
-      WHERE meta_at IS NULL AND uri IS NOT NULL AND uri != '' AND created_at > ?
-      ORDER BY created_at DESC LIMIT ?`).all(Date.now() - 3 * 86400_000, META_SWEEP_BATCH) as { mint: string; uri: string }[];
+      WHERE meta_at IS NULL AND uri IS NOT NULL AND uri != ''
+      ORDER BY created_at DESC LIMIT ?`).all(META_SWEEP_BATCH) as { mint: string; uri: string }[];
     if (!rows.length) return;
     let got = 0;
     for (const r of rows) {
@@ -1157,6 +1170,19 @@ if (process.env.IMAGES_CAPTURE === "1") {
       const { captureImages } = await import("./images.ts");
       const st = await captureImages(db, {
         dir: IMAGES_DIR, limit: IMAGES_LIMIT, concurrency: IMAGES_CONCURRENCY, log: () => {},
+        /**
+         * Every launch, not only the ones that graduated.
+         *
+         * Restricting capture to graduations meant the archive kept the picture only for launches that had already
+         * passed a test — so it could never answer a question about the ones it had filtered out, and could never
+         * establish what an ordinary launch looked like to compare a suspicious one against. An archive that keeps
+         * evidence only where it already suspects something has made the determination before preserving the record.
+         *
+         * The store is content-addressed by sha256 and skips bytes it already holds, so the 41% of launches that
+         * reuse another launch's picture cost nothing beyond the fetch — and that reuse is itself the signal: 249
+         * launches sharing one image is a factory, and it is only visible if the unremarkable ones were kept too.
+         */
+        all: true,
       });
       if (st.attempted > 0)
         log(`[images] kept ${st.kept} (${(st.bytes / 1048576).toFixed(1)} MB, ${st.reused} already held), ` +
