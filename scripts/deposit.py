@@ -57,7 +57,11 @@ def counts(path):
     out = {
         "launches": q("SELECT COUNT(*) FROM tokens WHERE COALESCE(late_discovery,0)=0"),
         "records": q("SELECT COUNT(*) FROM tokens"),
-        "graduated": q("SELECT COUNT(*) FROM tokens WHERE graduated=1"),
+        # Confirmed, not recorded. `graduated` is an inference from decoded trade volume and it is wrong on about
+        # two rows in five; publishing it as "Graduated" on the mirror's front page repeated the error the
+        # corrections table below exists to disclose. Both are reported, so the gap is visible rather than tidied.
+        "graduated": q("SELECT COUNT(*) FROM tokens WHERE graduated_confirmed_by IS NOT NULL"),
+        "graduated_recorded": q("SELECT COUNT(*) FROM tokens WHERE graduated=1"),
         "with_metadata": q("SELECT COUNT(*) FROM tokens WHERE meta_at IS NOT NULL"),
     }
     for t in ("trades", "hist_trades", "operator_wallets", "pool_map"):
@@ -65,6 +69,13 @@ def counts(path):
             out[t] = q(f"SELECT COUNT(*) FROM {t}")
         except sqlite3.Error:
             out[t] = 0          # a table this build does not carry holds nothing, which is what that means
+    # The corrections travel with the file, so the mirror states its own errata rather than deferring to a website
+    # that may not outlive it. A file built before the table existed simply has none to report.
+    try:
+        out["corrections"] = db.execute(
+            "SELECT id, issued_at, subject, finding, remedy FROM corrections ORDER BY issued_at").fetchall()
+    except sqlite3.Error:
+        out["corrections"] = []
     try:
         out["built_at"] = q("SELECT v FROM meta WHERE k='built_at'")
     except sqlite3.Error:
@@ -78,6 +89,20 @@ def counts(path):
     return out
 
 def readme(c, size, built_iso):
+    # Errata, rendered from the file's own corrections table. A deposit that cannot be withdrawn needs a way to be
+    # corrected, and pointing at a website for it defeats the reason the deposit exists.
+    if c["corrections"]:
+        rows = []
+        for cid, issued, subject, finding, remedy in c["corrections"]:
+            when = datetime.datetime.utcfromtimestamp(issued / 1000).strftime("%Y-%m-%d")
+            what = f"`{subject}`" if subject else "the record"
+            rows.append(f"### {cid} — {when}\n\n**Concerns {what}.** {finding}\n\n**What was done.** {remedy}\n")
+        errata = ("## Errata\n\nThis deposit cannot be withdrawn or renamed, so corrections are published into it "
+                  "rather than issued elsewhere. Every correction this project has made is below and in the "
+                  "`corrections` table of the file itself, which is append-only: a correction is superseded by a new "
+                  "row naming it, never edited.\n\n" + "\n".join(rows))
+    else:
+        errata = ""
     return f"""---
 license: cc0-1.0
 pretty_name: Chain of Title — Solana launch provenance
@@ -102,7 +127,8 @@ deposit describes itself.
 | Size | {size:,} bytes |
 | Launches observed from the creation transaction | {c['launches']:,} |
 | Records in the file | {c['records']:,} |
-| Graduated | {c['graduated']:,} |
+| Graduated (confirmed) | {c['graduated']:,} |
+| Graduated (recorded, unverified — see errata) | {c['graduated_recorded']:,} |
 | Buyout trades (curve buys ≥ 40 SOL) | {c['trades']:,} |
 | Reconstructed buyout history | {c['hist_trades']:,} |
 | Operator wallets | {c['operator_wallets']:,} |
@@ -113,6 +139,7 @@ deposit describes itself.
 counts every row, which additionally includes launches restored after the fact and those rebuilt from chain history.
 They are different numbers and are never used interchangeably.
 
+{errata}
 ## Read this before quoting a number
 
 **Coverage is data, not a footnote.** The `runs` table holds the intervals during which the collector was observing.
