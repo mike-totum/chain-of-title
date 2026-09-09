@@ -24,6 +24,7 @@ import { poolReservesPooled } from "./outcomes.ts";
 import { rebuild, store, curveExists } from "./backfill.ts";
 import { page, tokenBody, walletBody, tokenPreview, SEARCH, when, fmt, homeBody, homeTitle, verdict, CANONICAL_HOST,
   type Home, type Chrome, type Reading } from "./render.ts";
+import { r2Config, getWithType as r2Get } from "./r2.ts";
 import { tokenRecord, walletRecord, statusRecord, unknownRecord, errorRecord,
   API_VERSION, PER_IP_PER_HOUR, GLOBAL_PER_HOUR, GLOBAL_PER_DAY, type Coverage } from "./api.ts";
 import { startWatchdog, startHeartbeat, fmtAge } from "./watchdog.ts";
@@ -872,6 +873,8 @@ const isFile = (p: string): boolean => { try { return statSync(p).isFile(); } ca
  * the image carries, which is why a picture we do not hold returns 404 rather than pretending. See IMAGES.md.
  */
 const IMAGE_DIR = process.env.IMAGE_DIR ?? "data/images";
+/** Resolved once at boot. Null unless all four R2 variables are set, so a half-configured store never looks enabled. */
+const imageStore = r2Config();
 const HOME_TTL_MS = Number(process.env.HOME_TTL_SECONDS ?? 15) * 1000;
 const HOME_DAYS = Number(process.env.HOME_DAYS ?? 7);
 let homeCache: { at: number; h: Home; html: string } | null = null;
@@ -1236,6 +1239,27 @@ const server = createServer(async (req, res) => {
         const buf = readFileSync(hit.p);
         res.writeHead(200, headers(TYPES_BY_EXT[hit.ext] ?? "application/octet-stream", buf.length));
         return res.end(buf);
+      }
+      /**
+       * The object store, when there is one, before the collector.
+       *
+       * Once pictures go to R2 the collector's volume stops accumulating them, so asking the collector for a picture
+       * it captured last week would 404 — a real answer about our records, and the wrong one. The store is where the
+       * bytes actually are; the collector fallback stays for the transition and for any deploy without a store.
+       *
+       * Content-addressed, so this cannot serve the wrong picture: the key IS the hash the record commits to. A
+       * corrupt or substituted object would have to collide with sha256 to be served under that name.
+       */
+      if (imageStore) {
+        try {
+          const obj = await r2Get(imageStore, sha);
+          if (obj) {
+            res.writeHead(200, headers(obj.contentType, obj.body.length));
+            return res.end(obj.body);
+          }
+          // Absent from the store is "we never captured it" — fall through to the collector, which may still hold
+          // it from before the store existed, and only then to 404.
+        } catch { return send(502, "image store unreachable", "text/plain; charset=utf-8", "none"); }
       }
       if (HEALTH_URL) {
         try {

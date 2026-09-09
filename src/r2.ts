@@ -100,6 +100,21 @@ export async function put(cfg: R2Config, sha256: string, body: Buffer, contentTy
   if (!res.ok) throw new Error(`PUT ${res.status} ${(await res.text().catch(() => "")).slice(0, 200)}`);
 }
 
+/**
+ * Read an object back with the content type it was stored under.
+ *
+ * The image route needs the type: a picture served as application/octet-stream downloads instead of rendering. The
+ * type travels with the object rather than being re-derived from a filename, because the store is keyed by hash and
+ * has no filename to derive it from.
+ */
+export async function getWithType(cfg: R2Config, sha256: string, timeoutMs = 30_000): Promise<{ body: Buffer; contentType: string } | null> {
+  const { url, headers } = sign(cfg, "GET", objectKey(sha256), "UNSIGNED-PAYLOAD");
+  const res = await fetch(url, { method: "GET", headers, signal: AbortSignal.timeout(timeoutMs) });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`GET ${res.status}`);
+  return { body: Buffer.from(await res.arrayBuffer()), contentType: res.headers.get("content-type") ?? "application/octet-stream" };
+}
+
 /** Read an object back. Used by the verifier and by the image route when the bytes are not on local disk. */
 export async function get(cfg: R2Config, sha256: string, timeoutMs = 30_000): Promise<Buffer | null> {
   const { url, headers } = sign(cfg, "GET", objectKey(sha256), "UNSIGNED-PAYLOAD");
