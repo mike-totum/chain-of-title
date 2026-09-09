@@ -123,9 +123,14 @@ const assessed = toks.map((t) => ({ t, a: look(t) }));
 // Pass 3: write.
 for (const { t, a } of assessed) {
   const r = reading(t);
-  if (r && r.sol < MIN_POOL_SOL)
-    a.flags.push({ level: "DANGER", text: `Only ${r.sol.toFixed(1)} SOL of liquidity was in the pool ${r.fresh ? "just now" : `when it was last read, ${ago(now - r.at)}`}; a position cannot be sold near the quoted price.` });
+  // Settle the birth claim BEFORE the pool reading is allowed to add a flag, and tag that flag with the kind it is.
+  // `cleanAtBirth` refuses anything carrying a DANGER flag and does not ask which kind, so pushing an untagged
+  // liquidity flag first let a balance read seconds ago decide what the record said about the first block — the same
+  // contradiction serve.ts:705 was fixed for, left behind here. The comment on `isClean` above promises these two
+  // files make the same split; until this line they did not.
   const cleanTok = isClean(t, a);
+  if (r && r.sol < MIN_POOL_SOL)
+    a.flags.push({ level: "DANGER", kind: "liquidity", text: `Only ${r.sol.toFixed(1)} SOL of liquidity was in the pool ${r.fresh ? "just now" : `when it was last read, ${ago(now - r.at)}`}; a position cannot be sold near the quoted price.` });
   if (cleanTok) { clean.push(t); cleanBuyers.set(t.mint, a.curveBuyers ?? 0); }
   if (a.buyout) {
     const w = wallets.get(a.buyout.wallet) ?? { mints: [] };
