@@ -254,7 +254,9 @@ async function pullRecord(first: boolean): Promise<void> {
     // downloaded, verified, and then quietly ignored for as long as the process lived. Exiting hands the platform a
     // clean restart, which reopens the new file. The service is stateless; the queue holds nothing that is not in
     // the database, and a rebuild in flight is cheap to redo.
-    if (!first) { console.log("[record] restarting to pick it up"); setTimeout(() => process.exit(0), 250); }
+    // Adopt in place. This used to exit so the platform would restart us onto the new inode, which loops forever on
+    // a service with no volume — see reloadRecord.
+    reloadRecord();
   } catch (e) {
     console.log(`[record] pull failed: ${(e as Error).message}${first ? " (starting on whatever is already here)" : ""}`);
   }
@@ -305,7 +307,7 @@ if (RECORD_URL) {
  * reason its bytes differ from what servicedb built — see openDb. Readings still write here; only schema changes and
  * journal_mode are withheld.
  */
-const db = openDb(DB_FILE, { migrate: false });
+let db = openDb(DB_FILE, { migrate: false });
 
 /**
  * The guard runs FIRST, before anything else touches a table.
@@ -319,17 +321,17 @@ const db = openDb(DB_FILE, { migrate: false });
 const count = (sql: string): number => {
   try { return (db.prepare(sql).get() as any).c as number; } catch { return 0; }
 };
-const held = count("SELECT COUNT(*) c FROM tokens");
-const observed = count("SELECT COUNT(*) c FROM tokens WHERE COALESCE(late_discovery,0)=0");
+let held = count("SELECT COUNT(*) c FROM tokens");
+let observed = count("SELECT COUNT(*) c FROM tokens WHERE COALESCE(late_discovery,0)=0");
 if (held < 1000) {
   console.error(`refusing to start: ${DB_FILE} holds ${held} launches, which cannot be a real archive.`);
   console.error(`build one with \`npm run servicedb\` and make sure it is present at that path.`);
   process.exit(1);
 }
 
-const win = coverageWindows(db);
+let win = coverageWindows(db);
 const covered = (ts: number) => win.some((w) => ts >= w.a && ts <= w.b);
-const chrome: Chrome = {
+let chrome: Chrome = {
   coverageFrom: win.length ? when(win[0].a) : "unknown",
   gapMin: win.slice(1).reduce((a, w, i) => a + Math.max(0, w.a - win[i].b), 0) / 60_000,
 };
@@ -340,15 +342,57 @@ const chrome: Chrome = {
  * (RECORD_EVERY_HOURS, RECORD_REFRESH_HOURS) can put twelve hours between the chain and this process. `meta.built_at`
  * is written by servicedb; the newest row it holds is the fallback for a record built before that field existed.
  */
-const recordBuiltAt = (() => {
+const readBuiltAt = () => {
   try {
     const m = db.prepare("SELECT v FROM meta WHERE k='built_at'").get() as any;
     if (m?.v) return Number(m.v);
   } catch {}
   try { return (db.prepare("SELECT MAX(updated_at) m FROM tokens").get() as any)?.m ?? null; } catch { return null; }
-})();
+};
+let recordBuiltAt = readBuiltAt();
 console.log(`[record] built ${recordBuiltAt ? new Date(recordBuiltAt).toISOString() : "unknown"}`);
-const COV: Coverage = { from: win.length ? win[0].a : null, downtimeMinutes: chrome.gapMin, builtAt: recordBuiltAt };
+let COV: Coverage = { from: win.length ? win[0].a : null, downtimeMinutes: chrome.gapMin, builtAt: recordBuiltAt };
+
+/**
+ * Adopt a freshly pulled record WITHOUT restarting.
+ *
+ * The pull used to rename the file and exit, on the reasoning that an open SQLite handle keeps reading the old inode
+ * so only a restart can pick up the new one. That is true, and on 2026-09-09 it took the site down for hours: this
+ * service has no volume, so the restart returns a container built from the image, the 80 MB that was just pulled is
+ * gone, the record is old again, and it pulls and restarts forever. Every request 502s because the process never
+ * lives long enough to answer one. The freshness gate did not help — the collector is newer than the image on every
+ * single fresh container, by construction.
+ *
+ * Reopening in place is the fix that needs no volume and keeps the service stateless: swap the handle, re-derive
+ * everything read from the file, re-prepare the statements bound to the old connection. The old handle is closed on
+ * a delay rather than immediately, so a request already mid-flight finishes against the file it started on.
+ */
+function reloadRecord(): void {
+  const previous = db;
+  try {
+    db = openDb(DB_FILE, { migrate: false });
+    const n = count("SELECT COUNT(*) c FROM tokens");
+    // The same floor the boot guard applies. A record that cannot be a real archive is not adopted, and the process
+    // keeps serving what it already had rather than exiting into the loop this function exists to end.
+    if (n < 1000) { db = previous; console.log(`[record] refusing to adopt a record holding ${n} launches`); return; }
+    held = n;
+    observed = count("SELECT COUNT(*) c FROM tokens WHERE COALESCE(late_discovery,0)=0");
+    win = coverageWindows(db);
+    chrome = {
+      coverageFrom: win.length ? when(win[0].a) : "unknown",
+      gapMin: win.slice(1).reduce((a, w, i) => a + Math.max(0, w.a - win[i].b), 0) / 60_000,
+    };
+    recordBuiltAt = readBuiltAt();
+    COV = { from: win.length ? win[0].a : null, downtimeMinutes: chrome.gapMin, builtAt: recordBuiltAt };
+    tokenQ = db.prepare(`SELECT ${TOKEN_COLUMNS} FROM tokens WHERE mint = ?`);
+    setReading = db.prepare("UPDATE tokens SET vault_sol = ?, vault_at = ? WHERE mint = ?");
+    console.log(`[record] adopted in place: ${held.toLocaleString()} launches, built ${recordBuiltAt ? new Date(recordBuiltAt).toISOString() : "unknown"}`);
+    setTimeout(() => { try { previous.close(); } catch { /* a request may still hold it; the process will outlive this */ } }, 30_000);
+  } catch (e) {
+    db = previous;
+    console.log(`[record] could not adopt the new record, still serving the previous one: ${(e as Error).message}`);
+  }
+}
 
 /**
  * Refuse to serve an empty archive. `openDb` creates its tables when the file is missing, so a database that failed to
@@ -417,7 +461,7 @@ startWatchdog({
 /** The absence of this ping is the only alarm that survives the whole platform going down. See watchdog.ts. */
 startHeartbeat(process.env.HEARTBEAT_URL ?? "", 5 * 60_000, "web");
 
-const tokenQ = db.prepare(`SELECT ${TOKEN_COLUMNS} FROM tokens WHERE mint = ?`);
+let tokenQ = db.prepare(`SELECT ${TOKEN_COLUMNS} FROM tokens WHERE mint = ?`);
 
 // ---------- job queue ----------
 type Job = { mint: string; state: "queued" | "running" | "done" | "failed"; at: number; error?: string };
@@ -542,7 +586,7 @@ function refreshCandidates(now: number): any[] {
     .sort((a, b) => b.created_at - a.created_at);   // newest first: the tail is what we are willing to lose
 }
 
-const setReading = db.prepare("UPDATE tokens SET vault_sol = ?, vault_at = ? WHERE mint = ?");
+let setReading = db.prepare("UPDATE tokens SET vault_sol = ?, vault_at = ? WHERE mint = ?");
 
 /**
  * A cycle can outlast its tick when the chain is slow to answer, and `setInterval` does not care — it would start a
