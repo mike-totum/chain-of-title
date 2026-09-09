@@ -259,8 +259,46 @@ async function pullRecord(first: boolean): Promise<void> {
     console.log(`[record] pull failed: ${(e as Error).message}${first ? " (starting on whatever is already here)" : ""}`);
   }
 }
-await pullRecord(true);
-if (RECORD_URL) setInterval(() => void pullRecord(false), REFRESH_MS);
+/**
+ * NOTHING NETWORK-BOUND RUNS BEFORE THIS PROCESS LISTENS.
+ *
+ * The boot pull used to be awaited here, and it took the site down on 2026-09-09. This service sleeps when idle, so
+ * a wake starts a fresh container — which then blocked on downloading a 79 MB record from the collector before
+ * binding a port, and the platform's wake timed out. Every request got a 502 while the process was busy fetching the
+ * data it wanted to serve. The site had been up for hours; it broke the first time it was allowed to go idle.
+ *
+ * A service must be able to answer with what it already has. The image ships a record, that record is never empty
+ * (the guard below refuses to start otherwise), and being a few hours behind is a state this codebase already
+ * describes honestly on every page. Being unreachable is not.
+ *
+ * So the pull moves to a timer after `listen`, and the first one is gated on the collector actually holding
+ * something newer — otherwise a service that wakes often would download 79 MB and restart itself on every wake.
+ */
+async function collectorHasNewer(): Promise<boolean> {
+  if (!HEALTH_URL) return true;   // no way to ask: fall through to the pull, which has its own guards
+  try {
+    const res = await fetch(HEALTH_URL, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) return false;
+    const h = await res.json() as any;
+    const theirs = Number(h?.builtAt ?? 0);
+    if (!Number.isFinite(theirs) || theirs <= 0) return false;
+    const ours = await (async () => {
+      try {
+        const { DatabaseSync: DS } = await import("node:sqlite");
+        const cur = new DS(DB_FILE, { readOnly: true });
+        const m = cur.prepare("SELECT v FROM meta WHERE k='built_at'").get() as any;
+        cur.close();
+        return Number(m?.v ?? 0) || 0;
+      } catch { return 0; }
+    })();
+    if (theirs <= ours) { console.log(`[record] collector's build is not newer than ours; skipping the pull`); return false; }
+    return true;
+  } catch { return false; }
+}
+if (RECORD_URL) {
+  setTimeout(() => void (async () => { if (await collectorHasNewer()) void pullRecord(false); })(), 20_000);
+  setInterval(() => void pullRecord(false), REFRESH_MS);
+}
 
 /**
  * The published record, opened WITHOUT migrating it. This service serves the file to the public and must not be the

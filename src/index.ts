@@ -615,13 +615,25 @@ function handleSignal(sourceName: string, s: KolSignal): void {
   else broker.evaluateEntries(t, now, true);
   upsertToken(db, t);
 }
-if (provider && kols.length) {
+/**
+ * Having a key is not consent to spend it.
+ *
+ * This started whenever a provider was configured, which meant polling 37 timelines every 60 seconds — about 53,000
+ * requests a day. It costs nothing today only because the account has no credits and every request 402s, so the
+ * moment anyone tops it up this loop drains the balance before the targeted evidence search gets a single query.
+ * That is the exact firehose DEPLOY.md already switched off: ~$390/month for kolSignals=0 and a strategy that
+ * measured -13.8% over 543 entries.
+ *
+ * Presence of a credential must never be the thing that authorises spending it. X_KOL_WATCH=1 is the opt-in, and
+ * default off means funding the account buys what someone actually asked for.
+ */
+if (provider && kols.length && process.env.X_KOL_WATCH === "1") {
   watcher = new KolWatcher(provider, kols, config.kolPollSeconds);
   watcher.on("status", (m) => log("[kol]", m));
   watcher.on("signal", (s) => handleSignal(provider.name, s));
   watcher.start();
 } else {
-  log(`[kol] watcher disabled (${!provider ? "no TWITTER_PROVIDER/key configured" : "kols.txt is empty"})`);
+  log(`[kol] watcher disabled (${!provider ? "no TWITTER_PROVIDER/key configured" : !kols.length ? "kols.txt is empty" : "X_KOL_WATCH is not 1 — a configured key is not permission to spend it"})`);
 }
 let street: StreetListener | null = null;
 const buzz = new BuzzTracker({ windowMs: 10 * 60_000, baselineMs: 3 * 3600_000, minAuthors: config.buzzMinAuthors, minLift: config.buzzMinLift, cooldownMs: 60 * 60_000 });
