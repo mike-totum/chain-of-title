@@ -589,6 +589,19 @@ try {
     + "and destroy the evidence that the error happened. The reading is published beside it as curve_checked_at and "
     + "curve_complete, and the graduations view carries the confirmed set. Count with graduated_confirmed_by IS NOT "
     + "NULL, or select from graduations.");
+  ins.run("create-sig-dropped", at("2026-09-09"), "column", "create_sig",
+    "Every launch figure in this archive is computed from the token's creation transaction, and the decoder had the "
+    + "signature of that transaction in hand and dropped it at capture. Until 2026-09-09 no launch row cited the "
+    + "transaction its dev_pct came from.",
+    "Nothing published was wrong, but nothing was checkable either: a reader could believe our decoder or not. The "
+    + "gap that remains is not random and a reader must not treat it as such. 24,545 launches of 206,019 — including "
+    + "1,529 confirmed graduations, among them WOFI — had the trade rows the backfill reads pruned before this "
+    + "existed, so they are permanently without a signature here. A NULL in this column means we did not record one. "
+    + "It never means the launch has no creation transaction, and it is not a statement about the launch at all.",
+    "Recorded at capture from 2026-09-09, and backfilled to 181,474 launches from the creator's own first-block "
+    + "trade, which is that same transaction. The remainder are recoverable only from an archival node, and the hole "
+    + "is dated, bounded and published as NULL rather than closed by re-deriving a plausible signature after the "
+    + "fact.");
 }
 
 const RECORD_TABLES = new Set(["tokens", "trades", "hist_trades", "operator_wallets", "operator_policy",
