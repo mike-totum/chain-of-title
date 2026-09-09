@@ -78,6 +78,10 @@ Not decided, and needing counsel:
   an image layer; `data/telegram.session` remains the local default that `npm run telegram:login` writes.
 - **`channels.txt` and `kols.txt` are gitignored** and stay out of the public repo. They are a watch list, and a
   watch list published is a different document from an archive kept.
+- **The X corpus is kept permanently.** Decided by the owner on 2026-09-09: the 88,133 posts already collected are
+  never deleted on a timer. `TWEETS_RETAIN_DAYS` exists and is deliberately unset; setting it is a decision to
+  destroy the only sample of broad pump.fun X chatter this project holds, which cannot be re-collected at any price.
+  Posts cited by `token_promotion_hit` are exempt even when it is set.
 - **`LEGAL_HOLD`** suspends every deletion in both pruners — set it to anything and nothing is deleted until it is
   unset. Routine deletion under a documented policy is defensible; deletion that continues after a dispute is
   foreseeable is spoliation. The collector's own pruner destroys millions of rows a day, so the gap between "should
