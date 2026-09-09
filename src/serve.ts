@@ -262,7 +262,12 @@ async function pullRecord(first: boolean): Promise<void> {
 await pullRecord(true);
 if (RECORD_URL) setInterval(() => void pullRecord(false), REFRESH_MS);
 
-const db = openDb(DB_FILE);
+/**
+ * The published record, opened WITHOUT migrating it. This service serves the file to the public and must not be the
+ * reason its bytes differ from what servicedb built — see openDb. Readings still write here; only schema changes and
+ * journal_mode are withheld.
+ */
+const db = openDb(DB_FILE, { migrate: false });
 const win = coverageWindows(db);
 const covered = (ts: number) => win.some((w) => ts >= w.a && ts <= w.b);
 const chrome: Chrome = {
@@ -304,8 +309,16 @@ const COV: Coverage = { from: win.length ? win[0].a : null, downtimeMinutes: chr
  * 2,736. Nobody was wrong about the data and the site still contradicted itself, which is the failure this project
  * exists to point at in other people.
  */
-const held = (db.prepare("SELECT COUNT(*) c FROM tokens").get() as any).c as number;
-const observed = (db.prepare("SELECT COUNT(*) c FROM tokens WHERE COALESCE(late_discovery,0)=0").get() as any).c as number;
+/**
+ * Counted inside a try, because the record is now opened without migrating it (see openDb) and a missing or truncated
+ * file therefore has no `tokens` table at all rather than an empty one. That must reach the guard below as "holds
+ * nothing", which is what it is, instead of an unhandled exception in a stack trace nobody reads.
+ */
+const count = (sql: string): number => {
+  try { return (db.prepare(sql).get() as any).c as number; } catch { return 0; }
+};
+const held = count("SELECT COUNT(*) c FROM tokens");
+const observed = count("SELECT COUNT(*) c FROM tokens WHERE COALESCE(late_discovery,0)=0");
 if (held < 1000) {
   console.error(`refusing to start: ${DB_FILE} holds ${held} launches, which cannot be a real archive.`);
   console.error(`build one with \`npm run servicedb\` and make sure it is present at that path.`);

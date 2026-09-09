@@ -3,9 +3,30 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type { TokenState } from "./tracker.ts";
 
-export function openDb(path: string): DatabaseSync {
+/**
+ * Open the collector's database, migrating it to the current schema.
+ *
+ * `migrate: false` opens a database and changes NOTHING about it — no CREATE, no ALTER, and no journal_mode, which
+ * is itself a write to the file header. That option exists because this function was being pointed at the PUBLISHED
+ * RECORD by both `site.ts` and `serve.ts`, and it did exactly what it is written to do: it migrated the artifact.
+ *
+ * The columns it added were trivial. What it meant was not. The web service was schema-migrating the file it hands
+ * to the public, so the bytes a reader downloads were not the bytes `servicedb` built, and the hash of the published
+ * record changed after publication without anyone touching the data. For an archive whose own data page says its DOI
+ * cannot be renamed, withdrawn or made private — and which is meant to be usable as evidence — a file that cannot be
+ * hash-matched to what was published is a file an opposing party gets to argue about.
+ *
+ * Found 2026-09-08 by the schema page: a DROP COLUMN kept "silently not working", because every `npm run site` put
+ * the columns straight back.
+ */
+export function openDb(path: string, opts: { migrate?: boolean } = {}): DatabaseSync {
   mkdirSync(dirname(path), { recursive: true });
   const db = new DatabaseSync(path);
+  if (opts.migrate === false) {
+    // busy_timeout is a connection setting and touches no bytes. Everything below this line writes to the file.
+    db.exec("PRAGMA busy_timeout = 10000;");
+    return db;
+  }
   db.exec(`
     PRAGMA journal_mode = WAL;
     PRAGMA busy_timeout = 10000;

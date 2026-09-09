@@ -294,7 +294,8 @@ const recStat = (() => { try { return statSync("data/record.db"); } catch { retu
 const recCounts = (() => {
   if (!recStat) return null;
   try {
-    const r = openDb("data/record.db");
+    // Not migrated: this is the published artifact, and opening it with the collector's schema rewrites it. See openDb.
+    const r = openDb("data/record.db", { migrate: false });
     const held = (r.prepare("SELECT COUNT(*) c FROM tokens").get() as any).c as number;
     const observed = (r.prepare("SELECT COUNT(*) c FROM tokens WHERE COALESCE(late_discovery,0)=0").get() as any).c as number;
     return { held, observed };
