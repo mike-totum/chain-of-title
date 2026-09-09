@@ -10,7 +10,7 @@ import { mkdirSync, writeFileSync, readFileSync, statSync, rmSync, copyFileSync 
 import { join } from "node:path";
 import { config } from "./config.ts";
 import { openDb } from "./db.ts";
-import { profile, verdictLine } from "./operator.ts";
+import { profile, verdictLine, walletVerdict } from "./operator.ts";
 import { renderSchema, renderSamples } from "./schema-doc.ts";
 import { rpcStats } from "./rpc-http.ts";
 import { tokenRecord, walletRecord, API_VERSION, PER_IP_PER_HOUR, type Coverage } from "./api.ts";
@@ -141,7 +141,7 @@ for (const [w] of wallets) {
   const line = verdictLine(p);
   const rows = p.buyouts.map((b) => `<tr><td>${when(b.ts)}</td><td><a href="../t/${esc(b.mint)}.html">${esc(b.symbol ?? "?")}</a></td>
     <td>${b.sol.toFixed(0)} SOL</td><td>${b.dormantH === null ? "unknown" : dur(b.dormantH * 3600_000)} after launch</td></tr>`).join("");
-  if (PAGES) writeFileSync(join(OUT, "w", `${w}.html`), page(`Priors: ${w.slice(0, 8)}`, walletBody(w, p, line), chrome, 1, undefined, `/w/${w}.html`));
+  if (PAGES) writeFileSync(join(OUT, "w", `${w}.html`), page(`Wallet ${w.slice(0, 8)}`, walletBody(w, p, walletVerdict(p)), chrome, 1, undefined, `/w/${w}.html`));
   if (PAGES) writeFileSync(join(OUT, "api", API_VERSION, "wallet", `${w}.json`),
     JSON.stringify(walletRecord(w, p, line, COV), null, 2));
 }

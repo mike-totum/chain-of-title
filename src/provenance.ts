@@ -119,7 +119,10 @@ export type Assessment = {
 
 export const TOKEN_COLUMNS = `mint, symbol, name, creator, created_at, late_discovery, dev_pct, dev_sold, unique_buyers,
   snap30_buyers, bundled_buyers, graduated, graduated_at, pool, vault_sol, vault_at, last_price, updated_at,
-  rebuilt_at, rebuilt_complete, curve_buyers, venue, graduated_confirmed_by`;
+  rebuilt_at, rebuilt_complete, curve_buyers, venue, graduated_confirmed_by,
+  -- what the launch claimed to be, and our commitments to the documents behind it. Off-chain and mutable at the
+  -- source, which is exactly why the record page shows them and why they are read from here rather than re-fetched.
+  description, uri, image, meta_at, meta_sha256, meta_bytes, image_sha256, image_bytes`;
 
 /** Union of the collector's run intervals. A launch outside them happened while we were blind. */
 export function coverageWindows(db: DatabaseSync): { a: number; b: number }[] {
@@ -166,7 +169,24 @@ export function assess(db: DatabaseSync, t: any, covered: (ts: number) => boolea
     flags.push({ level: "UNKNOWN", text: "We did not observe this launch, so its creator share and outside-buyer count are unknown. A manufactured token is indistinguishable from a real one once its float has been spread." });
     return { flags, watched, buyout: bo, curveBuyers, completed: false };
   }
+  /**
+   * The creator bought its own curve.
+   *
+   * The strongest single fact the record can hold about a launch, and until now it was never stated: the creator's
+   * address appeared in the launch table and the same address appeared under "who took the curve" two sections
+   * below, as two 44-character base58 strings a reader was left to compare for themselves.
+   *
+   * Split in two on purpose. That the creator bought is true whether or not the curve completed, so it is said
+   * first and unconditionally. That the buy FUNDED the graduation asserts the graduation, and may only be said
+   * once `completed` is confirmed — the same rule every statement below this point obeys.
+   *
+   * It does not change certification: `cleanAtBirth` already refuses any launch with a buyout at all.
+   */
+  const selfBought = bo && t.creator && bo.wallet === t.creator;
+
   const gradS = t.graduated_at ? (t.graduated_at - t.created_at) / 1000 : null;
+  if (selfBought) flags.push({ level: "DANGER", text:
+    `The creator bought its own bonding curve — ${bo!.sol.toFixed(0)} SOL, from the same wallet that created the token.` });
   if (t.dev_pct >= 50) flags.push({ level: "DANGER", text: `The creator took ${t.dev_pct.toFixed(1)}% of the entire supply in the first block. Nothing visible on-chain today shows this — the float has since been spread across wallets.` });
   else if (t.dev_pct >= MAX_DEV_PCT) flags.push({ level: "CAUTION", text: `The creator took ${t.dev_pct.toFixed(1)}% of supply at launch.` });
   // Every statement below asserts that the curve *completed*, so none of them may be made until that is confirmed.
@@ -191,6 +211,8 @@ export function assess(db: DatabaseSync, t: any, covered: (ts: number) => boolea
   const confirmedBy = t.graduated_confirmed_by ?? (t.pool ? "pool" : null);
   const completed = gradS !== null && confirmedBy !== null;
   if (completed) {
+    if (selfBought) flags.push({ level: "DANGER", text:
+      "That purchase completed the curve, so the graduation was paid for by the creator rather than bought by demand." });
     if (curveBuyers === 0) flags.push({ level: "DANGER", text: "It completed its bonding curve with zero outside buyers. The graduation was funded by the creator, not by demand." });
     else if (curveBuyers !== null && curveBuyers < 10) flags.push({ level: "DANGER", text: `Only ${curveBuyers} outside buyer${curveBuyers === 1 ? "" : "s"} bought on the bonding curve before it graduated.` });
     if (gradS <= 60) flags.push({ level: "DANGER", text: `It left the curve ${Math.round(gradS)}s after launch — the float was taken before anyone could buy at a normal price.` });

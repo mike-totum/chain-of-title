@@ -205,18 +205,30 @@ db.function("sha256", (v: unknown) =>
 /**
  * And backfilled, because the copy below is incremental.
  *
- * A new column plus a watermark leaves every row that has not changed since the last run permanently NULL — the
- * third time this file has been bitten by that, and the reason `uri` carries its own backfill a few lines down. The
- * first run of this stamped 325 of 12,255 documents the collector was already holding. The commitment is worthless
- * if it only covers launches that happened to be touched today.
+ * A new column plus a watermark leaves every row that has not changed since the last run permanently NULL. The first
+ * run of meta_sha256 stamped 325 of 12,255 documents the collector was already holding, and `uri` carries its own
+ * backfill a few lines down for the same reason.
+ *
+ * Generalised after fixing it once and not learning from it: with meta_sha256 backfilled the record still published
+ * ZERO image commitments while the collector held them, because the image columns were added the same way and never
+ * got the same treatment. Anything the collector fills in long after a launch — a picture fetched hours later, a
+ * document read on a retry — arrives after the row has stopped changing, so it can only ever reach the record this
+ * way. One list, so the next such column is a line here rather than a silent hole in the published file.
  */
-try {
-  const r = db.prepare(`UPDATE rec.tokens SET meta_sha256 = (
-      SELECT sha256(m.meta_json) FROM main.tokens m WHERE m.mint = rec.tokens.mint)
-    WHERE meta_sha256 IS NULL AND EXISTS (
-      SELECT 1 FROM main.tokens m WHERE m.mint = rec.tokens.mint AND m.meta_json IS NOT NULL)`).run();
-  if (Number(r.changes ?? 0) > 0) log(`  backfilled ${Number(r.changes).toLocaleString()} metadata commitments`);
-} catch (e) { log(`  WARNING: meta_sha256 backfill failed: ${String((e as any)?.message ?? e).slice(0, 120)}`); }
+for (const [col, expr] of [
+  ["meta_sha256", "sha256(m.meta_json)"],
+  ["image_sha256", "m.image_sha256"],
+  ["image_bytes", "m.image_bytes"],
+  ["image_at", "m.image_at"],
+] as const) {
+  try {
+    const r = db.prepare(`UPDATE rec.tokens SET ${col} = (
+        SELECT ${expr} FROM main.tokens m WHERE m.mint = rec.tokens.mint)
+      WHERE ${col} IS NULL AND EXISTS (
+        SELECT 1 FROM main.tokens m WHERE m.mint = rec.tokens.mint AND ${expr} IS NOT NULL)`).run();
+    if (Number(r.changes ?? 0) > 0) log(`  backfilled ${Number(r.changes).toLocaleString()} ${col}`);
+  } catch (e) { log(`  WARNING: ${col} backfill failed: ${String((e as any)?.message ?? e).slice(0, 120)}`); }
+}
 /**
  * DO NOT add a DROP COLUMN here. It was tried and it does not hold.
  *

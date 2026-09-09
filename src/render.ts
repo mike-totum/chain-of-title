@@ -174,6 +174,14 @@ tbody tr:hover{background:var(--card)}
   background:none;border:1px solid var(--line);padding:6px 9px;cursor:pointer;text-decoration:none;white-space:nowrap}
 .addr a:hover,.addr button:hover{color:var(--fg);border-color:var(--fg)}
 .headline b.q{border-bottom:0}
+/* What the launch said it was, next to the picture it published. The image is deliberately small and unstyled:
+   it is evidence on a record page, not decoration, and it must not read as this site endorsing the thing. */
+.claim{display:flex;gap:20px;align-items:flex-start;margin:10px 0 0}
+.claim table{flex:1;min-width:0}
+.claim .shot{flex:none;display:block;border:1px solid var(--line);background:var(--card);padding:5px;line-height:0}
+.claim .shot img{width:132px;height:132px;object-fit:contain;display:block}
+.claim .sub{display:block;margin:3px 0 0}
+@media(max-width:620px){.claim{flex-direction:column}}
 /* The published schema. The kind pill is the column that matters: it says whether a reader could reproduce the
    value themselves. "live" is the irreplaceable half of this archive, so it reads as emphasis rather than as a
    warning; "opaque" is a defect we are admitting to, so it reads as one. */
@@ -203,6 +211,8 @@ td.mut,.mut{color:var(--mut)}
 .sample:hover .scta{color:var(--fg)}
 /* Scope, next to the claim it qualifies rather than in the footer. */
 .vscope{margin:9px 0 20px;color:var(--mut);font-size:13px;line-height:1.55;max-width:70ch}
+/* A wallet page is identified by its address, so the address is the heading rather than a word about it. */
+.addr-h1{font-size:16px;font-weight:600;word-break:break-all;margin:0 0 2px}
 /* Attribution. A registry that will not say who keeps it is asking for a trust it has not offered. */
 .who{margin-top:14px}
 .who b{font-weight:600;color:var(--fg)}
@@ -425,15 +435,18 @@ export function tokenBody(
 ): string {
   const rows = a.watched ? `
     <tr><td class="k">Created</td><td>${when(t.created_at)}</td></tr>
-    <tr><td class="k">Creator</td><td class="mono">${esc(t.creator || "unknown")}</td></tr>
+    <tr><td class="k">Creator</td><td class="mono">${t.creator
+      ? `<a href="../w/${esc(t.creator)}.html">${esc(t.creator)}</a>` : "unknown"}</td></tr>
     <tr><td class="k">Creator took</td><td><b>${t.dev_pct?.toFixed(1) ?? "?"}%</b> of supply in the first block</td></tr>
-    <tr><td class="k">Outside buyers</td><td><b>${a.curveBuyers === null ? "unknown" : fmt(a.curveBuyers)}</b> distinct wallets bought on the bonding curve before it graduated${origin === "observed" ? `: ${fmt(t.snap30_buyers ?? 0)} within the first 30s, ${fmt(t.bundled_buyers ?? 0)} bundled into the creation block.` : "."}</td></tr>
-    <tr><td class="k">Graduated</td><td>${t.graduated_at ? `${dur(t.graduated_at - t.created_at)} after launch` : "yes"}</td></tr>
+    <tr><td class="k">Outside buyers</td><td><b>${a.curveBuyers === null ? "unknown" : fmt(a.curveBuyers)}</b> distinct wallets, not counting the creator, bought on the bonding curve before it graduated${origin === "observed" ? `: ${fmt(t.snap30_buyers ?? 0)} within the first 30s, ${fmt(t.bundled_buyers ?? 0)} bundled into the creation block.` : "."}</td></tr>
+    <tr><td class="k">Graduated</td><td>${t.graduated_at ? `${curveAge(t.graduated_at - t.created_at)} after launch` : "yes"}</td></tr>
     <tr><td class="k">Creator sold</td><td>${t.dev_sold ? "yes" : origin === "observed" ? "not while we watched" : "no"}</td></tr>`
     : `<tr><td class="k">Launch</td><td>Not observed. ${t.late_discovery ? "Found only after it was already trading." : "The collector was down when it launched."}</td></tr>`;
 
+  const selfBought = !!a.buyout && !!t.creator && a.buyout.wallet === t.creator;
   const boBlock = a.buyout ? `<h2>Who took the curve</h2>
-    <p class="mono"><a href="../w/${esc(a.buyout.wallet)}.html">${esc(a.buyout.wallet)}</a></p>
+    <p class="mono"><a href="../w/${esc(a.buyout.wallet)}.html">${esc(a.buyout.wallet)}</a>${selfBought
+      ? ` <b class="serif">— the creator's own wallet</b>` : ""}</p>
     <p>Bought <b>${a.buyout.sol.toFixed(0)} SOL</b> of this curve in a single transaction${t.created_at ? `, ${curveAge(a.buyout.ts - t.created_at)}` : ""}.</p>
     ${t.created_at && a.buyout.ts - t.created_at <= 0 ? `<p class="sub">Our launch and trade timestamps are both taken when the events are decoded, so events that arrived together carry the same one. That it was taken at or near launch is on the record; how many seconds after is not.</p>` : ""}` : "";
 
@@ -448,6 +461,40 @@ export function tokenBody(
     We did not watch this launch. Its record was reconstructed from the bonding curve's complete transaction history,
     so the figures below are the same on-chain events, read later. What it cannot tell you is what the token
     <i>claimed</i> to be at launch: the name, image and links live off-chain and can be changed since.</div>` : "";
+
+  /**
+   * What the launch said it was.
+   *
+   * The token above is called "Cobie" — a real person — and until now this page could report that the creator took
+   * 79% of supply while never showing the claim that makes the launch worth reporting. The name, the description
+   * and the picture are the impersonation; the on-chain figures are only how it was funded.
+   *
+   * The picture is served from the bytes we captured at launch, addressed by their own sha256, NEVER hot-linked
+   * from the URI. The URI is the creator's to repoint, so rendering it live would put whatever they serve today
+   * onto a page that says "what this launch claimed at birth" — this site's own besetting error, committed on the
+   * page that exists to point it out. If we did not capture the bytes we say so and show nothing.
+   */
+  const claimed = (t.name || t.description || t.image_sha256 || t.uri) ? `
+    <div class="sec"><h2>What this launch claimed to be</h2></div>
+    <div class="claim">
+      ${t.image_sha256 ? `<a class="shot" href="../i/${esc(t.image_sha256)}"><img src="../i/${esc(t.image_sha256)}"
+        alt="The picture this launch published at birth" loading="lazy" width="132" height="132"></a>` : ""}
+      <table>
+        ${t.name ? `<tr><td class="k">Name</td><td>${esc(t.name)}</td></tr>` : ""}
+        ${t.description ? `<tr><td class="k">Description</td><td>${esc(t.description)}</td></tr>` : ""}
+        ${t.meta_sha256 ? `<tr><td class="k">Metadata held</td><td><span class="mono">sha256 ${esc(t.meta_sha256)}</span>${
+          t.meta_bytes ? ` · ${fmt(t.meta_bytes)} bytes` : ""}<br><span class="sub">The document is kept but not
+          published; this hash lets anyone who obtains it prove it is the one we read.</span></td></tr>` : ""}
+        ${t.image_sha256
+          ? `<tr><td class="k">Picture held</td><td><span class="mono">sha256 ${esc(t.image_sha256)}</span>${
+              t.image_bytes ? ` · ${fmt(t.image_bytes)} bytes` : ""}</td></tr>`
+          : `<tr><td class="k">Picture</td><td>Not captured${t.image ? ", so we cannot show what it published" : " — this launch declared none"}. ${
+              t.image ? "That is our storage budget, not a finding about the launch." : ""}</td></tr>`}
+      </table>
+    </div>
+    <p class="callout">Off-chain and mutable. This is what the launch served when we read it${t.meta_at
+      ? ` at ${when(t.meta_at)}` : ""}; the creator can change or unpin any of it at any time, and a launch record is
+    the only place it survives.</p>` : "";
 
   const v = verdict(t, a, clean);
   return `
@@ -469,7 +516,7 @@ export function tokenBody(
       var b=document.getElementById('cpb'),o=b.textContent;b.textContent='Copied';setTimeout(function(){b.textContent=o},1200)})}</script>
     ${provenance}
     ${a.flags.map((f) => `<div class="flag ${f.level}"><span class="tag ${f.level}">${f.level}</span>${esc(f.text)}</div>`).join("")}
-    <h2>At launch</h2><table>${rows}</table>${boBlock}${nowBlock}
+    <h2>At launch</h2><table>${rows}</table>${boBlock}${nowBlock}${claimed}
     <div class="sec"><h2>Check another</h2></div>${SEARCH}`;
 }
 
@@ -640,21 +687,64 @@ export function homeBody(h: Home): string {
 }
 
 /** A wallet's record: every curve it bought outright, and what it did with the tokens afterwards. */
-export function walletBody(w: string, p: any, line: string | null): string {
+/**
+ * A wallet's record: every curve it bought outright, and what it did with the tokens afterwards.
+ *
+ * It used to open with the word "Priors" on every wallet page — a term most readers will not decode, saying nothing
+ * about whose priors — and then render its verdict as one flag box among the furniture. A reader arrives here from a
+ * token page having just read that this wallet bought the whole curve, and the question in their head is who this is
+ * and whether they do it often. So: the address is the heading, the verdict is the verdict, and the size of the
+ * evidence behind it is stated rather than left for the reader to infer from the length of a table.
+ */
+export function walletBody(w: string, p: any, v: { label: string; why: string } | null, from?: { mint: string; symbol: string | null }): string {
   const heavy = p.ammSell > p.ammBuy * 3 && p.ammSell >= 20 ? "DANGER" : "CAUTION";
   const rows = p.buyouts.map((b: any) => `<tr><td>${when(b.ts)}</td><td><a href="../t/${esc(b.mint)}.html">${esc(b.symbol ?? "?")}</a></td>
-    <td>${b.sol.toFixed(0)} SOL</td><td>${curveAge(b.dormantH === null ? null : b.dormantH * 3600_000)}</td></tr>`).join("");
+    <td class="num">${b.sol.toFixed(0)} SOL</td><td>${curveAge(b.dormantH === null ? null : b.dormantH * 3600_000)}</td></tr>`).join("");
+  const n = p.buyouts.length;
+
+  /**
+   * How much evidence the sentence above rests on. One buyout and thirty produced identical prose, so a single
+   * event read with the same confidence as a habit — the reader could only tell them apart by counting the rows.
+   */
+  const basis = n === 0 ? "" : n === 1
+    ? `Based on <b>one</b> curve. A record of one event is not yet a pattern.`
+    : `Based on <b>${fmt(n)}</b> curves taken${p.ammSell > 0 ? " and the market trades on those same tokens" : ""}.`;
+
+  /**
+   * The cluster. This is the part no contract scanner can produce, and it was computed, published in the record and
+   * then never shown: 7,628 of the 10,243 wallets on file carry a funder. Where we do not hold one the section is
+   * absent rather than hedged, on the same rule as every other silence here.
+   */
+  const cluster = p.cluster && p.clusterWallets > 1 ? `
+    <div class="sec"><h2>Operator cluster</h2><span class="cnt">${esc(p.cluster)}</span></div>
+    <table>
+      ${p.funder ? `<tr><td class="k">Funded by</td><td class="mono">${esc(p.funder)}</td></tr>` : ""}
+      <tr><td class="k">Group</td><td>One of <b>${fmt(p.clusterWallets)}</b> wallets seeded from that funder, which
+        together took <b>${fmt(p.clusterCurves)}</b> bonding curve${p.clusterCurves === 1 ? "" : "s"}.</td></tr>
+      ${p.policy ? `<tr><td class="k">Cluster behaviour</td><td>${esc(p.policy)}</td></tr>` : ""}
+    </table>
+    <p class="callout">A shared funder is a lead, not a finding. Trading terminals fund their users from one address
+    the same way a wallet farm funds its own, and we cannot tell those apart from the chain alone.</p>` : "";
+
   return `
-    <h1>Priors</h1><div class="sub mono">${esc(w)}</div>
-    <p class="sub">Every bonding curve this wallet has bought outright, and what it did with the tokens afterwards.</p>
-    ${line ? `<div class="flag ${heavy}"><span class="tag ${heavy}">record</span>${esc(line)}</div>` : ""}
-    <div style="margin:20px 0">
-      <div class="stat"><span>curve buyouts</span><b class="big">${p.buyouts.length}</b></div>
+    <h1 class="mono addr-h1">${esc(w)}</h1>
+    ${v ? `<div class="verdict"><span class="v ${heavy}">${esc(v.label)}</span>
+      <span class="vwhy">${esc(v.why)}</span></div>
+      <p class="vscope">${basis} Every figure below is the wallet's own on-chain activity, and can be recomputed from
+      the published archive. Not a claim about who controls this address.</p>`
+      : `<p class="sub">Every bonding curve this wallet has bought outright, and what it did with the tokens afterwards.</p>`}
+    ${from ? `<p class="sub">You arrived from <a href="../t/${esc(from.mint)}.html">${esc(from.symbol ?? "that launch")}</a>.</p>` : ""}
+    <div class="stats" style="margin:20px 0">
+      <div class="stat"><span>curve buyouts</span><b class="big">${fmt(n)}</b></div>
       <div class="stat"><span>spent on curves</span><b class="big">${fmt(p.curveSol)}</b> SOL</div>
       <div class="stat"><span>sold on the market</span><b class="big">${fmt(p.ammSell)}</b> SOL</div>
       <div class="stat"><span>bought back</span><b class="big">${fmt(p.ammBuy)}</b> SOL</div>
     </div>
-    <h2>Curves taken</h2><table class="data"><tr><th>When</th><th>Token</th><th>Size</th><th>Curve age</th></tr>${rows}</table>
+    <p class="callout">Sold and bought back cover the curves this wallet took, not everything it has ever traded, and
+    the trades behind them are in the published archive so the figures can be checked rather than believed.</p>
+    ${cluster}
+    <div class="sec"><h2>Curves taken</h2><span class="cnt">${fmt(n)} on file</span></div>
+    <table class="data"><tr><th>When</th><th>Token</th><th class="num">Size</th><th>Curve age</th></tr>${rows}</table>
     <div class="sec"><h2>Check a token</h2></div>${SEARCH}`;
 }
 

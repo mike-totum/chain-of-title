@@ -19,7 +19,7 @@ import { config } from "./config.ts";
 import { openDb } from "./db.ts";
 import { type Assessment, assess, cleanAtBirth, coverageWindows, TOKEN_COLUMNS, MIN_POOL_SOL,
   readingCertifies, MAX_READING_AGE_MS, MAX_DEV_PCT, MIN_BUYERS, BUYOUT_SOL } from "./provenance.ts";
-import { profile, verdictLine } from "./operator.ts";
+import { profile, verdictLine, walletVerdict } from "./operator.ts";
 import { poolReservesPooled } from "./outcomes.ts";
 import { rebuild, store, curveExists } from "./backfill.ts";
 import { page, tokenBody, walletBody, tokenPreview, SEARCH, when, fmt, homeBody, homeTitle, verdict, CANONICAL_HOST,
@@ -1219,7 +1219,7 @@ const server = createServer(async (req, res) => {
           <div class="flag UNKNOWN"><span class="tag UNKNOWN">unknown</span>This wallet has not bought out a bonding
           curve in our archive. That is not a statement about the wallet: only that it does not appear here.</div>`, chrome, 1));
       const line = verdictLine(p);
-      return send(200, page(`Wallet ${wm[1].slice(0, 8)}`, walletBody(wm[1], p, line), chrome, 1,
+      return send(200, page(`Wallet ${wm[1].slice(0, 8)}`, walletBody(wm[1], p, walletVerdict(p)), chrome, 1,
         line ?? `A wallet that has bought out ${p.buyouts.length} bonding curve${p.buyouts.length === 1 ? "" : "s"} in this archive.`,
         `/w/${wm[1]}.html`), "text/html; charset=utf-8", "short");
     }

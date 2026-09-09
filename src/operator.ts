@@ -15,6 +15,8 @@ export interface Profile {
   buyouts: { mint: string; symbol: string | null; sol: number; ts: number; dormantH: number | null }[];
   curveSol: number; ammBuy: number; ammSell: number; tokens: number;
   cluster: string | null; policy: string | null;
+  /** Who funded the wallet, and how big the group it belongs to is. Computed already; it was simply never returned. */
+  funder: string | null; clusterWallets: number; clusterCurves: number;
 }
 
 /**
@@ -79,32 +81,68 @@ export function profile(dbh: any, w: string): Profile {
       COALESCE(SUM(CASE WHEN venue='amm'   AND side='sell' THEN sol END),0) ammSell,
       COUNT(DISTINCT mint) tokens
     FROM trades WHERE wallet = ?`).get(w) as any;
-  const op = dbh.prepare("SELECT cluster FROM operator_wallets WHERE wallet = ?").get(w) as any;
+  const op = dbh.prepare("SELECT cluster, funder FROM operator_wallets WHERE wallet = ?").get(w) as any;
+  /**
+   * The size of the group, which is the whole reason a cluster is worth naming.
+   *
+   * "This wallet bought a curve" is one event. "This wallet is one of 32 seeded by a single funder, which together
+   * took 14 curves" is a machine, and it is the sentence no contract scanner can produce because it needs a
+   * wallet's history across many tokens rather than one token's state. It was computed and stored and then not
+   * carried out of this function, so no page could say it.
+   */
+  const grp = op?.cluster ? dbh.prepare(
+    `SELECT (SELECT COUNT(*) FROM operator_wallets WHERE cluster = ?) wallets,
+            (SELECT COUNT(DISTINCT mint) FROM trades WHERE venue='curve' AND side='buy' AND sol >= ${BUYOUT_SOL}
+               AND wallet IN (SELECT wallet FROM operator_wallets WHERE cluster = ?)) curves`
+  ).get(op.cluster, op.cluster) as any : null;
   const pol = op?.cluster ? (dbh.prepare("SELECT policy FROM operator_policy WHERE cluster = ?").get(op.cluster) as any) : null;
   return {
     buyouts: buyouts.map((b) => ({ mint: b.mint, symbol: b.symbol, sol: b.sol, ts: b.ts,
       dormantH: b.created_at ? (b.ts - b.created_at) / 3600_000 : null })),
     curveSol: flow.curveSol, ammBuy: flow.ammBuy, ammSell: flow.ammSell, tokens: flow.tokens,
     cluster: op?.cluster ?? null, policy: pol?.policy ?? null,
+    funder: op?.funder || null, clusterWallets: Number(grp?.wallets ?? 0), clusterCurves: Number(grp?.curves ?? 0),
   };
 }
 
-/** one plain sentence a reader can act on, or null when the wallet has no pattern worth stating */
-export function verdictLine(p: Profile): string | null {
+/**
+ * The verdict on a wallet, as a label and its reason rather than one long sentence.
+ *
+ * It used to be a single string, and the wallet page split it on the first "." to get a heading — which worked until
+ * a wallet had bought back 0.0 SOL, at which point the decimal point WAS the first full stop: the heading swallowed
+ * the whole sentence and the reason under it read "0." Splitting prose on punctuation to recover structure that was
+ * thrown away is the bug; giving the structure a shape is the fix.
+ */
+export type WalletVerdict = { label: string; why: string };
+
+export function walletVerdict(p: Profile): WalletVerdict | null {
   if (!p.buyouts.length) return null;
+  // Same figure, same shape, wherever it appears. The prose said 2956 while the stat beside it said 2,956.
+  const sol = (n: number) => Math.round(n).toLocaleString();
   const n = p.buyouts.length;
+  const curves = `${n} bonding curve${n > 1 ? "s" : ""}`;
+  // "only 0.0" was arithmetic where a word was meant. A wallet that bought back nothing bought back nothing.
+  const back = p.ammBuy > 0 ? `${sol(p.ammBuy)} SOL` : "nothing";
   const ratio = p.ammBuy > 0 ? p.ammSell / p.ammBuy : Infinity;
   if (p.ammSell >= 20 && ratio >= 3)
-    return `This wallet has taken ${n} bonding curve${n > 1 ? "s" : ""} outright (${p.curveSol.toFixed(0)} SOL) and sold ${p.ammSell.toFixed(0)} SOL into buyers on the open market while buying back only ${p.ammBuy.toFixed(1)}. It distributes; it does not hold.`;
+    return { label: "It distributes; it does not hold",
+      why: `Took ${curves} outright for ${sol(p.curveSol)} SOL and sold ${sol(p.ammSell)} SOL into buyers on the open market, buying back ${back}.` };
   if (p.ammSell >= 20 && ratio >= 1.2)
-    return `This wallet has taken ${n} bonding curve${n > 1 ? "s" : ""} and is a net seller on the open market (${p.ammSell.toFixed(0)} SOL out against ${p.ammBuy.toFixed(0)} in).`;
-  // Zero in and zero out is an absence of data, not a measured neutral, and it must not read as one: most
-  // graduations have no market trades on our record at all, so "not yet a net seller (0 SOL in, 0 out)" was
-  // reporting silence as a finding.
+    return { label: "A net seller on the open market",
+      why: `Took ${curves} and sold ${sol(p.ammSell)} SOL against ${sol(p.ammBuy)} SOL bought back.` };
   if (p.ammBuy === 0 && p.ammSell === 0)
-    return `This wallet has taken ${n} bonding curve${n > 1 ? "s" : ""} outright (${p.curveSol.toFixed(0)} SOL). We hold no market trades for it in either direction, so what it did with the tokens afterwards is not on our record.`;
-  return `This wallet has taken ${n} bonding curve${n > 1 ? "s" : ""} outright (${p.curveSol.toFixed(0)} SOL). It is not yet a net seller in our data (${p.ammBuy.toFixed(0)} SOL in, ${p.ammSell.toFixed(0)} out).`;
+    return { label: `Took ${curves} outright`,
+      why: `${sol(p.curveSol)} SOL spent on curves. We hold no market trades for it in either direction, so what it did with the tokens afterwards is not on our record.` };
+  return { label: `Took ${curves} outright`,
+    why: `${sol(p.curveSol)} SOL spent on curves. It is not yet a net seller in our data (${p.ammBuy.toFixed(0)} SOL in, ${p.ammSell.toFixed(0)} out).` };
 }
+
+/** The same verdict as one line, for the CLI and anything that wants prose. */
+export function verdictLine(p: Profile): string | null {
+  const v = walletVerdict(p);
+  return v ? `${v.label}. ${v.why}` : null;
+}
+
 
 // CLI only. check.ts imports profile()/verdictLine(); importing must not run a report.
 const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop() ?? "\u0000");
