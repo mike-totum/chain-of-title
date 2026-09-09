@@ -2,6 +2,10 @@
 # `data`, because excluding the directory silently left out data/record.db and the web service deployed with an
 # empty archive.
 node_modules
+# Captured launch images are NEVER shipped in a build context. They live on the collector's volume, where they are
+# captured, and reach the web service over the private network at /image/<sha256>. Baking them into an image would
+# put whichever machine deploys back in the publish path and would grow by ~570 MB a day.
+data/images
 data/pump.db*
 # data/seed.db is no longer COPYed either; the merge it existed for is done and recorded. Both files have to agree:
 # .railwayignore governs what is uploaded, this one governs what COPY puts in the image, and changing one without

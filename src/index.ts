@@ -1,5 +1,6 @@
 import { config } from "./config.ts";
 import { readFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { openDb, upsertToken, TradeWriter, finalizeTokenTrades, recoverOrphans } from "./db.ts";
 import { poolReserves } from "./outcomes.ts";
 import { price } from "./curve.ts";
@@ -1294,6 +1295,42 @@ if (process.env.RECORD_PORT) {
           res.writeHead(500, { "content-type": "application/json" });
           return res.end(JSON.stringify({ held: false, error: (e as Error).message }));
         }
+      }
+      /**
+       * The captured launch image, by content hash, over the private network.
+       *
+       * The bytes live on THIS service's volume because this is the process that captured them. The web service has
+       * no volume, so its only alternatives were to ship the pictures inside its build context — which puts whichever
+       * laptop deploys back in the publish path, and dies at ~570 MB a day — or to hot-link the creator's IPFS URI,
+       * which would have the page that reports what a launch claimed at birth quietly showing whatever the operator
+       * is serving today. Both are the failure this project exists to point at. So the record travels over the
+       * private network and the pictures travel the same way.
+       *
+       * The name IS the hash, so this re-verifies before serving: a file whose bytes no longer match the sha256 it is
+       * filed under is corruption, and serving it under a content address would be a false attestation rather than a
+       * broken image.
+       */
+      const im = req.url?.match(/^\/image\/([0-9a-f]{64})$/);
+      if (im) {
+        const sha = im[1];
+        const dir = (process.env.IMAGES_DIR ?? (config.dbPath.replace(/[^/]*$/, "") + "images")) + "/" + sha.slice(0, 2);
+        const types: Record<string, string> = { png: "image/png", jpg: "image/jpeg", gif: "image/gif", webp: "image/webp", svg: "image/svg+xml", avif: "image/avif", bin: "application/octet-stream" };
+        for (const ext of Object.keys(types)) {
+          const path = `${dir}/${sha}.${ext}`;
+          try {
+            const buf = readFileSync(path);
+            const actual = createHash("sha256").update(buf).digest("hex");
+            if (actual !== sha) {
+              log(`[image] ${path} does not match its own hash — refusing to serve it`);
+              res.writeHead(500, { "content-type": "text/plain" });
+              return res.end("stored image failed its own checksum");
+            }
+            res.writeHead(200, { "content-type": types[ext], "content-length": String(buf.length), "x-content-sha256": sha });
+            return res.end(buf);
+          } catch { /* try the next extension */ }
+        }
+        res.writeHead(404, { "content-type": "text/plain" });
+        return res.end("not held");
       }
       if (req.url !== "/record.db") { res.writeHead(404); return res.end("not found"); }
       let st;

@@ -9,6 +9,10 @@
 !data/record.db
 !site
 !site/**
+# Captured launch images are NEVER shipped in a build context. They live on the collector's volume, where they are
+# captured, and reach the web service over the private network at /image/<sha256>. Baking them into an image would
+# put whichever machine deploys back in the publish path and would grow by ~570 MB a day.
+data/images
 data/pump.db*
 # data/seed.db is NOT shipped. It was, deliberately, for the two boots that merged it (13:12 and 14:13 on
 # 2026-09-08, both recorded in the collector's `seed_merges`); this is the negation being removed afterwards, which

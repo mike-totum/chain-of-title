@@ -839,6 +839,11 @@ const isFile = (p: string): boolean => { try { return statSync(p).isFile(); } ca
  * The cache exists only so a burst of traffic cannot multiply the work; at this TTL the page is never meaningfully
  * behind the database it reads, and it is orders of magnitude fresher than the file it replaces.
  */
+/**
+ * Where the captured launch pictures live. On the collector this is its volume; on the web service it is whatever
+ * the image carries, which is why a picture we do not hold returns 404 rather than pretending. See IMAGES.md.
+ */
+const IMAGE_DIR = process.env.IMAGE_DIR ?? "data/images";
 const HOME_TTL_MS = Number(process.env.HOME_TTL_SECONDS ?? 15) * 1000;
 const HOME_DAYS = Number(process.env.HOME_DAYS ?? 7);
 let homeCache: { at: number; h: Home; html: string } | null = null;
@@ -1113,6 +1118,39 @@ const server = createServer(async (req, res) => {
 
     // The front page is rendered, not served from disk. It must come before the static handler, which would
     // otherwise keep answering with whatever index.html the last build left behind.
+    /**
+      * The picture a launch published at birth, served from the bytes we captured and addressed by their sha256.
+      *
+      * Never a redirect to the original URI. The URI belongs to the creator and can be repointed or unpinned, so
+      * proxying it live would render whatever they serve today under a heading that says what the launch claimed
+      * at birth — the precise substitution this site exists to report. Content-addressed, so the response is
+      * immutable by construction and cacheable forever: the hash IS the verification.
+      */
+    const img = /^\/i\/([0-9a-f]{64})$/.exec(safe);
+    if (img) {
+      const sha = img[1];
+      const dir = join(IMAGE_DIR, sha.slice(0, 2));
+      const hit = (() => {
+        for (const ext of ["webp", "png", "jpg", "gif", "svg", "avif", "bin"]) {
+          const p = join(dir, `${sha}.${ext}`);
+          if (isFile(p)) return { p, ext };
+        }
+        return null;
+      })();
+      // A picture we do not hold is a 404 and nothing else. Never a placeholder that could be mistaken for evidence.
+      if (!hit) return send(404, "not held", "text/plain; charset=utf-8", "none");
+      const type = ({ webp: "image/webp", png: "image/png", jpg: "image/jpeg", gif: "image/gif",
+        svg: "image/svg+xml", avif: "image/avif" } as Record<string, string>)[hit.ext] ?? "application/octet-stream";
+      res.writeHead(200, {
+        "content-type": type,
+        "cache-control": "public, max-age=31536000, immutable",
+        // Operator-supplied bytes. Never let them execute or be framed, whatever the content type claims.
+        "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+        "x-content-type-options": "nosniff",
+      });
+      return res.end(readFileSync(hit.p));
+    }
+
     if (safe === "/index.html") return send(200, renderHome(), "text/html; charset=utf-8", "short");
     if (safe === "/api/summary.json") return send(200, summaryJson(), TYPES[".json"], "short");
 
@@ -1124,6 +1162,39 @@ const server = createServer(async (req, res) => {
      * A path we do not serve is a 404, not an error on our side.
      */
     if (isFile(file)) return send(200, readFileSync(file), TYPES[safe.slice(safe.lastIndexOf("."))] ?? "application/octet-stream", "short");
+
+    /**
+     * The launch image we captured, by content hash, proxied from the collector.
+     *
+     * Never the creator's URI. A page reporting what a launch claimed AT BIRTH must not render whatever that URI
+     * serves today — the operator can repoint or unpin it, and this site showing the current picture under a
+     * historical heading would be its own besetting error, committed on the page that exists to report it.
+     *
+     * The bytes live on the collector's volume because that is the process that captured them; this service has no
+     * volume, and shipping them in the build context would put whichever laptop deploys back in the publish path at
+     * ~570 MB a day. Same private network the record travels over.
+     *
+     * Cached immutable: the URL is the hash, so the bytes behind it can never change. If they ever did, the
+     * collector refuses to serve them at all rather than answering under a content address it cannot honour.
+     */
+    const capturedImage = safe.match(/^\/i\/([0-9a-f]{64})$/);
+    if (capturedImage && HEALTH_URL) {
+      try {
+        const r = await fetch(HEALTH_URL.replace(/\/health$/, `/image/${capturedImage[1]}`), { signal: AbortSignal.timeout(15_000) });
+        if (!r.ok) { res.writeHead(r.status === 404 ? 404 : 502, { "content-type": "text/plain" }); return res.end(r.status === 404 ? "not held" : "image store unavailable"); }
+        const buf = Buffer.from(await r.arrayBuffer());
+        res.writeHead(200, {
+          "content-type": r.headers.get("content-type") ?? "application/octet-stream",
+          "content-length": String(buf.length),
+          "cache-control": "public, max-age=31536000, immutable",
+        });
+        return res.end(buf);
+      } catch (e) {
+        res.writeHead(502, { "content-type": "text/plain" });
+        return res.end("image store unreachable");
+      }
+    }
+    if (capturedImage) { res.writeHead(503, { "content-type": "text/plain" }); return res.end("no image store configured"); }
 
     // The archive itself. Served from the image rather than copied into the static tree, and cached hard because it
     // is rebuilt on deploy — a public good nobody has to ask for.
@@ -1148,7 +1219,7 @@ const server = createServer(async (req, res) => {
           <div class="flag UNKNOWN"><span class="tag UNKNOWN">unknown</span>This wallet has not bought out a bonding
           curve in our archive. That is not a statement about the wallet: only that it does not appear here.</div>`, chrome, 1));
       const line = verdictLine(p);
-      return send(200, page(`Priors: ${wm[1].slice(0, 8)}`, walletBody(wm[1], p, line), chrome, 1,
+      return send(200, page(`Wallet ${wm[1].slice(0, 8)}`, walletBody(wm[1], p, line), chrome, 1,
         line ?? `A wallet that has bought out ${p.buyouts.length} bonding curve${p.buyouts.length === 1 ? "" : "s"} in this archive.`,
         `/w/${wm[1]}.html`), "text/html; charset=utf-8", "short");
     }
