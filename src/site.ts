@@ -32,7 +32,13 @@ const DAYS = Number(arg("--days", "7"));
  */
 const PAGES = process.argv.includes("--pages");
 
-const db = openDb(config.dbPath);
+/**
+ * Opened without migrating. The next line declares this process read-only, and a generator that only reads has no
+ * business writing the collector's schema into whatever it is pointed at — which is precisely what happened when it
+ * was pointed at the record: `npm run site` put all nine collector-only tables back into data/record.db seconds
+ * after servicedb had stripped them. Same bug as the web service, one caller further along.
+ */
+const db = openDb(config.dbPath, { migrate: false });
 db.exec("PRAGMA query_only = 1");
 const now = Date.now();
 

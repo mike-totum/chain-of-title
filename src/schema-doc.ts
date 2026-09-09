@@ -125,6 +125,10 @@ const DOCS: Record<string, Record<string, Doc>> = {
     source_mint: { kind: "ours", desc: "The launch that first brought this wallet to our attention." },
     added_at: { kind: "ours", desc: "When we added the row, epoch ms." },
   },
+  meta: {
+    k: { kind: "ours", desc: "Key. The published record carries built_at (when this file was assembled), built_by (which machine and script — 'local' or the cloud service name, never a personal hostname), built_pid, and watermark (how far the incremental copy had reached)." },
+    v: { kind: "ours", desc: "Value, as text. Timestamps are epoch ms." },
+  },
   operator_policy: {
     cluster: { kind: "ours", desc: "Cluster label, joining to operator_wallets." },
     policy: { kind: "ours", desc: "What the cluster's behaviour looks like across its plays. Our reading of a pattern, not a fact about the chain." },
@@ -145,6 +149,7 @@ const TABLE_NOTE: Record<string, string> = {
   pool_map: "Which PumpSwap pool belongs to which token.",
   operator_wallets: "Wallets grouped by who funded them.",
   operator_policy: "What each cluster's plays look like taken together.",
+  meta: "What built this file, and when. A record that cannot account for its own origin is a strange thing for a provenance project to publish.",
 };
 
 /** Columns actually present in the record, in file order. */
@@ -159,6 +164,28 @@ const columnsOf = (db: DatabaseSync, table: string): { name: string; type: strin
 export function renderSchema(db: DatabaseSync): string {
   const missing: string[] = [];
   const sections: string[] = [];
+
+  /**
+   * Undocumented TABLES fail the build too, not only undocumented columns.
+   *
+   * This was one-sided and the asymmetry hid a real omission: a table absent from DOCS was quietly left off the
+   * page, so the file could hold something the schema never mentioned. `meta` — the table saying what built the
+   * record and when — sat undocumented for exactly that reason, on a page whose whole subject is provenance.
+   *
+   * The same gap had a larger version. Before openDb stopped migrating the record, the published file had
+   * accumulated ten of the collector's own tables, all empty; this page would have said nothing about any of them
+   * while a reader who opened the download saw all ten.
+   */
+  const present = (db.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as any[])
+    .map((r) => r.name as string);
+  const undocumented = present.filter((t) => !DOCS[t]);
+  if (undocumented.length) {
+    throw new Error(
+      `schema-doc: ${undocumented.length} table(s) in the record are not documented: ${undocumented.join(", ")}.\n` +
+      `Either describe them in DOCS in src/schema-doc.ts, or stop publishing them in servicedb.ts. A file that ` +
+      `holds a table the schema does not mention is a finding aid that understates its own holdings.`);
+  }
 
   for (const [table, docs] of Object.entries(DOCS)) {
     const cols = columnsOf(db, table);
