@@ -18,9 +18,30 @@ export function messageToTweet(msg: any, channel: string): Tweet {
   };
 }
 
+/**
+ * One channel message, as read. Separate from KolSignal because they answer different questions: a signal is our
+ * reading of a message (it named this mint), and this is the message. The reading is derived and can be redone; the
+ * message cannot be re-read once it is deleted.
+ */
+export interface TelegramMessage {
+  channel: string;
+  id: number;
+  postedAt: number;
+  sender: string | null;
+  text: string;
+  url: string;
+  mints: string[];
+  cashtags: string[];
+  views: number | null;
+  forwards: number | null;
+  replyTo: number | null;
+  editedAt: number | null;
+}
+
 export interface TelegramWatcher {
   on(event: "signal", l: (s: KolSignal) => void): this;
   on(event: "status", l: (msg: string) => void): this;
+  on(event: "message", l: (m: TelegramMessage) => void): this;
 }
 
 /** Listens to new messages in the configured channels and emits KOL-style signals. */
@@ -98,6 +119,30 @@ export class TelegramWatcher extends EventEmitter {
     this.stats.messages++;
     const t = messageToTweet(msg, channel);
     const { mints, cashtags } = parseTweet(t);
+    /**
+     * Every message, not only the ones naming a token.
+     *
+     * This class was written to generate trading signals, so it kept what matched a mint and dropped the rest. The
+     * rest is the record: what was said about a launch before anyone knew how it ended, by whom, and when. It is
+     * unrecoverable once deleted, and a deletion is the event most worth having recorded.
+     *
+     * Emitted rather than written here so this file stays a reader of Telegram and the storage decision — including
+     * the decision not to publish any of it — lives with the process that owns the database.
+     */
+    this.emit("message", {
+      channel,
+      id: Number(msg?.id ?? 0),
+      postedAt: t.createdAt,
+      sender: msg?.senderId ? String(msg.senderId) : msg?.fromId?.userId ? String(msg.fromId.userId) : null,
+      text: t.text,
+      url: t.url,
+      mints: mints.map((m) => m.mint),
+      cashtags,
+      views: typeof msg?.views === "number" ? msg.views : null,
+      forwards: typeof msg?.forwards === "number" ? msg.forwards : null,
+      replyTo: msg?.replyTo?.replyToMsgId ? Number(msg.replyTo.replyToMsgId) : null,
+      editedAt: msg?.editDate ? Number(msg.editDate) * 1000 : null,
+    });
     for (const m of mints) {
       this.stats.signals++;
       this.emit("signal", { account: `tg:${channel}`, kind: m.kind, mint: m.mint, symbol: null, text: t.text, url: t.url, postedAt: t.createdAt } satisfies KolSignal);

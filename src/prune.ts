@@ -20,6 +20,25 @@ const APPLY = process.argv.includes("--apply");
 const VACUUM = process.argv.includes("--vacuum");
 const BATCH = 200_000;
 
+/**
+ * A legal hold suspends every deletion in this file, and in the collector's own pruner.
+ *
+ * Retention timers and evidence are in direct conflict the moment a dispute is foreseeable. Routine deletion under a
+ * documented policy is defensible; deletion that continues after a claim is anticipated is spoliation, and it is
+ * judged on whether a reasonable person should have foreseen the claim, not on whether anyone remembered to stop the
+ * cron job. The 3-day trades prune destroys ~6 million rows a day, so the window between "we should have stopped"
+ * and "we stopped" is measured in hours.
+ *
+ * One environment variable, honoured by both pruners, that fails closed: set LEGAL_HOLD to anything and nothing is
+ * deleted anywhere until it is unset. Deliberately not a config file or a database flag - it has to be settable in
+ * seconds by someone who has just been told to preserve, without a deploy.
+ */
+const LEGAL_HOLD = (process.env.LEGAL_HOLD ?? "").trim();
+if (LEGAL_HOLD) {
+  console.log(`LEGAL HOLD IS SET (${LEGAL_HOLD}) — nothing will be deleted. Unset LEGAL_HOLD to resume retention.`);
+  process.exit(0);
+}
+
 const db = openDb(config.dbPath);
 const cutoff = Date.now() - DAYS * 86400_000;
 const iso = new Date(cutoff).toISOString().slice(0, 16).replace("T", " ");
@@ -64,6 +83,21 @@ purge("trades", `DELETE FROM trades WHERE rowid IN (SELECT rowid FROM trades WHE
 purge("wallet_token_stats", `DELETE FROM wallet_token_stats WHERE rowid IN (SELECT wts.rowid FROM wallet_token_stats wts JOIN tokens t ON t.mint = wts.mint WHERE t.created_at < ? LIMIT ${BATCH})`, [cutoff]);
 purge("curve_snapshots", `DELETE FROM curve_snapshots WHERE rowid IN (SELECT rowid FROM curve_snapshots WHERE ts < ? LIMIT ${BATCH})`, [cutoff]);
 purge("tweets", `DELETE FROM tweets WHERE rowid IN (SELECT rowid FROM tweets WHERE fetched_at < ? LIMIT ${BATCH})`, [cutoff]);
+/**
+ * Telegram messages are NOT pruned on the working-data timer, and that is deliberate: they are the archive, not
+ * working data, and the retention period for personal data is a legal decision rather than an operational one.
+ *
+ * TELEGRAM_RETAIN_DAYS exists so that decision can be enforced once someone qualified has made it. Unset means keep,
+ * which is the archival default and the assumption that should be challenged rather than inherited. See TELEGRAM.md.
+ */
+const TG_DAYS = Number(process.env.TELEGRAM_RETAIN_DAYS ?? 0);
+if (TG_DAYS > 0) {
+  const tgCutoff = Date.now() - TG_DAYS * 86400_000;
+  console.log(`\n  TELEGRAM_RETAIN_DAYS=${TG_DAYS}: deleting channel messages posted before ${new Date(tgCutoff).toISOString().slice(0, 10)}`);
+  purge("tg_messages", `DELETE FROM tg_messages WHERE rowid IN (SELECT rowid FROM tg_messages WHERE posted_at < ? LIMIT ${BATCH})`, [tgCutoff]);
+} else {
+  console.log("\n  tg_messages: retained (TELEGRAM_RETAIN_DAYS unset). Retention is a legal decision; see TELEGRAM.md.");
+}
 
 if (VACUUM) {
   console.log("\n  VACUUM — reclaiming file space (this locks the database; the monitor will block until it finishes)");

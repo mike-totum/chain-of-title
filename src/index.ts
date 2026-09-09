@@ -726,6 +726,45 @@ if (telegramConfigured(config.telegramApiId, config.telegramApiHash) && channels
   tg = new TelegramWatcher(client, channels);
   tg.on("status", (m) => log("[tg]", m));
   tg.on("signal", (s) => handleSignal("telegram", s));
+  /**
+   * Store every message, not only the ones that named a token.
+   *
+   * The promotion layer is unrecoverable in exactly the way the launch image is: it exists while it is posted and
+   * not afterwards, and a deletion leaves nothing behind to find. The watcher has been reading these all along and
+   * discarding the ones that did not match a mint, because it was built to trade on them.
+   *
+   * Retained, never published. This does not go into servicedb and must not: the published record carries what a
+   * CREATOR claimed about their own launch, which is the subject's own statement and often the only surviving
+   * evidence of an impersonation. A channel message is someone else's expression, and most people amplifying a
+   * manufactured token were fooled by it rather than party to it — printing their words beside a fraud label under a
+   * DOI that cannot be withdrawn would make an accusation this project has no basis to make.
+   *
+   * Retention is a legal decision and not a technical one. TELEGRAM_RETAIN_DAYS exists so counsel can set one;
+   * unset means keep, which is the archival default and the assumption to challenge rather than to inherit. See
+   * TELEGRAM.md.
+   */
+  const tgInsert = db.prepare(`INSERT INTO tg_messages
+    (channel, msg_id, posted_at, fetched_at, sender, text, url, mints, cashtags, views, forwards, reply_to, edited_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(channel, msg_id) DO UPDATE SET
+      -- An edit is a new fact about an existing message, not a correction to the record of what was first posted.
+      -- Counters only ever climb; the original text stays.
+      views = MAX(COALESCE(excluded.views,0), COALESCE(tg_messages.views,0)),
+      forwards = MAX(COALESCE(excluded.forwards,0), COALESCE(tg_messages.forwards,0)),
+      edited_at = COALESCE(tg_messages.edited_at, excluded.edited_at)`);
+  let tgStored = 0;
+  tg.on("message", (m: any) => {
+    if (process.env.TELEGRAM_ARCHIVE !== "1") return;
+    try {
+      tgInsert.run(m.channel, m.id, m.postedAt ?? null, Date.now(), m.sender ?? null, m.text ?? null, m.url ?? null,
+        m.mints?.length ? m.mints.join(",") : null, m.cashtags?.length ? m.cashtags.join(",") : null,
+        m.views ?? null, m.forwards ?? null, m.replyTo ?? null, m.editedAt ?? null);
+      if (++tgStored % 100 === 0) log(`[tg] ${tgStored} messages archived this run`);
+    } catch (e) {
+      // Never fatal: this runs inside the process whose only real obligation is to keep watching launches.
+      log(`[tg] archive write failed: ${(e as Error).message}`);
+    }
+  });
   const tgRef = tg;
   tg.start()
     .then(() => {
@@ -848,7 +887,17 @@ const RETENTION_DAYS = Number(process.env.RETENTION_DAYS || 14);
  * chain, but only an archival node can reach back for them, and by then we are reconstructing what we watched.
  */
 const KEEP_EVIDENCE = KEEP_TRADE_EVIDENCE;
+let prunedHoldLogged = false;
 function pruneWorkingData(): void {
+  /**
+   * Legal hold, honoured here as well as in prune.ts. A rule that holds in only one of two pruners is not a rule -
+   * the same lesson KEEP_TRADE_EVIDENCE learned - and this is the pruner that actually runs unattended in the cloud,
+   * deleting millions of trade rows a day. See prune.ts for why the window matters.
+   */
+  if ((process.env.LEGAL_HOLD ?? "").trim()) {
+    if (!prunedHoldLogged) { prunedHoldLogged = true; log(`[prune] LEGAL HOLD set — retention suspended, nothing will be deleted`); }
+    return;
+  }
   const cutoff = Date.now() - RETENTION_DAYS * 86400_000;
   const batch = 50_000;
   let removed = 0;

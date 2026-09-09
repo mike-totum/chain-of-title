@@ -179,6 +179,28 @@ export function openDb(path: string, opts: { migrate?: boolean } = {}): Database
       PRIMARY KEY (mint, sha256)
     );
     CREATE INDEX IF NOT EXISTS platform_fetched ON platform_snapshots(fetched_at);
+    -- Telegram messages from the watched channels, kept whole.
+    --
+    -- The watcher already read every one of these and threw away any that did not name a token, because it was built
+    -- to generate trading signals and that thesis is dead. What it was discarding is the promotion layer: what was
+    -- said about a launch, by whom, and when — which is unrecoverable the moment it is deleted, and deletion is
+    -- itself the event most worth having recorded.
+    --
+    -- THIS TABLE IS NEVER PUBLISHED. It is not in servicedb and must not be added to it. The published record is the
+    -- creator's own claims about their own launch; this is other people's expression, and most people amplifying a
+    -- manufactured token were fooled by it rather than party to it. Collect, retain, disclose only on lawful
+    -- request. See TELEGRAM.md for the purpose, lawful basis and retention question, which is a legal decision and
+    -- not a technical one.
+    CREATE TABLE IF NOT EXISTS tg_messages (
+      channel TEXT NOT NULL, msg_id INTEGER NOT NULL,
+      posted_at INTEGER, fetched_at INTEGER,
+      sender TEXT, text TEXT, url TEXT,
+      mints TEXT, cashtags TEXT,
+      views INTEGER, forwards INTEGER, reply_to INTEGER, edited_at INTEGER,
+      PRIMARY KEY (channel, msg_id)
+    );
+    CREATE INDEX IF NOT EXISTS tg_posted ON tg_messages(posted_at);
+    CREATE INDEX IF NOT EXISTS tg_mints ON tg_messages(mints);
   `);
   // `updated_at` is written on every token row update, but vault_sol is only replaced when a pool read actually
   // succeeded (COALESCE below). Reporting updated_at as the measurement time therefore advanced the timestamp while
