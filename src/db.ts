@@ -1,5 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { dirname } from "node:path";
 import type { TokenState } from "./tracker.ts";
 
@@ -322,6 +323,29 @@ export function openDb(path: string, opts: { migrate?: boolean } = {}): Database
    * store" is told apart from "never fetched". Never truncated: half a JSON document is not a JSON document.
    */
   try { db.exec("ALTER TABLE tokens ADD COLUMN meta_json TEXT"); } catch {}
+  /**
+   * The commitment to the document, stored where the document is read rather than computed when the record is built.
+   *
+   * It existed only in `record.db`, produced by `servicedb` as `sha256(meta_json)` — and `TOKEN_COLUMNS` names it.
+   * So every query built from TOKEN_COLUMNS threw `no such column: meta_sha256` against the collector, which is the
+   * database the collector queries. That took out `/launch/<mint>` with an HTTP 500 and, with it, the live lookup
+   * the web service depends on to answer about a token launched moments ago.
+   *
+   * The cost of that was the exact failure the endpoint was written to fix, and its own comment describes it as
+   * "the worst failure this product has": a launch we watched from its creation transaction, answered with
+   * `UNKNOWN — Launch not observed` for the first hours of its life, during the only window when anyone is asking.
+   * It was reintroduced silently by adding a column to a shared column list that only one of the two databases had.
+   *
+   * A column list shared by two schemas is a claim that both schemas satisfy it. Nothing checked that claim.
+   */
+  try { db.exec("ALTER TABLE tokens ADD COLUMN meta_sha256 TEXT"); } catch {}
+  // Registered on every connection openDb hands out, so the write paths below and the backfill can both use it.
+  try {
+    db.function("sha256", (v: unknown) => (v == null ? null : createHash("sha256").update(String(v), "utf8").digest("hex")));
+  } catch {}
+  // Paired backfill: a column added without one leaves every existing row NULL while the value sits in the source,
+  // which is this codebase's most repeated bug. Cheap and self-terminating — it touches only rows holding a document.
+  try { db.exec("UPDATE tokens SET meta_sha256 = sha256(meta_json) WHERE meta_sha256 IS NULL AND meta_json IS NOT NULL"); } catch {}
   try { db.exec("ALTER TABLE tokens ADD COLUMN meta_bytes INTEGER"); } catch {}
   /**
    * Backfill from evidence already on the row. This is not a guess about history: every one of these rows has a pool
@@ -387,6 +411,8 @@ export function upsertToken(db: DatabaseSync, t: TokenState): void {
       image=COALESCE(tokens.image, excluded.image), description=COALESCE(tokens.description, excluded.description),
       meta_at=COALESCE(tokens.meta_at, excluded.meta_at),
       meta_json=COALESCE(tokens.meta_json, excluded.meta_json), meta_bytes=COALESCE(tokens.meta_bytes, excluded.meta_bytes),
+      -- Kept beside the document it commits to, so the two can never disagree about which document we read.
+      meta_sha256=COALESCE(tokens.meta_sha256, CASE WHEN excluded.meta_json IS NOT NULL THEN sha256(excluded.meta_json) END),
       kol_signals=excluded.kol_signals, pool=COALESCE(excluded.pool, tokens.pool), amm_trusted=COALESCE(excluded.amm_trusted, tokens.amm_trusted),
       -- vault_sol and vault_at move together or not at all: a kept balance keeps the time it was read.
       vault_sol=COALESCE(excluded.vault_sol, tokens.vault_sol),
