@@ -1137,18 +1137,45 @@ const server = createServer(async (req, res) => {
         }
         return null;
       })();
-      // A picture we do not hold is a 404 and nothing else. Never a placeholder that could be mistaken for evidence.
-      if (!hit) return send(404, "not held", "text/plain; charset=utf-8", "none");
-      const type = ({ webp: "image/webp", png: "image/png", jpg: "image/jpeg", gif: "image/gif",
-        svg: "image/svg+xml", avif: "image/avif" } as Record<string, string>)[hit.ext] ?? "application/octet-stream";
-      res.writeHead(200, {
+      /**
+       * Locally if we have it, otherwise from the collector over the private network.
+       *
+       * The bytes live on the COLLECTOR's volume, because that is the process that captured them, and this service
+       * has no volume. Reading only from the local directory meant serving whatever pictures happened to be in the
+       * build context of whichever machine deployed — the laptop back in the publish path, and ~570 MB a day of
+       * images inside a container image. The local branch stays because it is right in development and on any deploy
+       * that does carry files; the fallback is what makes production honest.
+       */
+      const headers = (type: string, len: number) => ({
         "content-type": type,
+        "content-length": String(len),
         "cache-control": "public, max-age=31536000, immutable",
         // Operator-supplied bytes. Never let them execute or be framed, whatever the content type claims.
         "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
         "x-content-type-options": "nosniff",
       });
-      return res.end(readFileSync(hit.p));
+      const TYPES_BY_EXT: Record<string, string> = { webp: "image/webp", png: "image/png", jpg: "image/jpeg",
+        gif: "image/gif", svg: "image/svg+xml", avif: "image/avif" };
+      if (hit) {
+        const buf = readFileSync(hit.p);
+        res.writeHead(200, headers(TYPES_BY_EXT[hit.ext] ?? "application/octet-stream", buf.length));
+        return res.end(buf);
+      }
+      if (HEALTH_URL) {
+        try {
+          const r = await fetch(HEALTH_URL.replace(/\/health$/, `/image/${sha}`), { signal: AbortSignal.timeout(15_000) });
+          if (r.ok) {
+            const buf = Buffer.from(await r.arrayBuffer());
+            res.writeHead(200, headers(r.headers.get("content-type") ?? "application/octet-stream", buf.length));
+            return res.end(buf);
+          }
+          // 404 from the store is "we never captured it", which is a different answer from "the store is down" and
+          // must not be cached as though it were settled.
+          if (r.status !== 404) return send(502, "image store unavailable", "text/plain; charset=utf-8", "none");
+        } catch { return send(502, "image store unreachable", "text/plain; charset=utf-8", "none"); }
+      }
+      // A picture we do not hold is a 404 and nothing else. Never a placeholder that could be mistaken for evidence.
+      return send(404, "not held", "text/plain; charset=utf-8", "none");
     }
 
     if (safe === "/index.html") return send(200, renderHome(), "text/html; charset=utf-8", "short");
@@ -1163,38 +1190,6 @@ const server = createServer(async (req, res) => {
      */
     if (isFile(file)) return send(200, readFileSync(file), TYPES[safe.slice(safe.lastIndexOf("."))] ?? "application/octet-stream", "short");
 
-    /**
-     * The launch image we captured, by content hash, proxied from the collector.
-     *
-     * Never the creator's URI. A page reporting what a launch claimed AT BIRTH must not render whatever that URI
-     * serves today — the operator can repoint or unpin it, and this site showing the current picture under a
-     * historical heading would be its own besetting error, committed on the page that exists to report it.
-     *
-     * The bytes live on the collector's volume because that is the process that captured them; this service has no
-     * volume, and shipping them in the build context would put whichever laptop deploys back in the publish path at
-     * ~570 MB a day. Same private network the record travels over.
-     *
-     * Cached immutable: the URL is the hash, so the bytes behind it can never change. If they ever did, the
-     * collector refuses to serve them at all rather than answering under a content address it cannot honour.
-     */
-    const capturedImage = safe.match(/^\/i\/([0-9a-f]{64})$/);
-    if (capturedImage && HEALTH_URL) {
-      try {
-        const r = await fetch(HEALTH_URL.replace(/\/health$/, `/image/${capturedImage[1]}`), { signal: AbortSignal.timeout(15_000) });
-        if (!r.ok) { res.writeHead(r.status === 404 ? 404 : 502, { "content-type": "text/plain" }); return res.end(r.status === 404 ? "not held" : "image store unavailable"); }
-        const buf = Buffer.from(await r.arrayBuffer());
-        res.writeHead(200, {
-          "content-type": r.headers.get("content-type") ?? "application/octet-stream",
-          "content-length": String(buf.length),
-          "cache-control": "public, max-age=31536000, immutable",
-        });
-        return res.end(buf);
-      } catch (e) {
-        res.writeHead(502, { "content-type": "text/plain" });
-        return res.end("image store unreachable");
-      }
-    }
-    if (capturedImage) { res.writeHead(503, { "content-type": "text/plain" }); return res.end("no image store configured"); }
 
     // The archive itself. Served from the image rather than copied into the static tree, and cached hard because it
     // is rebuilt on deploy — a public good nobody has to ask for.
