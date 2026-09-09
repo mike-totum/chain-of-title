@@ -296,7 +296,7 @@ ${body}
 </main>
 <footer class="band-bot"><div class="shell"><div class="note"><a href="${root}method.html">How this is decided</a> · <a href="${root}corrections.html">Tell us we are wrong</a> · <a href="${root}data.html">Take the data</a> · <a href="${root}api.html">API</a> · <a href="${root}pledge.html">Pledge</a> · <a href="${root}index.html">${BRAND}</a><br>
 The documented history of a token from its first block. Coverage begins ${c.coverageFrom}${c.gapMin >= 1 ? `, with ${fmt(c.gapMin)} min of recorded downtime` : ", no recorded downtime"}.
-Everything here is read from the Solana chain and can be checked against it. A clean record means a launch was <b>not manufactured</b>. It is not a prediction and not advice.
+Everything here is read from the Solana chain. Where we recorded a launch's creation transaction, its page cites it and you can check every figure yourself; where we did not, the page says so. A clean record means a launch was <b>not manufactured</b>. It is not a prediction and not advice.
 Most tokens lose money regardless: of 19,412 bonding-curve positions measured, none reached 5x.
 <div class="who">Kept by <b>${esc(KEEPER)}</b> · <a href="mailto:${esc(CONTACT)}">${esc(CONTACT)}</a>${SOURCE_URL ? ` · <a href="${esc(SOURCE_URL)}">Source</a>` : ""}<br>
 Free to use, with no account and no wallet connection. The archive is public domain (<a href="${root}data.html">CC0</a>) and
@@ -544,7 +544,15 @@ export function tokenBody(
         This sentence does the liability work, and it used to sit in the footer, roughly 1,300px below the verdict it
         qualifies, on a page whose entire job is to deliver one verdict. Scope belongs with the claim.
       */ ""}
-    <p class="vscope">A record of what this launch was at birth, read from the Solana chain and checkable against it.
+    ${/*
+        Conditional, because the page knows the answer and a blanket promise is false on the launches that most need
+        the reader's scepticism. 24,494 launches carry no creation transaction — their trade rows were pruned before
+        we began keeping it — and telling their readers the figures are checkable, on a page that offers nothing to
+        check them with, is the same overclaim this project exists to report in other people.
+      */ ""}
+    <p class="vscope">A record of what this launch was at birth, read from the Solana chain. ${t.create_sig
+      ? `The transaction it was decoded from is cited below: every figure here can be checked against the chain without trusting us.`
+      : `We did not record its creation transaction, so these figures rest on our observation at the time rather than on a citation you can follow.`}
     Not a prediction and not advice: most tokens lose money regardless.</p>
     <div class="addr">
       <span class="mono" id="mint">${esc(t.mint)}</span>

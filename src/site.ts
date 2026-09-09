@@ -213,9 +213,10 @@ const labelled = (() => {
 
 writeFileSync(join(OUT, "method.html"), page("How this is decided", `
   <h1 class="headline">How a claim on this site is decided</h1>
-  <p class="lede">Everything here is read from the Solana chain and can be checked against it. This page states what is
-  recorded, how the one judgement we make is defined, what was done to test it, and, the part that matters most,
-  what we refuse to say.</p>
+  <p class="lede">Everything here is read from the Solana chain. Where we recorded a launch's creation transaction,
+  its record cites it and you can decode it yourself rather than take our figures on trust; where we did not, the
+  record says so and the figures rest on our observation at the time. This page states what is recorded, how the one
+  judgement we make is defined, what was done to test it, and, the part that matters most, what we refuse to say.</p>
 
   <div class="sec"><h2>What is recorded, and when</h2></div>
   <p class="lede">A collector decodes the pump.fun program's own events as they happen and writes down, for every
