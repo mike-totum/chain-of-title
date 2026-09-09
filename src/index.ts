@@ -1246,6 +1246,7 @@ if (process.env.PLATFORM_CAPTURE === "1") {
  */
 if (process.env.CONFIRM_SWEEP === "1") {
   const EVERY_MS = Number(process.env.CONFIRM_EVERY_MINUTES ?? 15) * 60_000;
+  let pass = 0;
   const LIMIT = Number(process.env.CONFIRM_LIMIT ?? 500);
   const BATCH = Number(process.env.CONFIRM_BATCH ?? 100);
   let running = false;
@@ -1254,7 +1255,15 @@ if (process.env.CONFIRM_SWEEP === "1") {
     running = true;
     try {
       const { confirmGraduations } = await import("./confirm.ts");
-      const st = await confirmGraduations(db, { limit: LIMIT, batch: BATCH, log: () => {} });
+      /**
+       * Alternate ends. Newest-first stops today's graduations accumulating unconfirmed; oldest-first works the
+       * backlog, where the yield is far higher — measured 2026-09-09, the newest 2,000 unconfirmed returned 9
+       * completions and the oldest 2,000 returned 824, because the old end is where pool discovery was blind and
+       * the new end is mostly the vSOL inference firing on curves that never completed. Running only one end would
+       * either let the front edge rot or never reach the backlog.
+       */
+      pass++;
+      const st = await confirmGraduations(db, { limit: LIMIT, batch: BATCH, order: pass % 2 ? "newest" : "oldest", log: () => {} });
       if (st.read > 0)
         log(`[confirm] ${st.confirmed} confirmed, ${st.notComplete} not complete, ${st.missing} account gone, ` +
           `${st.unreadable} unreadable, of ${st.candidates} due`);
@@ -1263,6 +1272,37 @@ if (process.env.CONFIRM_SWEEP === "1") {
     } finally { running = false; }
   };
   setTimeout(() => void run(), 120_000);
+  setInterval(() => void run(), EVERY_MS);
+}
+
+/**
+ * Fill in the creation transaction for launches recorded before we kept it, in the cloud rather than by hand.
+ *
+ * This is a race against retention, not a one-off migration. `trades` holds about seven days, and the creator's
+ * first-block row is the only local source for `create_sig`, so every launch has a window in which its citation can
+ * still be recovered and after which only an archival node can return it. Run once from a laptop it recovered
+ * 181,474 launches and arrived too late for 24,494. On a timer here it reaches each launch inside the window.
+ *
+ * Cheap and self-terminating: it writes only where `create_sig IS NULL` and a matching trade row exists, so once
+ * caught up every pass does nothing. Bounded batches, because the process this runs inside must not stop ingesting.
+ */
+if (process.env.BACKFILL_SIG === "1") {
+  const EVERY_MS = Number(process.env.BACKFILL_SIG_EVERY_MINUTES ?? 30) * 60_000;
+  const BATCH = Number(process.env.BACKFILL_SIG_BATCH ?? 5000);
+  const MAX_BATCHES = Number(process.env.BACKFILL_SIG_MAX_BATCHES ?? 4);
+  let running = false;
+  const run = async () => {
+    if (running) return;
+    running = true;
+    try {
+      const { backfillCreateSig } = await import("./backfillsig.ts");
+      const st = backfillCreateSig(db, { batch: BATCH, maxBatches: MAX_BATCHES });
+      if (st.wrote) log(`[createsig] recovered ${st.wrote} creation transactions in ${st.batches} batches`);
+    } catch (e) {
+      log(`[createsig] backfill failed: ${(e as Error).message}`);
+    } finally { running = false; }
+  };
+  setTimeout(() => void run(), 180_000);
   setInterval(() => void run(), EVERY_MS);
 }
 

@@ -11,84 +11,88 @@
  * why nothing looser is accepted here. A `is_dev` trade at age_ms > 0 is a later purchase by the creator and proves
  * nothing about the first block; taking it would attach a citation that does not support the claim beside it.
  *
- * **This is a race, and it is being lost.** `trades` is under retention — about seven days at present volume — so a
- * launch's creation signature survives locally only until its trade rows are pruned. Measured when this was written:
- * 181,231 of 205,697 launches still recoverable, but only 5,498 of 7,026 confirmed graduations, the other 1,528
- * already gone. Roughly 25,000 launches age out per day. Run this now rather than well; what it misses is
- * recoverable only from an archival node, at a cost.
+ * **This is a race against retention, so it belongs in the collector rather than in a person's terminal.** `trades`
+ * holds roughly seven days at present volume, so a launch's creation signature survives locally only until its trade
+ * rows are pruned. Run once by hand on the laptop it recovered 181,474 of 206,019 launches and missed 24,494 whose
+ * rows had already gone. In the collector (`BACKFILL_SIG=1`) it runs on a timer and reaches each launch while the
+ * evidence is still there, which is the difference between a backfill and a permanent hole.
  *
  *   npm run backfillsig -- --dry-run
  *   npm run backfillsig
  *
- * It is idempotent and never overwrites: only rows where `create_sig IS NULL` are touched.
+ * Idempotent and never overwrites: only rows where `create_sig IS NULL` are touched.
  */
+import type { DatabaseSync } from "node:sqlite";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { config } from "./config.ts";
 import { openDb } from "./db.ts";
 
-const DRY = process.argv.includes("--dry-run");
-const arg = (k: string, d: string) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : d; };
-const BATCH = Number(arg("--batch", "20000"));
-
-const db = openDb(config.dbPath);
-
-const count = (sql: string): number => (db.prepare(sql).get() as any).c as number;
-
-const total = count("SELECT COUNT(*) c FROM tokens");
-const missing = count("SELECT COUNT(*) c FROM tokens WHERE create_sig IS NULL");
-const recoverable = count(`SELECT COUNT(*) c FROM tokens t WHERE t.create_sig IS NULL AND EXISTS (
-  SELECT 1 FROM trades tr WHERE tr.mint = t.mint AND tr.is_dev = 1 AND tr.age_ms = 0 AND tr.sig IS NOT NULL)`);
-const gradMissing = count(`SELECT COUNT(*) c FROM tokens WHERE create_sig IS NULL AND graduated_confirmed_by IS NOT NULL`);
-const gradRecoverable = count(`SELECT COUNT(*) c FROM tokens t WHERE t.create_sig IS NULL
-  AND t.graduated_confirmed_by IS NOT NULL AND EXISTS (
-  SELECT 1 FROM trades tr WHERE tr.mint = t.mint AND tr.is_dev = 1 AND tr.age_ms = 0 AND tr.sig IS NOT NULL)`);
-
-console.log(`${total.toLocaleString()} launches, ${missing.toLocaleString()} without a creation transaction`);
-console.log(`  recoverable from trade rows we still hold : ${recoverable.toLocaleString()}`);
-console.log(`  already pruned, archival RPC only         : ${(missing - recoverable).toLocaleString()}`);
-console.log(`confirmed graduations missing one: ${gradMissing.toLocaleString()}, of which ${gradRecoverable.toLocaleString()} recoverable\n`);
-
-if (DRY) {
-  console.log("dry run: nothing written");
-  process.exit(0);
-}
+export interface SigBackfillStats { wrote: number; batches: number }
 
 /**
- * Written in batches inside short transactions rather than as one statement over 180,000 rows.
+ * Fill `create_sig`/`create_slot` from the creator's first-block trade, in bounded batches.
  *
- * The collector is normally running against this file and a single multi-minute write transaction would hold the
- * write lock across it, which costs dropped launches — the one loss here that cannot be repaired. `updated_at` moves
- * with the write so `servicedb`'s incremental copy carries the row into the published record; omitting that is how
- * 940 confirmations sat in the collector and never reached the public archive earlier today.
+ * `updated_at` moves with the write. `servicedb` copies incrementally on that column, so a row filled without
+ * touching it stays in the collector and never reaches the published record — which happened twice on 2026-09-09,
+ * once losing 940 confirmations and once losing 180,951 signatures. The paired-backfill list in servicedb.ts is the
+ * belt to this brace; neither is sufficient alone, because a crashed build can leave the watermark ahead of writes
+ * that already happened.
+ *
+ * One short transaction per batch, because the collector is normally ingesting against this same file and its only
+ * real obligation is not to drop a launch.
  */
-let done = 0, wrote = 0;
-for (;;) {
-  const t0 = Date.now();
-  db.prepare("BEGIN IMMEDIATE").run();
-  let n = 0;
-  try {
-    const r = db.prepare(`UPDATE tokens SET
-        create_sig = (SELECT tr.sig FROM trades tr WHERE tr.mint = tokens.mint AND tr.is_dev = 1 AND tr.age_ms = 0 AND tr.sig IS NOT NULL LIMIT 1),
-        create_slot = COALESCE(create_slot, (SELECT tr.slot FROM trades tr WHERE tr.mint = tokens.mint AND tr.is_dev = 1 AND tr.age_ms = 0 AND tr.sig IS NOT NULL LIMIT 1)),
-        updated_at = ?
-      WHERE mint IN (
-        SELECT t.mint FROM tokens t WHERE t.create_sig IS NULL AND EXISTS (
-          SELECT 1 FROM trades tr WHERE tr.mint = t.mint AND tr.is_dev = 1 AND tr.age_ms = 0 AND tr.sig IS NOT NULL)
-        LIMIT ?)`).run(Date.now(), BATCH);
-    n = Number(r.changes);
-    db.prepare("COMMIT").run();
-  } catch (e) {
-    try { db.prepare("ROLLBACK").run(); } catch {}
-    throw e;
+export function backfillCreateSig(db: DatabaseSync, opts: { batch?: number; maxBatches?: number } = {}): SigBackfillStats {
+  const batch = opts.batch ?? 20_000;
+  const maxBatches = opts.maxBatches ?? Infinity;
+  let wrote = 0, batches = 0;
+  for (; batches < maxBatches;) {
+    db.prepare("BEGIN IMMEDIATE").run();
+    let n = 0;
+    try {
+      const r = db.prepare(`UPDATE tokens SET
+          create_sig = (SELECT tr.sig FROM trades tr WHERE tr.mint = tokens.mint AND tr.is_dev = 1 AND tr.age_ms = 0 AND tr.sig IS NOT NULL LIMIT 1),
+          create_slot = COALESCE(create_slot, (SELECT tr.slot FROM trades tr WHERE tr.mint = tokens.mint AND tr.is_dev = 1 AND tr.age_ms = 0 AND tr.sig IS NOT NULL LIMIT 1)),
+          updated_at = ?
+        WHERE mint IN (
+          SELECT t.mint FROM tokens t WHERE t.create_sig IS NULL AND EXISTS (
+            SELECT 1 FROM trades tr WHERE tr.mint = t.mint AND tr.is_dev = 1 AND tr.age_ms = 0 AND tr.sig IS NOT NULL)
+          LIMIT ?)`).run(Date.now(), batch);
+      n = Number(r.changes);
+      db.prepare("COMMIT").run();
+    } catch (e) {
+      try { db.prepare("ROLLBACK").run(); } catch {}
+      throw e;
+    }
+    if (n === 0) break;
+    wrote += n; batches++;
   }
-  if (n === 0) break;
-  wrote += n; done++;
-  console.log(`  batch ${done}: ${n.toLocaleString()} rows in ${Date.now() - t0} ms (${wrote.toLocaleString()} total)`);
+  return { wrote, batches };
 }
 
-const after = count("SELECT COUNT(*) c FROM tokens WHERE create_sig IS NOT NULL");
-const afterGrad = count("SELECT COUNT(*) c FROM tokens WHERE create_sig IS NOT NULL AND graduated_confirmed_by IS NOT NULL");
-console.log(`\nwrote ${wrote.toLocaleString()}`);
-console.log(`launches now citing a creation transaction: ${after.toLocaleString()} of ${total.toLocaleString()}`);
-console.log(`confirmed graduations citing one:           ${afterGrad.toLocaleString()}`);
-const stillMissing = count("SELECT COUNT(*) c FROM tokens WHERE create_sig IS NULL AND graduated_confirmed_by IS NOT NULL");
-if (stillMissing) console.log(`\n${stillMissing.toLocaleString()} confirmed graduations remain without one. Their trade rows are gone;\nonly an archival node can return them, and no further local run will help.`);
+// ---------- CLI ----------
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const DRY = process.argv.includes("--dry-run");
+  const arg = (k: string, d: string) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : d; };
+  const db = openDb(config.dbPath);
+  const count = (sql: string): number => (db.prepare(sql).get() as any).c as number;
+
+  const total = count("SELECT COUNT(*) c FROM tokens");
+  const missing = count("SELECT COUNT(*) c FROM tokens WHERE create_sig IS NULL");
+  const recoverable = count(`SELECT COUNT(*) c FROM tokens t WHERE t.create_sig IS NULL AND EXISTS (
+    SELECT 1 FROM trades tr WHERE tr.mint = t.mint AND tr.is_dev = 1 AND tr.age_ms = 0 AND tr.sig IS NOT NULL)`);
+  const gradMissing = count(`SELECT COUNT(*) c FROM tokens WHERE create_sig IS NULL AND graduated_confirmed_by IS NOT NULL`);
+
+  console.log(`${total.toLocaleString()} launches, ${missing.toLocaleString()} without a creation transaction`);
+  console.log(`  recoverable from trade rows we still hold : ${recoverable.toLocaleString()}`);
+  console.log(`  already pruned, archival RPC only         : ${(missing - recoverable).toLocaleString()}`);
+  console.log(`confirmed graduations missing one: ${gradMissing.toLocaleString()}\n`);
+  if (DRY) { console.log("dry run: nothing written"); process.exit(0); }
+
+  const st = backfillCreateSig(db, { batch: Number(arg("--batch", "20000")) });
+  const after = count("SELECT COUNT(*) c FROM tokens WHERE create_sig IS NOT NULL");
+  console.log(`wrote ${st.wrote.toLocaleString()} in ${st.batches} batches`);
+  console.log(`launches now citing a creation transaction: ${after.toLocaleString()} of ${total.toLocaleString()}`);
+  const stillMissing = count("SELECT COUNT(*) c FROM tokens WHERE create_sig IS NULL AND graduated_confirmed_by IS NOT NULL");
+  if (stillMissing) console.log(`\n${stillMissing.toLocaleString()} confirmed graduations remain without one. Their trade rows are gone;\nonly an archival node can return them, and no further local run will help.`);
+}
