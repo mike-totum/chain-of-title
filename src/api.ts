@@ -109,11 +109,20 @@ export function tokenRecord(
       graduationConfirmedBy: t.graduated_confirmed_by ?? null,
       graduatedAt: at(t.graduated_at),
       secondsToGraduate: gradMs === null ? null : Math.round(gradMs / 1000),
+      /**
+       * The transaction every field above was decoded from — the one carrying the creator's initial buy, and so the
+       * one `creatorSupplyPct` is computed from. Present for 88% of launches. **null means we did not record one**
+       * (the launch predates the field, or we found it late, or its trade rows aged out before we backfilled): it is
+       * never a claim that the launch has no creation transaction, and it must not be rendered as one.
+       */
+      transaction: t.create_sig ? { signature: t.create_sig, slot: t.create_slot ?? null } : null,
     } : null,
     curveBuyout: a.buyout ? {
       wallet: a.buyout.wallet,
       sol: a.buyout.sol,
       at: at(a.buyout.ts),
+      // The transaction the buyout was decoded from. null where retention removed the row before we published this.
+      signature: a.buyout.sig ?? null,
       secondsAfterLaunch: t.created_at ? Math.round((a.buyout.ts - t.created_at) / 1000) : null,
       priors: CANONICAL_HOST ? `${CANONICAL_HOST}/api/${API_VERSION}/wallet/${a.buyout.wallet}` : null,
     } : null,

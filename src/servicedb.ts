@@ -139,7 +139,12 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS rec.tokens_creator ON tokens(creator);
   -- only the curve buys large enough to be a buyout: findBuyout's whole input, 1,485 rows of 13.2 million
   CREATE TABLE IF NOT EXISTS rec.trades (
-    mint TEXT NOT NULL, wallet TEXT NOT NULL, side TEXT, sol REAL, ts INTEGER, slot INTEGER, venue TEXT, is_dev INTEGER
+    -- sig is the whole point of publishing these rows rather than a count. This table holds the curve buys large
+    -- enough to be a buyout, which is the most serious thing the record says about a launch — one wallet bought the
+    -- float and called it demand. Without the signature a reader has to take that on our word, on a record whose
+    -- own pages promise it can be checked against the chain. NULL where retention took the row before this existed.
+    mint TEXT NOT NULL, wallet TEXT NOT NULL, side TEXT, sol REAL, ts INTEGER, slot INTEGER, venue TEXT, is_dev INTEGER,
+    sig TEXT
   );
   CREATE INDEX IF NOT EXISTS rec.trades_mint ON trades(mint, ts);
   -- The image route refuses any hash the record does not attest, on every request; without this that is a scan of
@@ -223,6 +228,7 @@ try { db.exec("ALTER TABLE rec.tokens ADD COLUMN graduated_confirmed_by TEXT"); 
 // signatures would sit in the collector and never reach this file. See backfillsig.ts.
 try { db.exec("ALTER TABLE rec.tokens ADD COLUMN create_sig TEXT"); } catch {}
 try { db.exec("ALTER TABLE rec.tokens ADD COLUMN create_slot INTEGER"); } catch {}
+try { db.exec("ALTER TABLE rec.trades ADD COLUMN sig TEXT"); } catch {}
 /**
  * Upgrade the rows already in the file from evidence they already carry.
  *
@@ -414,8 +420,8 @@ try {
   // Named columns, not positional. `slot` is new, and on a record database built before it existed the ALTER above
   // appends it last — so a positional SELECT would quietly write the slot into `venue` on exactly the incremental
   // runs the collector actually does. Naming them makes physical column order irrelevant.
-  db.exec(`INSERT INTO rec.trades (mint, wallet, side, sol, ts, slot, venue, is_dev)
-    SELECT mint, wallet, side, sol, ts, slot, venue, COALESCE(is_dev,0)
+  db.exec(`INSERT INTO rec.trades (mint, wallet, side, sol, ts, slot, venue, is_dev, sig)
+    SELECT mint, wallet, side, sol, ts, slot, venue, COALESCE(is_dev,0), sig
     FROM main.trades WHERE venue='curve' AND side='buy' AND sol >= ${BUYOUT_SOL}`);
   /**
    * The AMM trades that `wallet_flow` is computed from, on the mints those wallets actually took.
@@ -429,8 +435,8 @@ try {
    * a second, larger claim. 1,916 rows measured 2026-09-08 against 10,773 for the wallet-wide version — small enough
    * that there was never a size reason not to publish it.
    */
-  db.exec(`INSERT INTO rec.trades (mint, wallet, side, sol, ts, slot, venue, is_dev)
-    SELECT t.mint, t.wallet, t.side, t.sol, t.ts, t.slot, t.venue, COALESCE(t.is_dev,0)
+  db.exec(`INSERT INTO rec.trades (mint, wallet, side, sol, ts, slot, venue, is_dev, sig)
+    SELECT t.mint, t.wallet, t.side, t.sol, t.ts, t.slot, t.venue, COALESCE(t.is_dev,0), t.sig
     FROM main.trades t
     JOIN (SELECT DISTINCT wallet, mint FROM main.trades
            WHERE venue='curve' AND side='buy' AND sol >= ${BUYOUT_SOL}) b

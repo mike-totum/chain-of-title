@@ -133,7 +133,7 @@ export type Assessment = {
 
 export const TOKEN_COLUMNS = `mint, symbol, name, creator, created_at, late_discovery, dev_pct, dev_sold, unique_buyers,
   snap30_buyers, bundled_buyers, graduated, graduated_at, pool, vault_sol, vault_at, last_price, updated_at,
-  rebuilt_at, rebuilt_complete, curve_buyers, venue, graduated_confirmed_by,
+  rebuilt_at, rebuilt_complete, curve_buyers, venue, graduated_confirmed_by, create_sig, create_slot,
   -- what the launch claimed to be, and our commitments to the documents behind it. Off-chain and mutable at the
   -- source, which is exactly why the record page shows them and why they are read from here rather than re-fetched.
   description, uri, image, meta_at, meta_sha256, meta_bytes, image_sha256, image_bytes`;

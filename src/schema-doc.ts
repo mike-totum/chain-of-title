@@ -87,6 +87,7 @@ const DOCS: Record<string, Record<string, Doc>> = {
     tokens: { kind: "ours", desc: "Number of curves this wallet took. Count the distinct mints in trades for this wallet and you will get this number." },
   },
   trades: {
+    sig: { kind: "chain", desc: "Signature of the transaction this trade was decoded from. Fetch it and you can verify the buyout for yourself — the single fact this record states most seriously about a launch, and the one it should least ask you to take on trust. NULL where retention removed the row before this column existed (2026-09-09); never a claim that no transaction exists." },
     mint: { kind: "chain", desc: "Token traded." },
     wallet: { kind: "chain", desc: "Wallet that traded." },
     side: { kind: "chain", desc: "'buy' or 'sell'." },

@@ -359,6 +359,16 @@ export type Reading = { sol: number; at: number; fresh: boolean };
  * The one-line finding a shared link should carry, and the title it should carry it under. Built from the record
  * only: if we cannot say what happened, the preview says that instead of implying anything.
  */
+/**
+ * A transaction, as a link a reader can actually follow.
+ *
+ * The record page has always ended every claim at our own assertion: it said the creator took 79.3% of supply and
+ * offered nothing to check that against, under a footer promising the figures "can be checked against it". A
+ * signature with an explorer link is what closes that gap, and it is the cheapest credibility this project can buy.
+ */
+const txLink = (sig: string) =>
+  `<a class="mono" href="https://solscan.io/tx/${esc(sig)}" rel="noopener">${esc(sig.slice(0, 22))}…</a>`;
+
 export function tokenPreview(t: any, a: Assessment, clean: boolean): { title: string; summary: string } {
   const sym = t.symbol ?? "This token";
   if (!a.watched)
@@ -452,14 +462,25 @@ export function tokenBody(
     <tr><td class="k">Creator took</td><td><b>${t.dev_pct?.toFixed(1) ?? "?"}%</b> of supply in the first block</td></tr>
     <tr><td class="k">Outside buyers</td><td><b>${a.curveBuyers === null ? "unknown" : fmt(a.curveBuyers)}</b> distinct wallets, not counting the creator, bought on the bonding curve before it graduated${origin === "observed" ? `: ${fmt(t.snap30_buyers ?? 0)} within the first 30s, ${fmt(t.bundled_buyers ?? 0)} bundled into the creation block.` : "."}</td></tr>
     <tr><td class="k">Graduated</td><td>${t.graduated_at ? `${curveAge(t.graduated_at - t.created_at)} after launch` : "yes"}</td></tr>
-    <tr><td class="k">Creator sold</td><td>${t.dev_sold ? "yes" : origin === "observed" ? "not while we watched" : "no"}</td></tr>`
+    <tr><td class="k">Creator sold</td><td>${t.dev_sold ? "yes" : origin === "observed" ? "not while we watched" : "no"}</td></tr>
+    ${/*
+        The transaction every figure above was decoded from. Absence is stated as ours, not the launch's: a launch
+        that predates this column, or whose trade rows retention took before the backfill reached them, has no
+        signature on file and that is a gap in our record rather than anything about the token.
+      */ ""}
+    <tr><td class="k">Recorded from</td><td>${t.create_sig
+      ? `${txLink(t.create_sig)}${t.create_slot ? ` <span class="sub">slot ${fmt(t.create_slot)}</span>` : ""}
+         <div class="sub">The transaction this record was decoded from. Every figure above is in it — fetch it and check us.</div>`
+      : `<span class="sub">Not recorded. This launch predates our keeping the creation transaction, or its trade rows were pruned before we backfilled it. The figures above stand on our contemporaneous observation alone, which is weaker, and we would rather say so.</span>`}</td></tr>`
     : `<tr><td class="k">Launch</td><td>Not observed. ${t.late_discovery ? "Found only after it was already trading." : "The collector was down when it launched."}</td></tr>`;
 
   const selfBought = !!a.buyout && !!t.creator && a.buyout.wallet === t.creator;
   const boBlock = a.buyout ? `<h2>Who took the curve</h2>
     <p class="mono"><a href="../w/${esc(a.buyout.wallet)}.html">${esc(a.buyout.wallet)}</a>${selfBought
       ? ` <b class="serif">— the creator's own wallet</b>` : ""}</p>
-    <p>Bought <b>${a.buyout.sol.toFixed(0)} SOL</b> of this curve in a single transaction${t.created_at ? `, ${curveAge(a.buyout.ts - t.created_at)}` : ""}.</p>
+    <p>Bought <b>${a.buyout.sol.toFixed(0)} SOL</b> of this curve in a single transaction${t.created_at ? `, ${curveAge(a.buyout.ts - t.created_at)}` : ""}.${
+      a.buyout.sig ? ` ${txLink(a.buyout.sig)}` : ""}</p>
+    ${a.buyout.sig && t.create_sig === a.buyout.sig ? `<p class="sub">That is the same transaction the token was created in: the launch and the purchase of its float are one signature.</p>` : ""}
     ${t.created_at && a.buyout.ts - t.created_at <= 0 ? `<p class="sub">Our launch and trade timestamps are both taken when the events are decoded, so events that arrived together carry the same one. That it was taken at or near launch is on the record; how many seconds after is not.</p>` : ""}` : "";
 
   /**

@@ -31,11 +31,14 @@ function stmts(dbh: any) {
   let s = buyoutStmts.get(dbh);
   if (!s) {
     s = {
-      live: dbh.prepare(`SELECT wallet, MAX(sol) sol, MIN(ts) ts FROM trades
+      // `sig` is bare beside an aggregate on purpose: SQLite guarantees a bare column in a MAX()/MIN() query comes
+      // from the row that supplied the extreme value, so this is the signature of the largest buy and not some other
+      // row's. That guarantee is specific to a single MAX or MIN, which is why it is spelled out rather than assumed.
+      live: dbh.prepare(`SELECT wallet, MAX(sol) sol, MIN(ts) ts, sig FROM trades
         WHERE mint = ? AND venue='curve' AND side='buy' AND sol >= ? GROUP BY wallet ORDER BY sol DESC LIMIT 1`),
       hist: (() => {
         try {
-          return dbh.prepare(`SELECT wallet, MAX(sol) sol, MIN(ts) ts FROM hist_trades
+          return dbh.prepare(`SELECT wallet, MAX(sol) sol, MIN(ts) ts, sig FROM hist_trades
             WHERE mint = ? AND side='buy' AND sol >= ? GROUP BY wallet ORDER BY sol DESC LIMIT 1`);
         } catch { return null; }
       })(),
@@ -45,7 +48,7 @@ function stmts(dbh: any) {
   return s;
 }
 
-export function findBuyout(dbh: any, mint: string, minSol = 40): { wallet: string; sol: number; ts: number } | null {
+export function findBuyout(dbh: any, mint: string, minSol = 40): { wallet: string; sol: number; ts: number; sig?: string | null } | null {
   const s = stmts(dbh);
   const live = s.live.get(mint, minSol) as any;
   if (live) return live;
