@@ -79,8 +79,18 @@ const insWallet = db.prepare(`INSERT INTO operator_wallets (wallet, funder, clus
  * useful, not required — so without them the pass does less and says nothing false.
  */
 const hasHistory = (): boolean => {
-  try { return !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name IN ('hist_tokens','hist_trades') LIMIT 1").get(); }
-  catch { return false; }
+  try {
+    /**
+     * BOTH tables, not either. The first version used `name IN (...) LIMIT 1`, which is true when only one exists —
+     * and that is exactly the collector's state: `seed.ts` creates `hist_trades` in the seed database and never
+     * `hist_tokens`, so the seeded collector has one of the two. The guard passed and the query on the missing table
+     * threw anyway, so the fix changed nothing and looked like a deploy that had not rolled out.
+     */
+    const n = (db.prepare(
+      "SELECT COUNT(*) c FROM sqlite_master WHERE type='table' AND name IN ('hist_tokens','hist_trades')")
+      .get() as any).c as number;
+    return n === 2;
+  } catch { return false; }
 };
 
 const clusterName = (funder: string) => funder.slice(0, 6);
