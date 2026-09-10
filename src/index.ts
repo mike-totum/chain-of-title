@@ -1172,22 +1172,38 @@ startHeartbeat(process.env.HEARTBEAT_URL ?? "", 5 * 60_000, "collector");
  * ingestion, and the slow part is awaited network I/O, which blocks nothing.
  *
  * Bounded so a bad hour stays bounded: `IMAGES_LIMIT` rows per pass at `IMAGES_CONCURRENCY` in flight, every
- * `IMAGES_EVERY_MINUTES`. Default scope is graduated launches (~1,400/day) rather than all ~24,000, which is what
- * makes the storage arithmetic survivable — see the note in images.ts. Bytes go next to the database on the volume.
+ * `IMAGES_EVERY_MINUTES`. Bytes go to the object store when one is configured, and next to the database otherwise.
+ *
+ * THE DEFAULTS MUST BEAT THE LAUNCH RATE, and for two days they did not. They were sized when capture covered only
+ * graduated launches — about 1,400 a day — and 300 rows every 20 minutes is ample for that. Scope was then widened
+ * to every launch (`all: true` below, and it is the right call) without resizing the schedule: 900 an hour against
+ * roughly 1,070 launches an hour. A deficit of 171 an hour, 4,100 a day, growing forever.
+ *
+ * It was invisible because every pass reported success. "kept 300 of 300 pending" is what falling behind looks like
+ * from inside a pass that can only see its own slice, which is why `backlog` is now in the stats and in this log
+ * line: the number that can show the fault is the total, and no pass-level figure can substitute for it.
  */
 if (process.env.IMAGES_CAPTURE === "1") {
   const IMAGES_DIR = process.env.IMAGES_DIR ?? (config.dbPath.replace(/[^/]*$/, "") + "images");
-  const IMAGES_EVERY_MS = Number(process.env.IMAGES_EVERY_MINUTES ?? 20) * 60_000;
-  const IMAGES_LIMIT = Number(process.env.IMAGES_LIMIT ?? 300);
-  const IMAGES_CONCURRENCY = Number(process.env.IMAGES_CONCURRENCY ?? 4);
+  const IMAGES_EVERY_MS = Number(process.env.IMAGES_EVERY_MINUTES ?? 10) * 60_000;
+  const IMAGES_LIMIT = Number(process.env.IMAGES_LIMIT ?? 400);
+  const IMAGES_CONCURRENCY = Number(process.env.IMAGES_CONCURRENCY ?? 8);
+  /**
+   * The backlog pass, oldest-first. Separate from the fresh pass because they are on different clocks: keeping up
+   * is continuous, draining is finite and urgent. Set to 0 to run only the fresh pass.
+   */
+  const IMAGES_BACKLOG_LIMIT = Number(process.env.IMAGES_BACKLOG_LIMIT ?? IMAGES_LIMIT);
+  /** Highest backlog seen, so the log can say which direction it is moving without keeping a history. */
+  let backlogWas: number | null = null;
   let capturing = false;
   const capture = async () => {
     if (capturing) return;
     capturing = true;
     try {
       const { captureImages } = await import("./images.ts");
+      const common = { dir: IMAGES_DIR, concurrency: IMAGES_CONCURRENCY, log: () => {} };
       const st = await captureImages(db, {
-        dir: IMAGES_DIR, limit: IMAGES_LIMIT, concurrency: IMAGES_CONCURRENCY, log: () => {},
+        ...common, limit: IMAGES_LIMIT, order: "newest" as const,
         /**
          * Every launch, not only the ones that graduated.
          *
@@ -1202,9 +1218,33 @@ if (process.env.IMAGES_CAPTURE === "1") {
          */
         all: true,
       });
-      if (st.attempted > 0)
-        log(`[images] kept ${st.kept} (${(st.bytes / 1048576).toFixed(1)} MB, ${st.reused} already held), ` +
-          `skipped ${st.skipped}, failed ${st.failed}, of ${st.attempted} pending → ${IMAGES_DIR}`);
+      /**
+       * Then the other end. A launch from two days ago whose picture is still unfetched is closer to losing its pin
+       * than one from two minutes ago, and under the old single-ended order it was never going to be asked for.
+       */
+      const bl = IMAGES_BACKLOG_LIMIT > 0
+        ? await captureImages(db, { ...common, limit: IMAGES_BACKLOG_LIMIT, order: "oldest" as const, all: true })
+        : null;
+
+      const kept = st.kept + (bl?.kept ?? 0);
+      const bytes = st.bytes + (bl?.bytes ?? 0);
+      const attempted = st.attempted + (bl?.attempted ?? 0);
+      const backlog = bl?.backlog ?? st.backlog;
+      if (attempted > 0) {
+        const moved = backlogWas === null ? "" : ` (${backlog > backlogWas ? "+" : ""}${backlog - backlogWas} since last pass)`;
+        log(`[images] kept ${kept} (${(bytes / 1048576).toFixed(1)} MB, ${st.reused + (bl?.reused ?? 0)} already held), ` +
+          `failed ${st.failed + (bl?.failed ?? 0)}, of ${attempted} tried → ${IMAGES_DIR}; ` +
+          `backlog ${backlog.toLocaleString()}${moved}`);
+        /**
+         * Said as a fault, not as a statistic. A backlog that grows across a pass means the schedule is below the
+         * launch rate, and every hour it stays there is a fixed number of launches whose picture nobody will ever
+         * hold — the one loss in this project that a later pass cannot repair.
+         */
+        if (backlogWas !== null && backlog > backlogWas)
+          log(`[images] FALLING BEHIND: capture is slower than launches arrive. Raise IMAGES_LIMIT or lower ` +
+              `IMAGES_EVERY_MINUTES; at this rate the pictures in the gap will not be recoverable.`);
+        backlogWas = backlog;
+      }
     } catch (e) {
       // Never fatal. Losing images is bad; losing ingestion is worse, and this runs in the ingesting process.
       log(`[images] capture failed: ${(e as Error).message}`);

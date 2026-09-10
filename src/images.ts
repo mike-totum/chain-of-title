@@ -42,7 +42,11 @@ const EXT: Record<string, string> = {
   "image/webp": "webp", "image/svg+xml": "svg", "image/avif": "avif",
 };
 
-export type CaptureStats = { attempted: number; kept: number; skipped: number; failed: number; bytes: number; reused: number };
+export type CaptureStats = {
+  attempted: number; kept: number; skipped: number; failed: number; bytes: number; reused: number;
+  /** Everything still uncaptured, not just this pass. The number that says whether we are keeping up. */
+  backlog: number;
+};
 
 /**
  * Capture the pending launch images into `dir`, recording the sha256 on each row.
@@ -60,7 +64,7 @@ export type CaptureStats = { attempted: number; kept: number; skipped: number; f
  */
 export async function captureImages(
   db: DatabaseSync,
-  opts: { dir: string; limit: number; concurrency: number; all?: boolean; log?: (s: string) => void } =
+  opts: { dir: string; limit: number; concurrency: number; all?: boolean; order?: "newest" | "oldest"; log?: (s: string) => void } =
     { dir: "data/images", limit: 500, concurrency: 6 },
 ): Promise<CaptureStats> {
   const log = opts.log ?? ((s: string) => console.log(s));
@@ -72,14 +76,37 @@ export async function captureImages(
    * matters less than recording what we tried, so the URL is used as declared and any failure is written down rather
    * than retried forever: `image_error` is how a permanently dead pin stops costing a request on every run.
    */
+  /**
+   * Which end of the backlog this pass works on, and why the choice is not cosmetic.
+   *
+   * This was always `created_at DESC`. Newest-first is right for keeping up — a launch's picture is likeliest to be
+   * served in the minutes after it launches — but it is catastrophic as the ONLY order once throughput falls below
+   * the launch rate, because every shortfall lands on the same rows and they are never reached again. Measured in
+   * production 2026-09-10, and the shape is unmistakable: 09-08 frozen at 3.5% captured, 09-09 at 9.9%, and the
+   * current day at 71.7%. Older days doing worse than newer ones is not decay, it is starvation.
+   *
+   * So the scheduler runs both ends. `newest` keeps pace with ingestion; `oldest` drains what the shortfall left
+   * behind, and it is the one on a deadline — those pins are the ones closest to lapsing.
+   */
+  const order = opts.order === "oldest" ? "ASC" : "DESC";
   const pending = db.prepare(`
     SELECT mint, image FROM tokens
      WHERE image IS NOT NULL AND image != ''
        AND image_sha256 IS NULL AND image_error IS NULL
        ${opts.all ? "" : "AND graduated = 1"}
-     ORDER BY created_at DESC LIMIT ?`).all(opts.limit) as { mint: string; image: string }[];
+     ORDER BY created_at ${order} LIMIT ?`).all(opts.limit) as { mint: string; image: string }[];
 
-  const st: CaptureStats = { attempted: pending.length, kept: 0, skipped: 0, failed: 0, bytes: 0, reused: 0 };
+  /**
+   * The whole backlog, not just this pass's slice. Published in the stats so the caller can say out loud whether it
+   * is draining or growing — the failure here was invisible for two days precisely because every pass reported a
+   * healthy "kept 300 of 300" while falling 171 rows further behind every hour.
+   */
+  const backlog = (db.prepare(`
+    SELECT COUNT(*) c FROM tokens
+     WHERE image IS NOT NULL AND image != '' AND image_sha256 IS NULL AND image_error IS NULL
+       ${opts.all ? "" : "AND graduated = 1"}`).get() as any).c as number;
+
+  const st: CaptureStats = { attempted: pending.length, kept: 0, skipped: 0, failed: 0, bytes: 0, reused: 0, backlog };
   if (pending.length === 0) return st;
   // Resolved once. A half-configured store must not look enabled, so r2Config returns null unless all four are set.
   const store = r2Config();
