@@ -27,7 +27,7 @@
  */
 import { config } from "./config.ts";
 import { openDb } from "./db.ts";
-import { fetchMeta } from "./tracker.ts";
+import { fetchMetaResult, type MetaResult } from "./tracker.ts";
 
 const arg = (k: string, d: string) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : d; };
 const DRY = process.argv.includes("--dry-run");
@@ -62,7 +62,9 @@ const ok = db.prepare(`UPDATE tokens SET
   image = COALESCE(image, ?), description = COALESCE(description, ?),
   twitter = COALESCE(twitter, ?), telegram = COALESCE(telegram, ?), website = COALESCE(website, ?),
   meta_json = COALESCE(meta_json, ?), meta_bytes = COALESCE(meta_bytes, ?),
-  meta_at = COALESCE(meta_at, ?), meta_error = NULL,
+  -- A document served but unparseable is held, not lost: meta_at says we have the bytes, meta_error says they did
+  -- not parse. Writing NULL here unconditionally would file it as a clean capture and lose that distinction.
+  meta_at = COALESCE(meta_at, ?), meta_error = ?,
   -- servicedb copies incrementally on updated_at, and a document written without moving it would sit in the
   -- collector and never reach the published record. That has now happened twice today. See servicedb.ts.
   updated_at = ?
@@ -79,27 +81,34 @@ for (;;) {
 
   // Fetch the whole batch with no lock held, then write it in one short transaction. The collector is normally
   // running against this file and its only real obligation is not to drop a launch.
-  const results: { mint: string; meta: Awaited<ReturnType<typeof fetchMeta>>; }[] = [];
+  const results: { mint: string; r: MetaResult }[] = [];
   let next = 0;
   await Promise.all(Array.from({ length: CONCURRENCY }, async () => {
     for (let i = next++; i < rows.length; i = next++) {
       const r = rows[i];
-      let meta: Awaited<ReturnType<typeof fetchMeta>> = null;
-      try { meta = await fetchMeta(r.uri); } catch { meta = null; }
-      results.push({ mint: r.mint, meta });
+      let out: MetaResult;
+      try { out = await fetchMetaResult(r.uri); }
+      catch (e) { out = { meta: null, via: "none", error: `threw: ${(e as Error).message}` }; }
+      results.push({ mint: r.mint, r: out });
     }
   }));
 
   const now = Date.now();
   db.prepare("BEGIN IMMEDIATE").run();
   try {
-    for (const { mint, meta } of results) {
+    for (const { mint, r } of results) {
+      const meta = r.meta;
       if (meta) {
         ok.run(meta.image ?? null, meta.description ?? null, meta.twitter ?? null, meta.telegram ?? null,
-          meta.website ?? null, meta.raw ?? null, meta.bytes ?? null, now, now, mint);
+          meta.website ?? null, meta.raw ?? null, meta.bytes ?? null, now, r.error ?? null, now, mint);
         got++; bytes += meta.bytes ?? 0;
       } else {
-        bad.run("unreachable", now, mint);
+        /**
+         * The cause, not the word "unreachable". `fetchContent` distinguishes a gateway refusing us from a pin that
+         * is gone, and the whole point of a retry pass is to know which of those it is looking at — 121,832 rows
+         * were written with one word between them and the permanent loss could not be sized.
+         */
+        bad.run(r.error ?? "unreachable", now, mint);
         failed++;
       }
     }

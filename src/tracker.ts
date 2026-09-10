@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import type { CreateEvent, TradeEvent } from "./feed/pumpportal.ts";
 import { TOTAL_SUPPLY, isGraduated, price, type Curve } from "./curve.ts";
-import { fetchContent } from "./ipfs.ts";
+import { fetchContent, ipfsPath, verifyCid } from "./ipfs.ts";
 
 export const CHECKPOINTS_S = [60, 300, 900, 3600] as const;
 export type CheckpointKey = (typeof CHECKPOINTS_S)[number];
@@ -512,8 +512,28 @@ export class Tracker extends EventEmitter {
   }
 }
 
+/** Bigger than this is not a metadata document. Recorded as seen but not stored; see `raw` in TokenMeta. */
+const MAX_META_BYTES = 16 * 1024;
+
 /**
- * Fetch a launch's declared metadata. Never throws; returns null only when nobody would serve it.
+ * The outcome of asking for a launch's metadata document: what we got, and — when we got nothing — why.
+ *
+ * The two failures are not the same fact and this project exists to keep such things apart. `http 404` from a
+ * gateway that answered means the pin is gone and no later pass will recover it. `ipfs.filebase.io 429` means we
+ * asked too fast and the document is still there. Collapsing both into "unreachable" is what made the size of the
+ * permanent loss unmeasurable: 121,832 rows carrying one word between them, while the image path beside it
+ * recorded twenty distinct causes for the same kinds of failure.
+ */
+export interface MetaResult {
+  meta: TokenMeta | null;
+  /** Which gateway answered, or the last one that refused. */
+  via: string;
+  /** Absent on success. Otherwise the cause, in the vocabulary `fetchContent` already uses. */
+  error?: string;
+}
+
+/**
+ * Fetch a launch's declared metadata, keeping the reason when it fails. Never throws.
  *
  * Was a single request to the URL as declared, with a 4-second timeout. Every pump.fun launch declares `ipfs.io`,
  * `ipfs.io` returns 429 to us in about 50 ms, and one refused request meant the launch's own account of itself was
@@ -524,35 +544,73 @@ export class Tracker extends EventEmitter {
  * description are the only facts here that cannot be recovered later: the chain keeps its own history, but the
  * launch's picture and words live behind a URI its creator can repoint at any time.
  */
-/** Bigger than this is not a metadata document. Recorded as seen but not stored; see `raw` in TokenMeta. */
-const MAX_META_BYTES = 16 * 1024;
+export async function fetchMetaResult(uri: string): Promise<MetaResult> {
+  const { res, via, error } = await fetchContent(uri, 8000);
+  if (!res) return { meta: null, via, error: error ?? "unreachable" };
 
-export async function fetchMeta(uri: string): Promise<TokenMeta | null> {
-  const { res } = await fetchContent(uri, 8000);
-  if (!res) return null;
+  /**
+   * Read the text and keep it, then parse. It used to call `res.json()`, which parses and discards the document —
+   * five fields kept out of however many the operator wrote, at the one moment the file is retrievable. The URI is
+   * the creator's to repoint and the pin is theirs to drop, so every key we did not think to name was being thrown
+   * away permanently: the off-chain name (which can differ from the on-chain one), creator handles, and whatever
+   * else a launch platform stamps in there.
+   */
+  let text: string;
   try {
+    text = await res.text();
+  } catch (e) {
+    return { meta: null, via, error: `read failed: ${(e as Error).message}` };
+  }
+  const bytes = Buffer.byteLength(text);
+
+  /**
+   * Check the bytes against the address we asked for, before treating them as this launch's document.
+   *
+   * A gateway answering 200 is not evidence it served the right thing: `gw3.io` returns one error page for every
+   * CID and `ipfs.raribleuserdata.com` served an empty body with a success code (measured 2026-09-10). Recording
+   * either as a launch's own account of itself would put a forgery in the archive, which is worse than the gap it
+   * fills. Where the CID is a plain sha2-256 of the content this costs one hash and settles it outright; where it
+   * is not, `verifyCid` says `unverifiable` and we store the document exactly as before, no better and no worse
+   * off than we were.
+   */
+  const cid = ipfsPath(uri);
+  if (cid) {
+    const check = verifyCid(cid, Buffer.from(text));
+    if (check === "mismatch") return { meta: null, via, error: `content did not match cid (via ${via})` };
+  }
+  /**
+   * Oversized documents are recorded as seen (`bytes`) but not stored, and never truncated: half a JSON document is
+   * not a JSON document, and storing one would put an unparseable value where a record is expected.
+   */
+  const raw = bytes <= MAX_META_BYTES ? text : undefined;
+
+  let j: any;
+  try {
+    j = JSON.parse(text);
+  } catch {
     /**
-     * Read the text and keep it, then parse. It used to call `res.json()`, which parses and discards the document —
-     * five fields kept out of however many the operator wrote, at the one moment the file is retrievable. The URI is
-     * the creator's to repoint and the pin is theirs to drop, so every key we did not think to name was being thrown
-     * away permanently: the off-chain name (which can differ from the on-chain one), creator handles, and whatever
-     * else a launch platform stamps in there.
+     * A document that was served and would not parse is still a document, and it is retrievable exactly once. The
+     * old code returned null here, which discarded bytes we had already been given and then recorded the launch as
+     * unreachable — the one failure mode an archive must never have, because it destroys evidence in hand and
+     * misfiles the reason. Keep what was served; report that it did not parse.
      */
-    const text = await res.text();
-    const bytes = Buffer.byteLength(text);
-    const j: any = JSON.parse(text);
-    const pick = (k: string) => (typeof j?.[k] === "string" && j[k] ? j[k] : undefined);
-    return {
+    return { meta: { raw, bytes }, via, error: "served but not json" };
+  }
+  const pick = (k: string) => (typeof j?.[k] === "string" && j[k] ? j[k] : undefined);
+  return {
+    meta: {
       twitter: pick("twitter"), telegram: pick("telegram"), website: pick("website"),
       description: pick("description")?.slice(0, 500),
       // `image` is the field worth having and it was never being read. See TokenMeta.image.
       image: pick("image"),
-      // Oversized documents are recorded as seen (`bytes`) but not stored, and never truncated: half a JSON document
-      // is not a JSON document, and storing one would put an unparseable value where a record is expected.
-      raw: bytes <= MAX_META_BYTES ? text : undefined,
+      raw,
       bytes,
-    };
-  } catch {
-    return null;
-  }
+    },
+    via,
+  };
+}
+
+/** The document alone, for callers that only act on success. See `fetchMetaResult` for the reason on failure. */
+export async function fetchMeta(uri: string): Promise<TokenMeta | null> {
+  return (await fetchMetaResult(uri)).meta;
 }
