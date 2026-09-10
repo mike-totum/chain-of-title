@@ -7,7 +7,7 @@ import { price } from "./curve.ts";
 import { PumpPortalFeed } from "./feed/pumpportal.ts";
 import { RpcFeed } from "./feed/rpc.ts";
 import { PumpSwapFeed } from "./feed/pumpswap.ts";
-import { Tracker, fetchMeta } from "./tracker.ts";
+import { Tracker, fetchMeta, fetchMetaResult } from "./tracker.ts";
 import { PaperBroker } from "./paper.ts";
 import { strategies, type OperatorActivity } from "./strategies/index.ts";
 import { rpc as rpcHttpCall } from "./rpc-http.ts";
@@ -895,11 +895,15 @@ setInterval(() => {
  * window to fetch them closes quietly when they repoint or unpin it — no error, no event, just a document that used
  * to be there. Roughly twenty thousand launches a day were falling through that window.
  *
- * Newest first, because a pin that is going to disappear usually disappears early, and because a launch nobody has
- * asked about yet is still worth more than one from last week. Small batches on a slow timer: the obligation this
- * process has is to keep watching the chain, and a sweep for old pictures must never compete with it.
+ * Both ends of the backlog on a slow timer: the obligation this process has is to keep watching the chain, and a
+ * sweep for old documents must never compete with it. Bounded by concurrency rather than by batch size, so raising
+ * the batch buys throughput without risking a sweep that outlives its own tick.
  */
-const META_SWEEP_BATCH = Number(process.env.META_SWEEP_BATCH ?? 25);
+const META_SWEEP_BATCH = Number(process.env.META_SWEEP_BATCH ?? 200);
+/** In flight at once. The batch is network-bound, so this and not the batch size is what bounds the wall clock. */
+const META_SWEEP_CONCURRENCY = Number(process.env.META_SWEEP_CONCURRENCY ?? 12);
+/** How long a recorded failure stands before it is worth asking again. A refused gateway is not a dropped pin. */
+const META_RETRY_MS = Number(process.env.META_RETRY_HOURS ?? 6) * 3600_000;
 /**
  * The three-day window is gone, and it was doing real damage.
  *
@@ -915,26 +919,61 @@ const META_SWEEP_BATCH = Number(process.env.META_SWEEP_BATCH ?? 25);
  */
 async function sweepMissingMeta(): Promise<void> {
   try {
-    const rows = db.prepare(`SELECT mint, uri FROM tokens
+    /**
+     * Both ends, for the same reason the image capture needs both: newest keeps pace with the small fraction the
+     * live fetch misses, oldest drains what fell behind before it worked. Newest-first alone could never reach the
+     * backlog, because new launches arrive faster than the sweep runs and are always at the head of the ordering —
+     * the 09-02 to 09-07 week sat at zero documents in production while this ran every minute for two days.
+     */
+    const pick = (order: "ASC" | "DESC", n: number) => db.prepare(`SELECT mint, uri FROM tokens
       WHERE meta_at IS NULL AND uri IS NOT NULL AND uri != ''
-      ORDER BY created_at DESC LIMIT ?`).all(META_SWEEP_BATCH) as { mint: string; uri: string }[];
+        AND (meta_error IS NULL OR updated_at < ?)
+      ORDER BY created_at ${order} LIMIT ?`).all(Date.now() - META_RETRY_MS, n) as { mint: string; uri: string }[];
+
+    const half = Math.max(1, Math.floor(META_SWEEP_BATCH / 2));
+    const seen = new Set<string>();
+    const rows = [...pick("DESC", half), ...pick("ASC", META_SWEEP_BATCH - half)]
+      .filter((r) => !seen.has(r.mint) && seen.add(r.mint));
     if (!rows.length) return;
-    let got = 0;
-    for (const r of rows) {
-      const meta = await fetchMeta(r.uri);
-      if (!meta) continue;
-      // Straight to the row: these tokens are long finalized and are not in the tracker any more. Written with the
-      // same keep-first rule as everywhere else, so a later fetch can never overwrite the launch's original claim.
-      db.prepare(`UPDATE tokens SET
+
+    const ok = db.prepare(`UPDATE tokens SET
         image = COALESCE(image, ?), description = COALESCE(description, ?),
         twitter = COALESCE(twitter, ?), telegram = COALESCE(telegram, ?), website = COALESCE(website, ?),
         meta_json = COALESCE(meta_json, ?), meta_bytes = COALESCE(meta_bytes, ?),
-        meta_at = COALESCE(meta_at, ?) WHERE mint = ?`)
-        .run(meta.image ?? null, meta.description ?? null, meta.twitter ?? null, meta.telegram ?? null,
-             meta.website ?? null, meta.raw ?? null, meta.bytes ?? null, Date.now(), r.mint);
-      got++;
-    }
-    if (got) log(`[meta] recovered ${got}/${rows.length} launch claims that the first attempt missed`);
+        meta_at = COALESCE(meta_at, ?), meta_error = ?, updated_at = ? WHERE mint = ?`);
+    /**
+     * A failure is now written down. It was not, and that made every permanently dead pin a standing cost: the row
+     * stayed `meta_at IS NULL`, so the next sweep asked for it again, and the one after that, forever. Recording the
+     * reason both frees the budget for documents that can still be had and turns "we asked and nobody served it"
+     * into a fact in the record rather than an absence indistinguishable from never having looked.
+     */
+    const bad = db.prepare(`UPDATE tokens SET meta_error = ?, updated_at = ? WHERE mint = ?`);
+
+    let got = 0, next = 0;
+    // Bounded concurrency so a larger batch still finishes well inside the timer. Sequentially, one slow gateway
+    // could hold the whole sweep past the next tick; the work is awaited network I/O and blocks no ingestion.
+    await Promise.all(Array.from({ length: META_SWEEP_CONCURRENCY }, async () => {
+      for (let i = next++; i < rows.length; i = next++) {
+        const r = rows[i];
+        let res;
+        try { res = await fetchMetaResult(r.uri); }
+        catch (e) { res = { meta: null, via: "none", error: `threw: ${(e as Error).message}` }; }
+        const now = Date.now();
+        // Straight to the row: these tokens are long finalized and are not in the tracker any more. Written with the
+        // same keep-first rule as everywhere else, so a later fetch can never overwrite the launch's original claim.
+        if (res.meta) {
+          const m = res.meta;
+          ok.run(m.image ?? null, m.description ?? null, m.twitter ?? null, m.telegram ?? null, m.website ?? null,
+                 m.raw ?? null, m.bytes ?? null, now, res.error ?? null, now, r.mint);
+          got++;
+        } else bad.run(res.error ?? "unreachable", now, r.mint);
+      }
+    }));
+
+    const left = (db.prepare(`SELECT COUNT(*) c FROM tokens WHERE meta_at IS NULL AND uri IS NOT NULL AND uri != ''`)
+      .get() as any).c as number;
+    if (got) log(`[meta] recovered ${got}/${rows.length} launch claims that the first attempt missed; ` +
+                 `${left.toLocaleString()} still without a document`);
   } catch (e) { log("[meta] sweep failed:", (e as Error).message); }
 }
 setInterval(() => void sweepMissingMeta(), 60_000);
