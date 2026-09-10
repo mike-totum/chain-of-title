@@ -164,7 +164,21 @@ const TOKEN_POLICY: Record<string, string> = {
   kol_signals: `MAX(COALESCE(excluded.kol_signals,0), COALESCE(tokens.kol_signals,0))`,
   finalized: `MAX(COALESCE(excluded.finalized,0), COALESCE(tokens.finalized,0))`,
   last_seen_at: `MAX(COALESCE(excluded.last_seen_at,0), COALESCE(tokens.last_seen_at,0))`,
-  updated_at: `MAX(COALESCE(excluded.updated_at,0), COALESCE(tokens.updated_at,0))`,
+  /**
+   * Stamped to the MERGE time, not carried from either side — because `updated_at` is not a fact about the launch
+   * here, it is the watermark `servicedb` copies by, and a merged row that does not move it is a row the published
+   * record can never see.
+   *
+   * Taking MAX of the two sides looks conservative and is the bug. The seed's timestamps are whenever the LAPTOP
+   * last touched each row, which for a document captured at 16:30 is 16:30 — behind a collector whose last record
+   * build stamped its watermark at 17:59. Measured after the 2026-09-10 merge: 113,866 rows carried a document and
+   * an `updated_at` behind the watermark, so 70,000 recovered documents sat in the collector invisible to every
+   * future incremental build. They needed a full rebuild to surface, and nothing would have reported them missing.
+   *
+   * This is the fourth time in this codebase that a write which did not move `updated_at` failed to reach the
+   * record. `backfillmeta` carries the same note and the same fix. A merge changed the row; the row says so.
+   */
+  updated_at: `CAST(strftime('%s','now') AS INTEGER) * 1000`,
 };
 
 /**
