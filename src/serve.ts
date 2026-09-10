@@ -13,6 +13,7 @@
  * request. One worker runs at a time because the RPC endpoint, not the CPU, is the constraint.
  */
 import { createServer } from "node:http";
+import { createHash } from "node:crypto";
 import { readFileSync, existsSync, statSync } from "node:fs";
 import { join, normalize } from "node:path";
 import { config } from "./config.ts";
@@ -1416,6 +1417,10 @@ const server = createServer(async (req, res) => {
           records: held,
           docs: "/api.html",
           bulk: "/data/record.db",
+          // The launch documents themselves, deliberately outside record.db so that file stays mirrorable.
+          documents: "/data/documents.ndjson.gz",
+          documentsManifest: "/data/documents.json",
+          document: `/d/{mint}`,
           endpoints: [`/api/${API_VERSION}/token/{mint}`, `/api/${API_VERSION}/wallet/{address}`, `/api/${API_VERSION}/status`],
           rebuildsPerIpPerHour: PER_IP_PER_HOUR,
           // What the certificate actually rests on, published rather than implied: how fresh a pool reading has to be,
@@ -1492,6 +1497,57 @@ const server = createServer(async (req, res) => {
       * at birth — the precise substitution this site exists to report. Content-addressed, so the response is
       * immutable by construction and cacheable forever: the hash IS the verification.
       */
+    /**
+     * The metadata document a launch published at birth — the bytes, not our reading of them.
+     *
+     * record.db commits to `meta_sha256` and carries no document, so a reader could verify bytes they already held
+     * and could not obtain any. For the one artefact in this archive that cannot be rebuilt from chain at any price
+     * that is the difference between being the copy and attesting to one, and it is not hypothetical:
+     * metadata.j7tracker.io hosted 30,443 of these launches and now answers 404 for every one of them, so for
+     * thousands of launches the bytes behind this route are the only ones left anywhere.
+     *
+     * By mint, because that is what a reader arrives holding and what the record is indexed by. The sha256 goes back
+     * in a header, so the answer is still checkable against the record's commitment.
+     */
+    const doc = /^\/d\/([1-9A-HJ-NP-Za-km-z]{32,44})$/.exec(safe);
+    if (doc) {
+      const mint = doc[1];
+      /**
+       * The record is the attestation and is checked first, exactly as for pictures. Serving a document for a launch
+       * the archive does not attest holding one for would be serving evidence nobody can verify against the archive.
+       */
+      const att = db.prepare("SELECT meta_at, meta_sha256 FROM tokens WHERE mint = ?").get(mint) as any;
+      if (!att) return send(404, "no such launch on record", "text/plain; charset=utf-8", "none");
+      if (!att.meta_at) return send(404, "no document on record for this launch", "text/plain; charset=utf-8", "none");
+      if (!HEALTH_URL) return send(503, "no collector configured to serve documents from", "text/plain; charset=utf-8", "none");
+      try {
+        const r = await fetch(HEALTH_URL.replace(/\/health$/, `/doc/${mint}`), { signal: AbortSignal.timeout(15_000) });
+        if (r.status === 404) return send(404, await r.text(), "text/plain; charset=utf-8", "none");
+        if (!r.ok) return send(502, "document store unavailable", "text/plain; charset=utf-8", "none");
+        const buf = Buffer.from(await r.arrayBuffer());
+        const sha = createHash("sha256").update(buf).digest("hex");
+        /**
+         * Refuse rather than serve bytes that do not match what the record committed to. A document that has drifted
+         * from its published hash is the one thing this route must never hand over quietly — the reader's whole
+         * reason for asking us rather than the creator's URI is that ours is the attested copy.
+         */
+        if (att.meta_sha256 && att.meta_sha256 !== sha)
+          return send(500, "stored document does not match the hash on record", "text/plain; charset=utf-8", "none");
+        res.writeHead(200, {
+          "content-type": "application/json; charset=utf-8",
+          "content-length": String(buf.length),
+          "cache-control": "public, max-age=31536000, immutable",
+          "x-content-sha256": sha,
+          "x-fetched-at": r.headers.get("x-fetched-at") ?? "",
+          // Operator-supplied bytes. Never let them execute or be framed, whatever the content type claims.
+          "content-security-policy": "default-src 'none'; sandbox",
+          "x-content-type-options": "nosniff",
+          "access-control-allow-origin": "*",
+        });
+        return res.end(buf);
+      } catch { return send(502, "document store unreachable", "text/plain; charset=utf-8", "none"); }
+    }
+
     const img = /^\/i\/([0-9a-f]{64})$/.exec(safe);
     if (img) {
       const sha = img[1];
@@ -1596,6 +1652,33 @@ const server = createServer(async (req, res) => {
 
     // The archive itself. Served from the image rather than copied into the static tree, and cached hard because it
     // is rebuilt on deploy — a public good nobody has to ask for.
+    /**
+     * The document bundle, streamed from the collector rather than held here.
+     *
+     * record.db is pulled, verified and adopted by this service because every page depends on it. This is different:
+     * it is an optional download that no page reads, ~13 MB gzipped, and giving it its own pull-verify-adopt cycle
+     * would be a second copy of the most delicate machinery in the project for a file nothing here queries. So it is
+     * proxied. If the collector is down this 502s, which is the honest answer — the alternative is serving a stale
+     * bundle under a name that promises the current corpus.
+     */
+    if (safe === "/data/documents.ndjson.gz" || safe === "/data/documents.json") {
+      if (!HEALTH_URL) return send(503, "no collector configured to serve documents from", "text/plain; charset=utf-8", "none");
+      const which = safe.endsWith(".json") ? "/documents.json" : "/documents.ndjson.gz";
+      try {
+        const r = await fetch(HEALTH_URL.replace(/\/health$/, which), { signal: AbortSignal.timeout(120_000) });
+        if (!r.ok) return send(r.status === 503 ? 503 : 502, await r.text(), "text/plain; charset=utf-8", "none");
+        const buf = Buffer.from(await r.arrayBuffer());
+        res.writeHead(200, {
+          "content-type": which.endsWith(".json") ? "application/json" : "application/gzip",
+          "content-length": String(buf.length),
+          "content-disposition": `attachment; filename="chain-of-title-${which.slice(1)}"`,
+          "cache-control": "public, max-age=3600",
+          "access-control-allow-origin": "*",
+        });
+        return res.end(buf);
+      } catch { return send(502, "the document bundle is not available from the collector", "text/plain; charset=utf-8", "none"); }
+    }
+
     if (safe === "/data/record.db") {
       try {
         const buf = readFileSync(DB_FILE);

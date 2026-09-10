@@ -1111,6 +1111,14 @@ function shutdown() {
  *     deletes; a launch pruned before that number is computed can never have it computed again.
  */
 const RECORD_PATH = (process.env.DB_PATH ?? "data/pump.db").replace(/pump\.db$/, "record.db");
+/**
+ * The document bundle, built on the same cycle and deliberately NOT inside record.db.
+ *
+ * Keeping it separate is what answers the objection that kept these unpublished: record.db's size and the property
+ * that one person can mirror the whole archive are untouched, and a reader takes the bytes only if they want them.
+ * ~13 MB gzipped for the corpus to date against a ~135 MB record, growing about 2.1 MB a day.
+ */
+const DOCS_PATH = (process.env.DB_PATH ?? "data/pump.db").replace(/pump\.db$/, "documents.ndjson.gz");
 const RECORD_EVERY_MS = Number(process.env.RECORD_EVERY_HOURS ?? 6) * 3600_000;
 let buildingRecord = false;
 
@@ -1140,7 +1148,29 @@ async function buildRecord(): Promise<void> {
         resolve();
       });
     });
+    await runChild("src/documents.ts", ["--out", DOCS_PATH], "documents");
   } finally { buildingRecord = false; }
+}
+
+/** Spawn a build step as a child process, for the same reason the record build is one: never stop decoding. */
+async function runChild(script: string, args: string[], tag: string): Promise<void> {
+  const started = Date.now();
+  const { spawn } = await import("node:child_process");
+  await new Promise<void>((resolve) => {
+    const child = spawn("npx", ["tsx", "--no-warnings=ExperimentalWarning", script, ...args],
+      { stdio: ["ignore", "pipe", "pipe"], env: process.env });
+    let tail = "";
+    child.stdout?.on("data", (d) => { tail = (tail + d).slice(-4000); });
+    child.stderr?.on("data", (d) => { tail = (tail + d).slice(-4000); });
+    child.on("error", (e) => { log(`[${tag}] could not start build: ${e.message}`); resolve(); });
+    child.on("exit", (code) => {
+      const secs = ((Date.now() - started) / 1000).toFixed(0);
+      if (code === 0) log(`[${tag}] rebuilt in ${secs}s — ${tail.trim().split("\n").filter((l) => l.trim()).slice(-2).join(" | ")}`);
+      else log(`[${tag}] build FAILED (exit ${code}) after ${secs}s: ` +
+        tail.trim().split("\n").filter((l) => l.trim() && !/^Node\.js v/.test(l)).slice(-4).join(" | ").slice(0, 600));
+      resolve();
+    });
+  });
 }
 
 // Off unless explicitly enabled: this runs on the machine that must never stop collecting, so it is opt-in.
@@ -1624,6 +1654,47 @@ if (process.env.RECORD_PORT) {
        * filed under is corruption, and serving it under a content address would be a false attestation rather than a
        * broken image.
        */
+      /**
+       * The launch's own metadata document, by mint, over the private network.
+       *
+       * `record.db` carries `meta_sha256` and not the document, so a reader could verify bytes they already had and
+       * could not obtain any — which for the one artefact here that cannot be rebuilt from chain at any price is the
+       * difference between being the copy and merely attesting to it. Several thousand of these exist nowhere else:
+       * metadata.j7tracker.io hosted 30,443 launches and now answers 404 for every one.
+       *
+       * Keyed by MINT rather than by content hash on purpose. A reader arrives holding a mint, because that is what
+       * the record is indexed by; and a mint is this table's primary key, where the content hash is not indexed at
+       * all and is populated only for rows a record build has passed over. The hash goes out in a header so the
+       * answer is still self-verifying, and the bulk bundle is content-addressed for the archival case.
+       */
+      const dm = req.url?.match(/^\/doc\/([1-9A-HJ-NP-Za-km-z]{32,44})$/);
+      if (dm) {
+        let row: any;
+        try { row = db.prepare(`SELECT meta_json, meta_at, uri FROM tokens WHERE mint = ?`).get(dm[1]); }
+        catch (e) { res.writeHead(500, { "content-type": "text/plain" }); return res.end("lookup failed"); }
+        if (!row) { res.writeHead(404, { "content-type": "text/plain" }); return res.end("no such launch on record"); }
+        if (!row.meta_json) {
+          /**
+           * Three different answers, kept apart. A launch we never fetched, one we fetched and whose bytes we did
+           * not keep, and one that declared no URI at all are not the same fact, and collapsing them into 404 is
+           * the exact habit this project exists to break.
+           */
+          const why = !row.uri ? "the launch declared no metadata uri"
+            : row.meta_at ? "fetched, but its bytes were not kept"
+            : "not fetched";
+          res.writeHead(404, { "content-type": "text/plain" });
+          return res.end(`document not held: ${why}`);
+        }
+        const buf = Buffer.from(row.meta_json);
+        res.writeHead(200, {
+          "content-type": "application/json; charset=utf-8",
+          "content-length": String(buf.length),
+          "x-content-sha256": createHash("sha256").update(buf).digest("hex"),
+          // When we obtained it, so a reader can tell a launch-time capture from a later one.
+          "x-fetched-at": String(row.meta_at ?? ""),
+        });
+        return res.end(buf);
+      }
       const im = req.url?.match(/^\/image\/([0-9a-f]{64})$/);
       if (im) {
         const sha = im[1];
@@ -1645,6 +1716,23 @@ if (process.env.RECORD_PORT) {
         }
         res.writeHead(404, { "content-type": "text/plain" });
         return res.end("not held");
+      }
+      /**
+       * The document bundle, for the web service to publish. Same reasoning as /record.db: the bytes live on this
+       * volume because this is the process that captured them, and a rebuild in progress must never be served half
+       * written — a truncated bundle reads as a real one holding fewer documents.
+       */
+      if (req.url === "/documents.ndjson.gz" || req.url === "/documents.json") {
+        const path = req.url === "/documents.json" ? DOCS_PATH.replace(/\.ndjson\.gz$/, ".json") : DOCS_PATH;
+        if (buildingRecord) { res.writeHead(503); return res.end("a rebuild is in progress; try again shortly"); }
+        let st2;
+        try { st2 = statSync(path); } catch { res.writeHead(503); return res.end("bundle not built yet"); }
+        res.writeHead(200, {
+          "content-type": req.url === "/documents.json" ? "application/json" : "application/gzip",
+          "content-length": String(st2.size),
+          "last-modified": new Date(st2.mtimeMs).toUTCString(),
+        });
+        return createReadStream(path).pipe(res);
       }
       if (req.url !== "/record.db") { res.writeHead(404); return res.end("not found"); }
       let st;
