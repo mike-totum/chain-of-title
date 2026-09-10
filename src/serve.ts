@@ -1025,6 +1025,24 @@ const LOOP_STALL_MS = Number(process.env.LOOP_STALL_MS ?? 2000);
 const HOME_DAYS = Number(process.env.HOME_DAYS ?? 7);
 let homeCache: { at: number; h: Home; html: string } | null = null;
 
+/**
+ * The cumulative finding. Two counts over the whole table, not the window.
+ *
+ * Cached for the life of the process rather than recomputed each rebuild: it moves by single digits an hour against
+ * totals in the thousands, and the front page already pays three seconds for the window pass. The exclusions are
+ * the same ones findings.html states — a token a detector restored after launch carries a zero because nobody was
+ * watching it, not because nobody bought, and counting those would overstate this by nearly half.
+ */
+let everCache: { watched: number; noBuyer: number } | null = null;
+function everFinding(): { watched: number; noBuyer: number } {
+  if (everCache) return everCache;
+  const LIVE = "graduated_confirmed_by IS NOT NULL AND COALESCE(late_discovery,0) = 0 AND rebuilt_at IS NULL";
+  const c = (w: string) => (db.prepare(`SELECT COUNT(*) c FROM tokens WHERE ${w}`).get() as any).c as number;
+  try { everCache = { watched: c(LIVE), noBuyer: c(`${LIVE} AND curve_buyers = 0`) }; }
+  catch { everCache = { watched: 0, noBuyer: 0 }; }
+  return everCache;
+}
+
 function buildHome(now: number): Home {
   const since = now - HOME_DAYS * 86400_000;
   // Same rule as the record pages: a graduation we have disproved is not counted as one. This is the population
@@ -1082,6 +1100,7 @@ function buildHome(now: number): Home {
     clean24h: certified.filter(({ t }) => inDay(t)).length,
     danger24h: day.filter(({ a }) => a.flags.some((f) => f.level === "DANGER")).length,
     onFile: (db.prepare("SELECT COUNT(*) c FROM tokens WHERE late_discovery=0").get() as any).c,
+    everWatched: everFinding().watched, everNoBuyer: everFinding().noBuyer,
     windowDays: HOME_DAYS, gradWindow: toks.length, cleanBirthWindow: birthClean.length, unchecked, unread,
     unchecked24h: uncertified.filter((x) => inDay(x.t)).length,
     /**

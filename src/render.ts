@@ -731,6 +731,15 @@ export interface Home {
   /** the subset of those we have also just read a healthy pool for. Perishable; this is a courtesy, not the finding. */
   clean24h: number;
   danger24h: number; onFile: number;
+  /**
+   * The cumulative finding, across the whole archive rather than the window above.
+   *
+   * Every other count here describes a window and moves hourly, which is right for a front page and useless as a
+   * statement about the market. This is the one number that says what the archive has established: of every curve
+   * we watched from its creation transaction and confirmed against the curve account, how many completed without a
+   * single outside buyer. It is the claim worth being known for, and it was reachable only from a footer link.
+   */
+  everWatched: number; everNoBuyer: number;
   windowDays: number; gradWindow: number; cleanBirthWindow: number; unchecked: number; unread: number; unchecked24h: number;
   cleanRows: CleanRow[]; wallets: number; opRows: OpRow[]; clusterRows: HomeCluster[];
   /** What we actually found in the window, itemised. Counts overlap: one launch can carry several. */
@@ -905,6 +914,14 @@ export function homeBody(h: Home): string {
     })()</script>
     </div>
   </div>
+
+  ${h.everWatched > 0 ? `<div class="sec"><h2>What the record shows</h2><span class="cnt">the whole archive, not the window</span></div>
+  <p class="lede"><b>Of the ${fmt(h.everWatched)} bonding curves we have watched from the creation transaction and
+  confirmed against the curve account itself, ${fmt(h.everNoBuyer)} &mdash;
+  ${(100 * h.everNoBuyer / h.everWatched).toFixed(1)}% &mdash; completed with no outside buyer at all.</b>
+  Not one wallet other than the creator ever bought on the curve. The creator funded the entire graduation.</p>
+  <p class="lede"><a href="findings.html">The rest of what the record shows</a> &mdash; creator supply share, fill
+  times, and the exclusions that make the number defensible, with the queries to check every figure yourself.</p>` : ""}
 
   ${p ? `<div class="sec"><h2>Why a scanner cannot tell you this</h2></div>
   <p class="lede">One launch from this archive, <a href="t/${esc(p.mint)}.html">${esc(p.symbol ?? "?")}</a>, and several hundred like it. Read left to right.</p>
