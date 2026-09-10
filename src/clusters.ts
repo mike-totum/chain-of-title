@@ -19,6 +19,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { config } from "./config.ts";
 import { openDb } from "./db.ts";
 import { rpc, rpcStats } from "./rpc-http.ts";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const args = process.argv.slice(2);
 const opt = (k: string, d: string) => { const i = args.indexOf(`--${k}`); return i >= 0 && args[i + 1] !== undefined ? args[i + 1] : d; };
@@ -29,7 +31,16 @@ const ARCHIVAL = /helius|mainnet-beta|quiknode|quicknode|triton|rpcpool|alchemy/
 const log = (...a: unknown[]) => console.log(new Date().toISOString().slice(11, 19), ...a);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-const db = openDb(config.dbPath);
+/**
+ * The database handle, injectable.
+ *
+ * This module used to open its own connection at import. Inside the collector that would be a SECOND writer against
+ * the file the collector is ingesting into — the precise thing HANDOFF names as costing dropped launches, and the
+ * reason this tool stayed on a laptop for a week. `traceClusters` takes the caller's handle instead, so in the
+ * collector the tracing and the ingestion serialise on one connection, and the CLI still opens its own.
+ */
+let db = openDb(config.dbPath);
+export function useDb(handle: typeof db): void { db = handle; }
 db.exec(`CREATE TABLE IF NOT EXISTS operator_funders (funder TEXT PRIMARY KEY, first_seen INTEGER, last_seen INTEGER, txs INTEGER, wallets INTEGER, seeds INTEGER, sampled_at INTEGER, note TEXT)`);
 db.exec(`CREATE TABLE IF NOT EXISTS operator_wallets (wallet TEXT PRIMARY KEY, funder TEXT, cluster TEXT, role TEXT, seeded_at INTEGER, source_mint TEXT, traced INTEGER DEFAULT 0, added_at INTEGER)`);
 db.exec(`CREATE INDEX IF NOT EXISTS operator_wallets_funder ON operator_wallets(funder)`);
@@ -268,53 +279,82 @@ function behaviour(): void {
   console.log("h1 = first hour after the cluster's first AMM trade on the token; DISTRIBUTE = the farm sold more than it bought in that hour (selling to followers); HOLD = net buyer in h1; hold→sell = accumulated, then sold most of it later; px = last / peak AMM price vs the cluster's first-trade price; outside = distinct AMM buyers not in the cluster");
 }
 
-if (args.includes("--report")) { buildClusterTrades(); computePolicies(); report(); process.exit(0); }
-const seeds = collectSeeds();
-log(`[clusters] ${seeds} seed rows collected`);
-// trace seeds: organic-looking winners first, then the rest
-const todo = db.prepare(`SELECT w.wallet, w.source_mint, h.buyers, h.graduated_min FROM operator_wallets w LEFT JOIN hist_tokens h ON h.mint = w.source_mint
-  WHERE w.traced = 0 ORDER BY (COALESCE(h.buyers, 0) >= 30 OR COALESCE(h.graduated_min, 0) >= 1) DESC, h.ath_usd DESC LIMIT ?`).all(LIMIT) as any[];
-log(`[clusters] tracing ${todo.length} seed wallets to their funders`);
-let traced = 0, found = 0;
-for (const s of todo) {
-  try {
-    const r = await traceFunder(s.wallet);
-    db.prepare(`UPDATE operator_wallets SET traced = 1, funder = COALESCE(funder, ?), cluster = COALESCE(cluster, ?), seeded_at = COALESCE(seeded_at, ?) WHERE wallet = ?`).run(r.funder, r.funder ? clusterName(r.funder) : null, r.seededAt, s.wallet);
-    if (r.funder) { db.prepare(`INSERT OR IGNORE INTO operator_funders (funder) VALUES (?)`).run(r.funder); found++; }
-    traced++;
-    if (traced % 20 === 0) log(`[clusters] ${traced}/${todo.length} traced, ${found} funders`);
-  } catch (e) { log(`[clusters] ${s.wallet.slice(0, 8)}: ${(e as Error).message}`); }
-}
-// enumerate funders not yet sampled (or sampled > 24 h ago)
-const funders = db.prepare(`SELECT funder FROM operator_funders WHERE sampled_at IS NULL OR sampled_at < ? ORDER BY (SELECT COUNT(*) FROM operator_wallets w WHERE w.funder = operator_funders.funder AND w.role = 'buyout') DESC LIMIT ?`).all(Date.now() - 86400_000, LIMIT) as any[];
-log(`[clusters] enumerating ${funders.length} funders (${SAMPLE} sampled transactions each)`);
-for (const f of funders) {
-  try {
-    const r = await enumerateFunder(f.funder);
-    db.prepare("BEGIN").run();
+/**
+ * One tracing pass, callable rather than only runnable.
+ *
+ * This file was a script whose whole body executed on import, so the only way to grow the operator map was for a
+ * person to run it on a laptop — and that is exactly what happened. The published record froze tonight because the
+ * web service refused the collector's record for carrying 8,598 operator wallets against the 10,243 already served:
+ * the guard doing its job about a gap that existed only because this code had no home in the cloud.
+ *
+ * The map is the attribution half of the product. Every wallet page, and the front page's "who takes the curves",
+ * reads it. A record that carries fewer of them really is carrying less evidence, so the right fix was never to
+ * relax the guard; it was to let the machine that ingests also trace.
+ *
+ * RPC-heavy and bounded: `limit` seeds and `limit` funders per pass. In the collector it runs on a slow timer, in
+ * the same process and therefore on the same connection, because a second writer against a 10 s busy_timeout costs
+ * dropped launches — the one loss here that cannot be repaired.
+ */
+export async function traceClusters(opts: { limit?: number; db?: typeof db; log?: (...a: unknown[]) => void } = {}): Promise<{ traced: number; found: number; wallets: number }> {
+  const LIMIT = opts.limit ?? 120;
+  const log = opts.log ?? console.log;
+  if (opts.db) useDb(opts.db);
+  const seeds = collectSeeds();
+  log(`[clusters] ${seeds} seed rows collected`);
+  // trace seeds: organic-looking winners first, then the rest
+  const todo = db.prepare(`SELECT w.wallet, w.source_mint, h.buyers, h.graduated_min FROM operator_wallets w LEFT JOIN hist_tokens h ON h.mint = w.source_mint
+    WHERE w.traced = 0 ORDER BY (COALESCE(h.buyers, 0) >= 30 OR COALESCE(h.graduated_min, 0) >= 1) DESC, h.ath_usd DESC LIMIT ?`).all(LIMIT) as any[];
+  log(`[clusters] tracing ${todo.length} seed wallets to their funders`);
+  let traced = 0, found = 0;
+  for (const s of todo) {
     try {
-      for (const [w] of r.wallets) insWallet.run(w, f.funder, clusterName(f.funder), "seeded", null, null, 0, Date.now());
-      db.prepare(`UPDATE operator_funders SET first_seen = ?, last_seen = ?, txs = ?, wallets = (SELECT COUNT(*) FROM operator_wallets w WHERE w.funder = ?), seeds = (SELECT COUNT(*) FROM operator_wallets w WHERE w.funder = ? AND w.role = 'buyout'), sampled_at = ? WHERE funder = ?`)
-        .run(r.first, r.last, r.txs, f.funder, f.funder, Date.now(), f.funder);
-    } finally { db.prepare("COMMIT").run(); }
-    log(`[clusters] ${clusterName(f.funder)}: ${r.wallets.size} recipients in ${SAMPLE} of ${r.txs}${r.txs >= 3000 ? "+" : ""} txs`);
-  } catch (e) { log(`[clusters] funder ${clusterName(f.funder)}: ${(e as Error).message}`); }
+      const r = await traceFunder(s.wallet);
+      db.prepare(`UPDATE operator_wallets SET traced = 1, funder = COALESCE(funder, ?), cluster = COALESCE(cluster, ?), seeded_at = COALESCE(seeded_at, ?) WHERE wallet = ?`).run(r.funder, r.funder ? clusterName(r.funder) : null, r.seededAt, s.wallet);
+      if (r.funder) { db.prepare(`INSERT OR IGNORE INTO operator_funders (funder) VALUES (?)`).run(r.funder); found++; }
+      traced++;
+      if (traced % 20 === 0) log(`[clusters] ${traced}/${todo.length} traced, ${found} funders`);
+    } catch (e) { log(`[clusters] ${s.wallet.slice(0, 8)}: ${(e as Error).message}`); }
+  }
+  // enumerate funders not yet sampled (or sampled > 24 h ago)
+  const funders = db.prepare(`SELECT funder FROM operator_funders WHERE sampled_at IS NULL OR sampled_at < ? ORDER BY (SELECT COUNT(*) FROM operator_wallets w WHERE w.funder = operator_funders.funder AND w.role = 'buyout') DESC LIMIT ?`).all(Date.now() - 86400_000, LIMIT) as any[];
+  log(`[clusters] enumerating ${funders.length} funders (${SAMPLE} sampled transactions each)`);
+  for (const f of funders) {
+    try {
+      const r = await enumerateFunder(f.funder);
+      db.prepare("BEGIN").run();
+      try {
+        for (const [w] of r.wallets) insWallet.run(w, f.funder, clusterName(f.funder), "seeded", null, null, 0, Date.now());
+        db.prepare(`UPDATE operator_funders SET first_seen = ?, last_seen = ?, txs = ?, wallets = (SELECT COUNT(*) FROM operator_wallets w WHERE w.funder = ?), seeds = (SELECT COUNT(*) FROM operator_wallets w WHERE w.funder = ? AND w.role = 'buyout'), sampled_at = ? WHERE funder = ?`)
+          .run(r.first, r.last, r.txs, f.funder, f.funder, Date.now(), f.funder);
+      } finally { db.prepare("COMMIT").run(); }
+      log(`[clusters] ${clusterName(f.funder)}: ${r.wallets.size} recipients in ${SAMPLE} of ${r.txs}${r.txs >= 3000 ? "+" : ""} txs`);
+    } catch (e) { log(`[clusters] funder ${clusterName(f.funder)}: ${(e as Error).message}`); }
+  }
+  // pass-through funders: trace them one hop up (repeat runs climb further); wallets are then named after the root
+  const thin = db.prepare(`SELECT funder, hops FROM operator_funders WHERE parent IS NULL AND txs IS NOT NULL AND txs <= ? AND COALESCE(hops, 0) < ? LIMIT ?`).all(PASSTHROUGH_TXS, MAX_HOPS, LIMIT) as any[];
+  log(`[clusters] ${thin.length} pass-through funders (<= ${PASSTHROUGH_TXS} txs): tracing their own funders`);
+  for (const f of thin) {
+    try {
+      const r = await traceFunder(f.funder);
+      if (!r.funder) { db.prepare(`UPDATE operator_funders SET hops = ? WHERE funder = ?`).run(MAX_HOPS, f.funder); continue; }
+      db.prepare(`INSERT OR IGNORE INTO operator_funders (funder, note, hops) VALUES (?, ?, ?)`).run(r.funder, `parent of ${clusterName(f.funder)}`, (f.hops ?? 0) + 1);
+      db.prepare(`UPDATE operator_funders SET parent = ?, hops = ? WHERE funder = ?`).run(r.funder, (f.hops ?? 0) + 1, f.funder);
+      log(`[clusters] ${clusterName(f.funder)} <- ${clusterName(r.funder)}`);
+    } catch (e) { log(`[clusters] parent of ${clusterName(f.funder)}: ${(e as Error).message}`); }
+  }
+  // rename every wallet after its root funder so the live strategy and the report see one cluster per operation
+  for (const w of db.prepare(`SELECT wallet, funder FROM operator_wallets WHERE funder IS NOT NULL`).all() as any[]) db.prepare(`UPDATE operator_wallets SET cluster = ? WHERE wallet = ?`).run(clusterName(rootOf(w.funder)), w.wallet);
+  buildClusterTrades();
+  computePolicies();
+  log(`[clusters] done; ${rpcStats()}`);
+
+  const wallets = (db.prepare("SELECT COUNT(*) c FROM operator_wallets").get() as any).c as number;
+  return { traced, found, wallets };
 }
-// pass-through funders: trace them one hop up (repeat runs climb further); wallets are then named after the root
-const thin = db.prepare(`SELECT funder, hops FROM operator_funders WHERE parent IS NULL AND txs IS NOT NULL AND txs <= ? AND COALESCE(hops, 0) < ? LIMIT ?`).all(PASSTHROUGH_TXS, MAX_HOPS, LIMIT) as any[];
-log(`[clusters] ${thin.length} pass-through funders (<= ${PASSTHROUGH_TXS} txs): tracing their own funders`);
-for (const f of thin) {
-  try {
-    const r = await traceFunder(f.funder);
-    if (!r.funder) { db.prepare(`UPDATE operator_funders SET hops = ? WHERE funder = ?`).run(MAX_HOPS, f.funder); continue; }
-    db.prepare(`INSERT OR IGNORE INTO operator_funders (funder, note, hops) VALUES (?, ?, ?)`).run(r.funder, `parent of ${clusterName(f.funder)}`, (f.hops ?? 0) + 1);
-    db.prepare(`UPDATE operator_funders SET parent = ?, hops = ? WHERE funder = ?`).run(r.funder, (f.hops ?? 0) + 1, f.funder);
-    log(`[clusters] ${clusterName(f.funder)} <- ${clusterName(r.funder)}`);
-  } catch (e) { log(`[clusters] parent of ${clusterName(f.funder)}: ${(e as Error).message}`); }
+
+// ---------- CLI ----------
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  if (args.includes("--report")) { buildClusterTrades(); computePolicies(); report(); process.exit(0); }
+  await traceClusters({ limit: LIMIT });
+  report();
 }
-// rename every wallet after its root funder so the live strategy and the report see one cluster per operation
-for (const w of db.prepare(`SELECT wallet, funder FROM operator_wallets WHERE funder IS NOT NULL`).all() as any[]) db.prepare(`UPDATE operator_wallets SET cluster = ? WHERE wallet = ?`).run(clusterName(rootOf(w.funder)), w.wallet);
-buildClusterTrades();
-computePolicies();
-log(`[clusters] done; ${rpcStats()}`);
-report();

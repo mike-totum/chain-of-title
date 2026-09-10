@@ -1276,6 +1276,37 @@ if (process.env.CONFIRM_SWEEP === "1") {
 }
 
 /**
+ * Trace the operator map here, because the alternative was a laptop and the alternative broke the archive.
+ *
+ * `operator_wallets` is the attribution half of the product — every wallet page and the front page's "who takes the
+ * curves" reads it — and it only ever grew where a person ran `npm run clusters`. Tonight that came due: the web
+ * service refused the collector's record for carrying 8,598 operator wallets against 10,243 already served, so the
+ * published archive stopped advancing. The guard was right. The gap existed because this code had no home in the
+ * cloud, and relaxing the guard would have published less evidence to make a number go up.
+ *
+ * Runs on the collector's own connection, not its own — a second writer against a 10 s busy_timeout costs dropped
+ * launches. Slow and bounded, because it is RPC-heavy and ingestion always outranks it.
+ */
+if (process.env.CLUSTERS_TRACE === "1") {
+  const EVERY_MS = Number(process.env.CLUSTERS_EVERY_MINUTES ?? 45) * 60_000;
+  const LIMIT = Number(process.env.CLUSTERS_LIMIT ?? 60);
+  let running = false;
+  const run = async () => {
+    if (running) return;
+    running = true;
+    try {
+      const { traceClusters } = await import("./clusters.ts");
+      const st = await traceClusters({ limit: LIMIT, db, log: () => {} });
+      log(`[clusters] traced ${st.traced}, ${st.found} funders found, ${st.wallets} wallets on file`);
+    } catch (e) {
+      log(`[clusters] trace failed: ${(e as Error).message}`);
+    } finally { running = false; }
+  };
+  setTimeout(() => void run(), 240_000);
+  setInterval(() => void run(), EVERY_MS);
+}
+
+/**
  * Fill in the creation transaction for launches recorded before we kept it, in the cloud rather than by hand.
  *
  * This is a race against retention, not a one-off migration. `trades` holds about seven days, and the creator's
