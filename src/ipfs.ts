@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 /**
  * Reaching content-addressed bytes through whichever gateway will actually serve them.
  *
@@ -30,11 +31,33 @@
  * answers next month, which is the whole reason the list is a list.
  */
 
-/** Gateways in preference order: fastest first, and the declared host last since it is the one refusing us. */
+/**
+ * Gateways in preference order: fastest first, and the declared host last since it is the one refusing us.
+ *
+ * Re-measured 2026-09-10 against 12 random `bafkrei…` CIDs from the archive, checking the BYTES and not the status
+ * code (see `verifyCid` — that distinction is the reason the list changed):
+ *
+ *   snapshot.4everland.link   12/12 verified   0.12 s/req    added, and put first
+ *   ipfs.filebase.io          11/12 verified   0.88 s/req
+ *   ipfs.raribleuserdata.com   7/12 verified   4.23 s/req    added as depth, not for speed
+ *   4everland.io               3/12 verified   7.59 s/req    demoted; it was second and was costing the most
+ *   gw3.io                     0/12 verified   12 MISMATCH   never add: one error page, HTTP 200, for every CID
+ *   ipfs.kaleido.art          dead
+ *
+ * Four gateways with a 60 s cooldown could not carry the backlog: a recovery pass measured 3 rows/s, and 173 of one
+ * 252-row batch's failures were our own rate limiter rather than anything wrong with the documents. Depth here is
+ * what converts that backlog into captured documents, and verification is what makes adding depth safe — without it
+ * a wider pool is a wider surface for `gw3.io` to write a forgery into the archive.
+ *
+ * Re-run `npm run gateways` before trusting this list again; a gateway that answered today is not a gateway that
+ * answers next month, which is the whole reason the list is a list.
+ */
 const GATEWAYS = [
+  "https://snapshot.4everland.link/ipfs/",
   "https://ipfs.filebase.io/ipfs/",
-  "https://4everland.io/ipfs/",
   "https://gateway.pinata.cloud/ipfs/",
+  "https://ipfs.raribleuserdata.com/ipfs/",
+  "https://4everland.io/ipfs/",
   "https://ipfs.io/ipfs/",
 ];
 
@@ -64,6 +87,57 @@ export function ipfsPath(uri: string): string | null {
   // A bare CID: v0 starts Qm and is 46 chars, v1 is base32 and starts with b.
   if (/^(Qm[1-9A-HJ-NP-Za-km-z]{44}|b[a-z2-7]{58,})$/.test(uri.trim())) return uri.trim();
   return null;
+}
+
+/**
+ * Check bytes against the content address they were asked for, where the address makes that possible.
+ *
+ * WHY. `fetchContent` trusts HTTP 200. Measured 2026-09-10 while looking for more gateways: `gw3.io` returned 200
+ * and the SAME 132-byte body for four different CIDs — an error page with a success code — and
+ * `ipfs.raribleuserdata.com` returned 200 with an empty body for one CID and correct bytes for three others. Either
+ * would have been recorded as a launch's own account of itself, permanently, with nothing to distinguish it from a
+ * real capture. For an archive whose only claim is that its copy is the true copy, that is the worst available
+ * failure: not losing a document, but holding a forgery of one.
+ *
+ * A CID is a hash of the content — verifying is the whole point of content addressing, and it costs one SHA-256.
+ * That turns "which gateways do we trust" into a question we do not have to answer, which is what makes it safe to
+ * ask a wider pool of them and recover the backlog faster.
+ *
+ * WHAT IS AND IS NOT COVERED. `bafkrei…` is CIDv1, raw codec, sha2-256: the digest is of the bytes themselves and
+ * this verifies them outright — 64,752 of the archive's URIs, about a third. `Qm…` (CIDv0) and `bafy…` hash a
+ * dag-pb block that wraps the bytes rather than the bytes, so a plain digest does not match and reconstructing the
+ * wrapper is not worth it here. Those return `"unverifiable"`, which is deliberately not the same answer as `"ok"`.
+ * Recording that we could not check is the honest outcome; pretending we did is the thing this project exists not
+ * to do.
+ */
+export type CidCheck = "ok" | "mismatch" | "unverifiable";
+
+const B32 = "abcdefghijklmnopqrstuvwxyz234567";
+
+/** RFC 4648 base32, lower case, no padding — the multibase `b` prefix used by every CIDv1 in the archive. */
+function base32Decode(s: string): Uint8Array | null {
+  let bits = 0, value = 0, i = 0;
+  const out = new Uint8Array(Math.floor((s.length * 5) / 8));
+  for (const c of s) {
+    const idx = B32.indexOf(c);
+    if (idx === -1) return null;
+    value = (value << 5) | idx; bits += 5;
+    if (bits >= 8) { out[i++] = (value >>> (bits - 8)) & 0xff; bits -= 8; }
+  }
+  return out.subarray(0, i);
+}
+
+export function verifyCid(cid: string, body: Buffer | Uint8Array): CidCheck {
+  // Only the path's first segment is the address; a trailing `/image.png` addresses something inside a directory.
+  const id = cid.split("/")[0].split("?")[0];
+  if (!/^bafkrei[a-z2-7]+$/.test(id)) return "unverifiable";
+  const bytes = base32Decode(id.slice(1));
+  // version 0x01, codec 0x55 (raw), multihash 0x12 (sha2-256) length 0x20, then 32 bytes of digest.
+  if (!bytes || bytes.length !== 36 || bytes[0] !== 0x01 || bytes[1] !== 0x55 || bytes[2] !== 0x12 || bytes[3] !== 0x20)
+    return "unverifiable";
+  const want = Buffer.from(bytes.subarray(4));
+  const got = createHash("sha256").update(body).digest();
+  return want.equals(got) ? "ok" : "mismatch";
 }
 
 export interface FetchResult {
