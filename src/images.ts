@@ -31,7 +31,7 @@ import { resolve } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { config } from "./config.ts";
 import { openDb } from "./db.ts";
-import { fetchContent } from "./ipfs.ts";
+import { fetchContent, ipfsPath, verifyCid } from "./ipfs.ts";
 
 /** Bigger than this is not a token icon, and we are not a CDN. Skipped and recorded as skipped, never retried blindly. */
 const MAX_BYTES = 5 * 1024 * 1024;
@@ -91,13 +91,23 @@ export async function captureImages(
     try {
       // Through the gateway rotation, not the declared host: every launch declares ipfs.io and ipfs.io refuses us.
       // The CID is the address; the hostname is only a way of reaching it, so the same bytes come from whoever answers.
-      const { res, error } = await fetchContent(url, TIMEOUT_MS);
+      const { res, error, via } = await fetchContent(url, TIMEOUT_MS);
       if (!res) { failed.run(error ?? "unreachable", Date.now(), mint); st.failed++; return; }
       const type = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
       const len = Number(res.headers.get("content-length") ?? 0);
       if (len > MAX_BYTES) { failed.run(`too large: ${len}`, Date.now(), mint); st.skipped++; return; }
       const buf = Buffer.from(await res.arrayBuffer());
       if (buf.length === 0) { failed.run("empty body", Date.now(), mint); st.failed++; return; }
+      /**
+       * The picture must match the address it was fetched from. A gateway answering 200 with something else — an
+       * error page, an empty body, another launch's image — would be stored under a sha256 of the wrong bytes and
+       * published as this launch's picture, and nothing downstream could tell. Verifiable where the CID is a plain
+       * sha2-256 of the content; `unverifiable` elsewhere, which is recorded as neither pass nor fail.
+       */
+      const cid = ipfsPath(url);
+      if (cid && verifyCid(cid, buf) === "mismatch") {
+        failed.run(`content did not match cid (via ${via})`, Date.now(), mint); st.failed++; return;
+      }
       if (buf.length > MAX_BYTES) { failed.run(`too large: ${buf.length}`, Date.now(), mint); st.skipped++; return; }
 
       const sha = createHash("sha256").update(buf).digest("hex");
