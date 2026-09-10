@@ -48,6 +48,17 @@ a:focus-visible,button:focus-visible,input:focus-visible,summary:focus-visible{o
 .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;word-break:break-all}
 .sub{color:var(--mut);font-size:13px;margin-bottom:24px}
 td.mut{color:var(--mut)}
+.strip{border:1px solid var(--line);background:var(--card);padding:12px 14px 8px;margin:20px 0 4px}
+.strip svg{display:block;width:100%;height:66px}
+.striphead{font-size:12.5px;color:var(--mut);margin-bottom:6px;display:flex;gap:10px;flex-wrap:wrap;align-items:baseline}
+.striphead b{color:var(--fg);font-size:14px}
+.readout{margin-left:auto;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--fg)}
+.stripfoot{display:flex;justify-content:space-between;font-size:11.5px;color:var(--mut);margin-top:2px}
+.mk rect{fill:var(--fg);opacity:.55}
+.mk.d rect{fill:var(--bad);opacity:.85}
+.mk:hover rect,.mk:focus rect{opacity:1;fill:var(--bad)}
+.strip .ax{stroke:var(--line);stroke-width:1}
+.strip .tk{stroke:var(--mut);stroke-width:1;opacity:.5}
 .shot{margin:14px 0;max-width:220px;border:1px solid var(--line);background:var(--card);padding:6px}
 .shot img{display:block;width:100%;height:auto;image-rendering:auto}
 td.thin{color:var(--bad)}
@@ -886,6 +897,7 @@ export interface SiblingRow {
  */
 export function siblingsBody(
   kind: "image" | "creator", key: string, rows: SiblingRow[], stats: SiblingStats, now: number, shownCap: number,
+  strip = "",
 ): string {
   /**
    * Every headline figure is computed over the WHOLE set, never over the rows that happen to be displayed.
@@ -918,6 +930,7 @@ export function siblingsBody(
   <div class="hero"><div class="col-a">
     <h1 class="headline">${title}</h1>
     <p class="lede">${lede}</p>
+    ${strip}
     ${kind === "image" ? `<div class="shot"><img src="../i/${esc(key)}" alt="the picture these launches used" loading="lazy"></div>` : ""}
     <p class="mono sub">${esc(key)}</p>
   </div>
@@ -939,4 +952,65 @@ export function siblingsBody(
     the oldest ${fmt(shownCap)} so the sequence reads from the beginning.</p>` : ""}
   <p class="callout">A repeated picture or a repeated creator is a fact about the record, not an accusation about a
   person. What each launch did is on its own page, with the transaction it was read from.</p>`;
+}
+
+/** One launch on the timeline. `danger` colours it; `mint` makes it clickable. */
+export interface StripMark { t: number; mint: string; symbol: string | null; danger: boolean }
+
+/**
+ * The relaunch strip: every launch as a mark on a real time axis.
+ *
+ * A table of 194 timestamps is a table. The same 194 launches as marks on nine hours of wall clock is a comb, and
+ * the comb is the finding — you see a launch every three minutes without reading a single row. Cadence is the thing
+ * serial reuse actually looks like, and it is invisible in any presentation that sorts rather than *places*.
+ *
+ * Inline SVG on purpose. The pages are self-contained, mirror-able and carry no external request; a charting library
+ * would be the first dependency in a file whose credibility partly rests on not having any. Marks are `<a>` elements
+ * with a `<title>`, so hover and click work with no JavaScript at all — the script below only adds a readout, and
+ * the strip is fully usable when it does not run.
+ *
+ * Density is not smoothed away. Where launches overlap, the marks overlap; a solid black band means exactly what it
+ * looks like, and thinning it to make a prettier chart would be editing the evidence.
+ */
+export function relaunchStrip(marks: StripMark[], capped: number): string {
+  if (marks.length < 2) return "";
+  const a = marks[0].t, b = marks[marks.length - 1].t;
+  const span = Math.max(1, b - a);
+  const W = 1000, H = 66, PAD = 2;
+  const x = (t: number) => PAD + ((t - a) / span) * (W - PAD * 2);
+
+  const bars = marks.map((m) => {
+    const px = x(m.t).toFixed(2);
+    const label = `${esc(m.symbol ?? "?")} · ${when(m.t)}`;
+    return `<a href="../t/${esc(m.mint)}.html" class="mk${m.danger ? " d" : ""}" data-l="${label}">` +
+      `<title>${label}</title><rect x="${px}" y="8" width="1.6" height="${H - 22}" /></a>`;
+  }).join("");
+
+  /**
+   * Ticks are days when the span is long enough for days to mean something, and hours otherwise. A fixed unit would
+   * render "9.8 hours" with a single tick or "7.2 days" with a hundred.
+   */
+  const dayMs = 86400_000;
+  const stepMs = span > 6 * dayMs ? dayMs : span > 12 * 3600_000 ? 6 * 3600_000 : 3600_000;
+  const ticks: string[] = [];
+  for (let t = Math.ceil(a / stepMs) * stepMs; t <= b; t += stepMs) {
+    const px = x(t).toFixed(2);
+    ticks.push(`<line x1="${px}" x2="${px}" y1="${H - 13}" y2="${H - 8}" class="tk"/>`);
+  }
+
+  return `
+  <div class="strip">
+    <div class="striphead"><b>${fmt(marks.length)}</b> launches on a real time axis${
+      capped > marks.length ? ` · newest ${fmt(marks.length)} of ${fmt(capped)} plotted` : ""}
+      <span class="readout" id="ro">hover a mark</span></div>
+    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img"
+         aria-label="Each vertical mark is one launch, positioned by the time it happened.">
+      <line x1="${PAD}" x2="${W - PAD}" y1="${H - 8}" y2="${H - 8}" class="ax"/>
+      ${ticks.join("")}${bars}
+    </svg>
+    <div class="stripfoot"><span>${when(a)}</span><span>${dur(span)} wide</span><span>${when(b)}</span></div>
+  </div>
+  <script>(function(){var s=document.currentScript.previousElementSibling,r=s.querySelector('#ro');
+    s.addEventListener('mouseover',function(e){var g=e.target.closest('.mk');if(g)r.textContent=g.getAttribute('data-l');});
+    s.addEventListener('mouseleave',function(){r.textContent='hover a mark';});})();</script>`;
 }

@@ -23,7 +23,7 @@ import { profile, verdictLine, walletVerdict } from "./operator.ts";
 import { poolReservesPooled } from "./outcomes.ts";
 import { rebuild, store, curveExists } from "./backfill.ts";
 import { page, tokenBody, walletBody, tokenPreview, SEARCH, when, fmt, homeBody, homeTitle, verdict, CANONICAL_HOST,
-  siblingsBody, type Priors, type SiblingRow, type SiblingStats,
+  siblingsBody, relaunchStrip, type Priors, type SiblingRow, type SiblingStats, type StripMark,
   type Home, type Chrome, type Reading } from "./render.ts";
 import { r2Config, getWithType as r2Get } from "./r2.ts";
 import { tokenRecord, walletRecord, statusRecord, unknownRecord, errorRecord,
@@ -1104,8 +1104,22 @@ const server = createServer(async (req, res) => {
         }));
       const stats = { total, flagged: Number(agg?.flagged ?? 0), grad: Number(agg?.grad ?? 0),
         span: agg?.a != null && agg?.b != null ? Number(agg.b) - Number(agg.a) : 0 };
+      /**
+       * The strip plots the WHOLE set, not the page of rows below it — three columns per launch, so a wallet with
+       * 1,994 of them is a cheap query and a few hundred kilobytes of SVG. Capped at STRIP_MAX because past a few
+       * thousand marks the comb is solid and more marks add bytes without adding information; when the cap bites the
+       * strip says so rather than quietly plotting a subset.
+       */
+      const STRIP_MAX = 3000;
+      const markRows = db.prepare(`SELECT mint, symbol, created_at, dev_pct, curve_buyers, graduated_confirmed_by
+        FROM tokens WHERE ${where} ORDER BY created_at DESC LIMIT ?`).all(key, STRIP_MAX) as any[];
+      const marks: StripMark[] = markRows.map((x) => ({
+        t: x.created_at, mint: x.mint, symbol: x.symbol,
+        danger: (x.dev_pct ?? 0) >= 50 || (x.graduated_confirmed_by != null && x.curve_buyers === 0),
+      })).sort((p1, p2) => p1.t - p2.t);
+      const strip = relaunchStrip(marks, total);
       const title = kind === "image" ? `${fmt(total)} launches used this picture` : `${fmt(total)} launches by this wallet`;
-      return send(200, page(title, siblingsBody(kind, key, rows, stats, Date.now(), SIBLINGS_MAX), chrome, 1,
+      return send(200, page(title, siblingsBody(kind, key, rows, stats, Date.now(), SIBLINGS_MAX, strip), chrome, 1,
         kind === "image"
           ? `Every launch in the archive that used this exact image, matched by sha256, oldest first.`
           : `Every launch in the archive from this creator wallet, oldest first.`, safe), "text/html; charset=utf-8", "short");
