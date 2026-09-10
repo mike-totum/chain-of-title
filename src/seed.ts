@@ -25,7 +25,16 @@ import { BUYOUT_SOL } from "./provenance.ts";
 
 const i = process.argv.indexOf("--out");
 const OUT = i > 0 ? process.argv[i + 1] : "data/seed.db";
-if (existsSync(OUT)) rmSync(OUT, { force: true });
+/**
+ * Clear the previous seed AND its write-ahead sidecars.
+ *
+ * Removing only the database left `seed.db-shm` and `seed.db-wal` behind, and `mergeSeed` chmods a merged seed to
+ * read-only so a merged file cannot be edited and re-merged under the same size marker. The next run then deleted
+ * the database, created a new one, and SQLite opened the surviving 444 shared-memory file to enable WAL — failing
+ * with "attempt to write a readonly database" pointing at the schema statement, which is nowhere near the cause.
+ * A database is its three files; deleting one of them is not deleting it.
+ */
+for (const f of [OUT, `${OUT}-wal`, `${OUT}-shm`]) if (existsSync(f)) rmSync(f, { force: true });
 
 /**
  * Every table the collector needs to inherit, and the filter that makes two of them affordable.

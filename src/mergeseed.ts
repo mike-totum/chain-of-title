@@ -111,6 +111,26 @@ const TOKEN_POLICY: Record<string, string> = {
   // the launch, and a later fetch reads today's URI rather than that day's.
   meta_json: `COALESCE(tokens.meta_json, excluded.meta_json)`,
   meta_bytes: `COALESCE(tokens.meta_bytes, excluded.meta_bytes)`,
+  // Our fetch attempt, not the launch — same rule and same reason as image_error below. The target's own attempt
+  // describes the target, so it wins; the seed only fills a slot the target never wrote. Named here because the
+  // guard would otherwise refuse the merge over it, which is the guard doing its job: this column appeared after
+  // the policy was written, and the alternative to stopping is dropping it silently.
+  meta_error: `COALESCE(tokens.meta_error, excluded.meta_error)`,
+  /**
+   * The document's hash moves with the document or not at all — the vault_sol/vault_at rule, for the same reason.
+   *
+   * Plain keep-first would break the one thing the hash is for. A target holding its own document but no hash (rows
+   * written before meta_sha256 existed) would take the SEED's hash while keeping its OWN bytes, and publish a
+   * sha256 that verifies nothing. `meta_at` is the marker for "we hold a document", and it is exactly the rows
+   * where meta_at is null that adopt the seed's — so gate on that and the hash always describes the bytes beside it.
+   */
+  meta_sha256: `CASE WHEN tokens.meta_at IS NULL THEN excluded.meta_sha256 ELSE tokens.meta_sha256 END`,
+  /**
+   * The creation transaction and its slot: a launch fact, immutable once recorded, and the two are one observation.
+   * Neither is ever revised, so keep-first — but paired, so a row can never carry one without the other.
+   */
+  create_sig: `CASE WHEN tokens.create_sig IS NULL THEN excluded.create_sig ELSE tokens.create_sig END`,
+  create_slot: `CASE WHEN tokens.create_sig IS NULL THEN excluded.create_slot ELSE tokens.create_slot END`,
   // A diagnostic about OUR fetch attempt, not a fact about the launch. The target's own attempt is the one that
   // describes the target, so it wins; the seed only fills a slot the target never wrote. Added 2026-09-08 when the
   // shared-column guard refused the merge over it — which is the guard working exactly as intended: a column that
