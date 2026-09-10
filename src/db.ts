@@ -426,9 +426,22 @@ export function upsertToken(db: DatabaseSync, t: TokenState): void {
       -- Kept beside the document it commits to, so the two can never disagree about which document we read.
       meta_sha256=COALESCE(tokens.meta_sha256, CASE WHEN excluded.meta_json IS NOT NULL THEN sha256(excluded.meta_json) END),
       kol_signals=excluded.kol_signals, pool=COALESCE(excluded.pool, tokens.pool), amm_trusted=COALESCE(excluded.amm_trusted, tokens.amm_trusted),
-      -- vault_sol and vault_at move together or not at all: a kept balance keeps the time it was read.
-      vault_sol=COALESCE(excluded.vault_sol, tokens.vault_sol),
-      vault_at=CASE WHEN excluded.vault_sol IS NOT NULL THEN excluded.vault_at ELSE tokens.vault_at END,
+      -- A reading is both numbers or it is not a reading, and this now enforces that instead of asserting it.
+      --
+      -- The old pair wrote vault_sol from a COALESCE and vault_at from a CASE keyed only on whether a balance
+      -- arrived. A writer supplying a balance with no timestamp therefore got the balance stored AND the timestamp
+      -- nulled: a reading nobody can date, in a record whose own rule is that a balance is never quoted without the
+      -- moment it was read. 1,255 rows in the collector and 1,198 in the published archive are in that state.
+      --
+      -- The sentence above this was already here and was already right. It was a comment where it needed to be a
+      -- constraint — the same failure this codebase keeps producing, in the line describing it.
+      --
+      -- Now a half-reading is ignored entirely rather than half-applied, so the stored pair can only ever be one the
+      -- collector actually observed together.
+      vault_sol=CASE WHEN excluded.vault_sol IS NOT NULL AND excluded.vault_at IS NOT NULL
+                     THEN excluded.vault_sol ELSE tokens.vault_sol END,
+      vault_at=CASE WHEN excluded.vault_sol IS NOT NULL AND excluded.vault_at IS NOT NULL
+                    THEN excluded.vault_at ELSE tokens.vault_at END,
       finalized=excluded.finalized, updated_at=excluded.updated_at
   `).run(
     t.mint, t.name, t.symbol, t.uri, t.creator, t.createdAt, t.lateDiscovery ? 1 : 0, t.launchPrice, t.lastPrice, t.peakPrice, t.peakAt,

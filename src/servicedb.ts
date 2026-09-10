@@ -594,6 +594,91 @@ try {
     if (Number(r.changes ?? 0) > 0) log(`  synced ${Number(r.changes).toLocaleString()} curve readings`);
   } catch (e) { log(`  WARNING: curve reading sync failed: ${String((e as any)?.message ?? e).slice(0, 120)}`); }
 
+  /**
+   * A balance nobody can date is not published.
+   *
+   * DATA.md's rule is that vault_sol is never quoted without vault_at, and every consumer honours it —
+   * `readingCertifies` takes both and refuses the pair when either is missing. So an orphaned balance is a number
+   * the archive has already committed never to use, and publishing it invites exactly one thing: a reader who does
+   * not know the rule quoting it anyway.
+   *
+   * The write path in db.ts now refuses to create these, so this clears the 1,198 already in the file rather than
+   * carrying them forever. The balance is not destroyed — the collector keeps whatever it holds; this is a decision
+   * about what the published record asserts, and it should assert nothing it will not stand behind.
+   *
+   * With this and the db.ts fix in place, the vault invariant below can only trip on a genuine regression, which is
+   * why it is allowed to fail the build rather than merely report.
+   */
+  {
+    const r = db.prepare("UPDATE rec.tokens SET vault_sol = NULL WHERE vault_sol IS NOT NULL AND vault_at IS NULL").run();
+    if (Number(r.changes ?? 0) > 0)
+      log(`  cleared ${Number(r.changes).toLocaleString()} pool balances that carried no reading time`);
+  }
+
+  /**
+   * Coherence: does this file contradict itself, row by row.
+   *
+   * The count guards below ask whether the archive shrank. This asks a different question that none of them can:
+   * whether a single row now asserts two things that cannot both be true. Twice on 2026-09-10 it did — the record
+   * published 126,217 meta_sha256 against 80,630 documents, and then, in the commit that fixed that, 154,374
+   * meta_lag_ms against 152,711 timestamps. More hashes than documents; more lags than the readings they measure.
+   *
+   * The cause is structural rather than careless, which is the whole reason this exists. An incremental copy behind
+   * a watermark refreshes one column of a row on one run and its partner on another, so a pair that is enforced at
+   * the source can arrive here broken without any step reporting a failure. It survived being known about: the
+   * second instance was written by the person who had just finished documenting the first.
+   *
+   * Two shapes, because they catch different faults:
+   *
+   *   IMPLIES   a per-row implication. `meta_sha256 IS NOT NULL` requires `meta_at IS NOT NULL`. An aggregate
+   *             comparison of the two counts misses a file where the totals happen to agree and individual rows
+   *             are crossed, which is exactly what a partial copy produces.
+   *   EQUALS    a derived value recomputed from the published row. Where both operands exist the stored value must
+   *             equal the derivation, so a stale copy of something computable is caught rather than served.
+   *
+   * **This guard is not the real fix and must not be mistaken for one.** Where a column can be derived from the
+   * published row instead of copied from the collector, derive it — `meta_lag_ms` and the curve reading both do,
+   * and neither can contradict the row it sits beside because there is no second copy to disagree with. Removing
+   * the possibility beats detecting the failure. This catches the pairs that cannot be collapsed that way, and it
+   * fails the build rather than warning, because a record that contradicts itself is worse than a stale one: a
+   * reader can date a stale file, and has no way to know which half of a crossed row to believe.
+   */
+  const INVARIANTS: { kind: "IMPLIES" | "EQUALS"; sql: string; why: string }[] = [
+    // A commitment to a document requires the reading that produced it.
+    { kind: "IMPLIES", sql: "meta_sha256 IS NOT NULL AND meta_at IS NULL", why: "meta_sha256 without meta_at" },
+    { kind: "IMPLIES", sql: "meta_lag_ms IS NOT NULL AND meta_at IS NULL", why: "meta_lag_ms without meta_at" },
+    { kind: "IMPLIES", sql: "meta_bytes IS NOT NULL AND meta_at IS NULL", why: "meta_bytes without meta_at" },
+    // The picture's proof requires the fetch that produced it.
+    { kind: "IMPLIES", sql: "image_sha256 IS NOT NULL AND image_at IS NULL", why: "image_sha256 without image_at" },
+    // A curve reading and the time it was taken. NULL complete with a time is legitimate — the account was gone.
+    { kind: "IMPLIES", sql: "curve_complete IS NOT NULL AND curve_checked_at IS NULL", why: "curve_complete without curve_checked_at" },
+    // A pool balance is only ever quoted with the moment it was read, and the moment is meaningless without it.
+    // db.ts enforces this on write with a CASE; asserting it here checks the invariant survived the copy, which is
+    // the class of failure this file keeps producing — a rule held at the source and lost in transit.
+    { kind: "IMPLIES", sql: "vault_sol IS NOT NULL AND vault_at IS NULL", why: "vault_sol without vault_at" },
+    { kind: "IMPLIES", sql: "vault_at IS NOT NULL AND vault_sol IS NULL", why: "vault_at without vault_sol" },
+    // Completion facts require the claim they qualify.
+    { kind: "IMPLIES", sql: "graduated_at IS NOT NULL AND COALESCE(graduated,0) = 0", why: "graduated_at on a row that did not graduate" },
+    // On the VALUE, not on non-nullness. rebuilt_complete carries a meaningful 0 — 205,737 rows are "not rebuilt",
+    // which an IS NOT NULL test reads as "claims to be rebuilt" and fails on correct data. Any column with a
+    // meaningful default needs the value form, and a build-failing guard that trips on correct data is switched off
+    // within a week, after which there is neither a guard nor any reason to trust the next one.
+    { kind: "IMPLIES", sql: "rebuilt_complete = 1 AND rebuilt_at IS NULL", why: "rebuilt_complete=1 without rebuilt_at" },
+    // Derived, and therefore checkable against its own row.
+    { kind: "EQUALS", sql: "meta_lag_ms IS NOT NULL AND meta_at IS NOT NULL AND created_at IS NOT NULL AND meta_lag_ms != meta_at - created_at", why: "meta_lag_ms disagrees with meta_at - created_at" },
+  ];
+  const broken: string[] = [];
+  for (const inv of INVARIANTS) {
+    const n = (db.prepare(`SELECT COUNT(*) c FROM rec.tokens WHERE ${inv.sql}`).get() as any).c as number;
+    if (n > 0) broken.push(`  ${inv.kind.padEnd(7)} ${n.toLocaleString().padStart(9)} rows — ${inv.why}`);
+  }
+  if (broken.length)
+    throw new Error(`the record contradicts itself and will not be published:\n${broken.join("\n")}\n` +
+      `Each line is a pair of columns where one asserts something the other denies, on the same row. ` +
+      `A partial copy behind the watermark is the usual cause: run with --full to re-copy every row.`);
+  const checked = (db.prepare("SELECT COUNT(*) c FROM rec.tokens").get() as any).c as number;
+  log(`  coherence: ${INVARIANTS.length} invariants hold across ${checked.toLocaleString()} rows`);
+
   db.exec(`INSERT INTO rec.meta (k, v) VALUES ('watermark', '${Date.now()}'), ('built_at', '${Date.now()}'),
       ('built_by', '${builtBy}'), ('built_pid', '${process.pid}')
     ON CONFLICT(k) DO UPDATE SET v = excluded.v`);
