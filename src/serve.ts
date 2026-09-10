@@ -17,6 +17,7 @@ import { readFileSync, existsSync, statSync } from "node:fs";
 import { join, normalize } from "node:path";
 import { config } from "./config.ts";
 import { openDb } from "./db.ts";
+import { DatabaseSync } from "node:sqlite";
 import { type Assessment, assess, cleanAtBirth, coverageWindows, TOKEN_COLUMNS, optionalColumns, graduationDisproved, MIN_POOL_SOL,
   readingCertifies, readingIsFresh, MAX_READING_AGE_MS, MAX_DEV_PCT, MIN_BUYERS, BUYOUT_SOL } from "./provenance.ts";
 import { profile, verdictLine, walletVerdict, clusterProfile, clusterTable } from "./operator.ts";
@@ -349,6 +350,60 @@ if (RECORD_URL) {
   })(), 20_000);
   setInterval(() => void pullRecord(false), REFRESH_MS);
 }
+
+/**
+ * Fetch a record before serving, when there is nothing worth serving yet.
+ *
+ * The record used to be baked into the image from whatever was on a laptop at build time, which meant a personal
+ * machine sat in the publish path of a public archive: on 2026-09-10 that copy carried a later build timestamp
+ * than the collector's, the service preferred it, and the archive sat 29,419 launches behind. With the record on
+ * a volume instead, the first boot has nothing at all, and a web service that starts anyway would answer "we hold
+ * no record" about every token on Solana — authoritative and wrong, which this project ranks below being down.
+ *
+ * Deliberately not `pullRecord`: that ends in `reloadRecord`, which reassigns `db`, and `db` is initialised on the
+ * next line. Calling it here would read a binding in its temporal dead zone. This only puts bytes on disk, and the
+ * ordinary guards below then decide whether those bytes are fit to serve.
+ */
+async function fetchFirstRecord(): Promise<void> {
+  if (!RECORD_URL) return;
+  const holds = (() => {
+    try {
+      const cur = new DatabaseSync(DB_FILE, { readOnly: true });
+      const n = (cur.prepare("SELECT COUNT(*) c FROM tokens").get() as any).c as number;
+      cur.close();
+      return n;
+    } catch { return 0; }
+  })();
+  if (holds >= 1000) return;
+  const { writeFileSync, mkdirSync, renameSync } = await import("node:fs");
+  const { dirname } = await import("node:path");
+  for (let attempt = 1; attempt <= 20; attempt++) {
+    console.log(`[record] nothing to serve yet (${holds} launches on disk); fetching from the collector, attempt ${attempt}`);
+    try {
+      const res = await fetch(RECORD_URL, { signal: AbortSignal.timeout(300_000) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const buf = Buffer.from(await res.arrayBuffer());
+      if (buf.length < 1_000_000) throw new Error(`only ${buf.length} bytes`);
+      mkdirSync(dirname(DB_FILE), { recursive: true });
+      writeFileSync(`${DB_FILE}.incoming`, buf);
+      const probe = new DatabaseSync(`${DB_FILE}.incoming`, { readOnly: true });
+      const n = (probe.prepare("SELECT COUNT(*) c FROM tokens").get() as any).c as number;
+      probe.close();
+      if (n < 1000) throw new Error(`it holds only ${n} launches`);
+      renameSync(`${DB_FILE}.incoming`, DB_FILE);
+      console.log(`[record] fetched ${(buf.length / 1048576).toFixed(1)} MB, ${n.toLocaleString()} launches, before opening the port`);
+      return;
+    } catch (e) {
+      console.log(`[record] first fetch failed: ${(e as Error).message}`);
+      await new Promise((r) => setTimeout(r, 15_000));
+    }
+  }
+  // Twenty attempts over five minutes. Exit rather than serve an empty archive; the platform restarts us and the
+  // collector may be back by then.
+  console.error("[record] could not fetch a record to serve. Exiting rather than answering with an empty archive.");
+  process.exit(1);
+}
+await fetchFirstRecord();
 
 /**
  * The published record, opened WITHOUT migrating it. This service serves the file to the public and must not be the
