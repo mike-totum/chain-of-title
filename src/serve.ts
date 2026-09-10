@@ -809,7 +809,7 @@ async function readRecord(t: any, judgeable: boolean, precomputed?: any): Promis
    */
   const clean = cleanAtBirth(t, a);
   if (reading && reading.sol < MIN_POOL_SOL)
-    a.flags.push({ level: "DANGER", kind: "liquidity", text: `Only ${reading.sol.toFixed(1)} SOL of liquidity was in the pool ${reading.fresh ? "just now" : "when it was last read"}.` });
+    a.flags.push({ level: "DANGER", kind: "liquidity", code: "thin_pool_now", text: `Only ${reading.sol.toFixed(1)} SOL of liquidity was in the pool ${reading.fresh ? "just now" : "when it was last read"}.` });
   const liquid = !!reading?.fresh && reading.sol >= MIN_POOL_SOL;
   return { a, reading, origin: rebuilt ? "rebuilt" : "observed", clean, liquid };
 }
@@ -1105,6 +1105,28 @@ function buildHome(now: number): Home {
      * dashes, and a dash there reads as "this one acts alone" when it means "we have not traced it". The clusters
      * we did trace get their own list, where every row is something we know.
      */
+    /**
+     * What we found in the window, itemised and counted by code rather than by parsing the sentence each flag
+     * renders - the sentences have been rewritten four times in a day and a regex over them would have broken
+     * every time. Ordered by how often it happens, which is the order a reader wants.
+     */
+    findings: (() => {
+      const label: Record<string, string> = {
+        creator_kept_supply: "the creator kept the supply",
+        creator_bought_own_curve: "the creator bought its own curve",
+        creator_completed_curve: "the creator's own buy completed it",
+        filled_in_seconds: "the curve filled in seconds",
+        few_outside_buyers: "almost no one outside bought",
+        buyer_distributes: "the buyer sold and did not buy back",
+      };
+      const n = new Map<string, number>();
+      for (const { a } of day)
+        // Counted once per launch per kind: a launch with two flags of the same code is one launch, not two.
+        for (const code of new Set(a.flags.filter((f) => f.level === "DANGER" && f.code && f.code !== "thin_pool_now").map((f) => f.code!)))
+          n.set(code, (n.get(code) ?? 0) + 1);
+      return [...n.entries()].filter(([c]) => label[c]).sort((x, y) => y[1] - x[1])
+        .map(([c, v]) => ({ label: label[c], n: v }));
+    })(),
     clusterRows: clusterTable(db, 10),
     /**
      * Three records to open, newest first, for a visitor with nothing to paste. Taken from the same assessed set

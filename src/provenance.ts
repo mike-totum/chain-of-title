@@ -114,7 +114,15 @@ export type Level = "DANGER" | "CAUTION" | "UNKNOWN";
  * consumer can tell the two apart without parsing English: a thin pool right now is a real warning and belongs on
  * the page, but it is not evidence about how the token was created and must never retract a finding about that.
  */
-export type Flag = { level: Level; text: string; kind?: "liquidity" };
+/**
+ * `code` names the finding without its numbers, so it can be counted, grouped and translated. Anything that wants
+ * to say "38 launches had this" had to regex the sentence before, which breaks the first time the wording improves
+ * - and the wording on this page has improved four times in a day.
+ */
+export type FindingCode =
+  | "creator_kept_supply" | "creator_bought_own_curve" | "filled_in_seconds" | "few_outside_buyers"
+  | "creator_completed_curve" | "thin_pool_now" | "buyer_distributes";
+export type Flag = { level: Level; text: string; kind?: "liquidity"; code?: FindingCode };
 export type Assessment = {
   flags: Flag[];
   /** we watched this launch happen, so its creator share and buyer count are real observations */
@@ -224,9 +232,9 @@ export function assess(db: DatabaseSync, t: any, covered: (ts: number) => boolea
   const selfBought = bo && t.creator && bo.wallet === t.creator;
 
   const gradS = t.graduated_at ? (t.graduated_at - t.created_at) / 1000 : null;
-  if (selfBought) flags.push({ level: "DANGER", text:
+  if (selfBought) flags.push({ level: "DANGER", code: "creator_bought_own_curve", text:
     `The creator bought its own bonding curve — ${bo!.sol.toFixed(0)} SOL, from the same wallet that created the token.` });
-  if (t.dev_pct >= 50) flags.push({ level: "DANGER", text: `The creator took ${t.dev_pct.toFixed(1)}% of the entire supply in the first block. Nothing visible on-chain today shows this — the float has since been spread across wallets.` });
+  if (t.dev_pct >= 50) flags.push({ level: "DANGER", code: "creator_kept_supply", text: `The creator took ${t.dev_pct.toFixed(1)}% of the entire supply in the first block. Nothing visible on-chain today shows this — the float has since been spread across wallets.` });
   else if (t.dev_pct >= MAX_DEV_PCT) flags.push({ level: "CAUTION", text: `The creator took ${t.dev_pct.toFixed(1)}% of supply at launch.` });
   // Every statement below asserts that the curve *completed*, so none of them may be made until that is confirmed.
   //
@@ -250,11 +258,13 @@ export function assess(db: DatabaseSync, t: any, covered: (ts: number) => boolea
   const confirmedBy = t.graduated_confirmed_by ?? (t.pool ? "pool" : null);
   const completed = gradS !== null && confirmedBy !== null;
   if (completed) {
-    if (selfBought) flags.push({ level: "DANGER", text:
-      "That purchase completed the curve, so the graduation was paid for by the creator rather than bought by demand." });
-    if (curveBuyers === 0) flags.push({ level: "DANGER", text: "It completed its bonding curve with zero outside buyers on record." });
-    else if (curveBuyers !== null && curveBuyers < 10) flags.push({ level: "DANGER", text: `Only ${curveBuyers} outside buyer${curveBuyers === 1 ? "" : "s"} bought on the bonding curve before it graduated.` });
-    if (gradS <= 60) flags.push({ level: "DANGER", text: `It left the curve ${Math.round(gradS)}s after launch.` });
+    // States what the purchase did, not what it was for. "Bought by demand" is a claim about other people's
+    // intentions, which we do not observe and do not get to characterise.
+    if (selfBought) flags.push({ level: "DANGER", code: "creator_completed_curve", text:
+      "That purchase is what completed the curve: the token left the curve on the creator's own money." });
+    if (curveBuyers === 0) flags.push({ level: "DANGER", code: "few_outside_buyers", text: "It completed its bonding curve with zero outside buyers on record." });
+    else if (curveBuyers !== null && curveBuyers < 10) flags.push({ level: "DANGER", code: "few_outside_buyers", text: `Only ${curveBuyers} outside buyer${curveBuyers === 1 ? "" : "s"} bought on the bonding curve before it graduated.` });
+    if (gradS <= 60) flags.push({ level: "DANGER", code: "filled_in_seconds", text: `It left the curve ${Math.round(gradS)}s after launch.` });
   } else if (gradS !== null && t.curve_checked_at != null && !t.curve_complete) {
     /**
      * Checked and disproved, which is not the same as unchecked and was being reported as if it were. Our feed

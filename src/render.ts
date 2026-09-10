@@ -732,6 +732,8 @@ export interface Home {
   danger24h: number; onFile: number;
   windowDays: number; gradWindow: number; cleanBirthWindow: number; unchecked: number; unread: number; unchecked24h: number;
   cleanRows: CleanRow[]; wallets: number; opRows: OpRow[]; clusterRows: HomeCluster[];
+  /** What we actually found in the window, itemised. Counts overlap: one launch can carry several. */
+  findings: { label: string; n: number }[];
   /** Records to open, for the visitor who has no address to paste. Newest first, uncurated. */
   startHere: { mint: string; symbol: string | null; label: string; level: Verdict["level"]; at: number }[];
   proof: null | { mint: string; symbol: string | null; devPct: number; gradMs: number | null;
@@ -828,7 +830,7 @@ export function homeBody(h: Home): string {
         stated in the headline above by something that counted rather than chose.
       */ ""}
     ${h.startHere.length ? `<div class="starts">
-      <span class="sh">No address to hand? Three of the ${fmt(h.danger24h)} with findings in that window</span>
+      <span class="sh">No address to hand? Three of them, and what we found</span>
       ${h.startHere.map((r) => `<a href="t/${esc(r.mint)}.html">
         <span class="ss">${esc(r.symbol ?? "?")}</span>
         <span class="sl ${r.level}">${esc(r.label)}</span>
@@ -838,13 +840,23 @@ export function homeBody(h: Home): string {
     <div class="col-b">
     <div class="stats" style="margin:4px 0 0">
       <div class="stat"><span>graduated, 24h to ${h.windowEnd ? when(h.windowEnd) : "now"}</span><b class="big">${fmt(h.graduated24h)}</b></div>
-      <div class="stat"><span>with findings on record</span><b class="big">${fmt(h.danger24h)}</b></div>
-      <div class="stat"><span>checked, no markers found</span><b class="big">${fmt(h.cleanBirth24h)}</b></div>
-      ${/* Stated so the four figures above account for every graduation in the window and a reader can add them up. */ ""}
-      <div class="stat"><span>short of a test, nothing found</span><b class="big">${fmt(Math.max(0, h.graduated24h - h.danger24h - h.cleanBirth24h))}</b></div>
+      ${/*
+          What we found, itemised, instead of three counts of things the reader has no name for.
+          
+          This read "with findings on record", "checked, no markers found" and "short of a test, nothing found" -
+          three labels made of words that mean something inside this codebase and nothing outside it, sitting on a
+          phone several screens below the sentence that defines them. Naming each finding needs no vocabulary at
+          all and is strictly more information: a reader learns both what we look for and how often it happens.
+          
+          The counts overlap, because a launch can carry more than one, and that is said rather than left for
+          somebody to discover by adding them up and getting more than the total.
+        */ ""}
+      ${h.findings.map((f) => `<div class="stat"><span>${esc(f.label)}</span><b class="big">${fmt(f.n)}</b></div>`).join("")}
+      <div class="stat"><span>none of these</span><b class="big">${fmt(h.cleanBirth24h)}</b></div>
       <div class="stat"><span>launches recorded</span><b class="big" id="rec" data-n="${h.onFile}">${fmt(h.onFile)}</b></div>
     </div>
-    <p class="sub" style="margin:6px 0 0"><span id="recnote">Launch counts as of ${h.builtAt ? `${when(h.builtAt)}, ${ago(h.now - h.builtAt)}` : "an unrecorded time"}, the age of the archive this reads.</span>
+    <p class="sub" style="margin:6px 0 0">A launch can carry more than one of these, so they add to more than the
+    ${fmt(h.danger24h)} that carry at least one. <span id="recnote">Launch counts as of ${h.builtAt ? `${when(h.builtAt)}, ${ago(h.now - h.builtAt)}` : "an unrecorded time"}, the age of the archive this reads.</span>
     Pool balances are read separately and continuously; each carries its own age below.</p>
     <!--
       The counter climbs because the collector never stops, and this is the one number on the page that is a claim
