@@ -1214,11 +1214,23 @@ function currentHome(): Home {
       // Hand back the page we already have, then refresh. setImmediate so the response is flushed first.
       if (!homeRebuilding) {
         homeRebuilding = true;
-        setImmediate(() => {
+        /**
+         * A timer, not setImmediate, and the delay is the whole point.
+         *
+         * The first version used setImmediate and measured 1.3 ms locally and 2.9 s in production — the fix
+         * appeared to work and did nothing. The front page is ~49 KB, which goes out over TLS across several event
+         * loop turns; setImmediate fires in the check phase of the very next turn, so the rebuild seized the only
+         * thread while the response was still being written and the client waited for it anyway. Over loopback
+         * with no TLS the whole body flushes in one turn, which is exactly why the local test passed.
+         *
+         * Two seconds is far longer than any flush needs and costs nothing: the page being handed out is already
+         * stale by definition, and two more seconds of it is not a different claim.
+         */
+        setTimeout(() => {
           try { rebuildHome(Date.now()); }
           catch (e) { console.log(`[home] background rebuild failed: ${(e as Error).message}`); }
           finally { homeRebuilding = false; }
-        });
+        }, 2000).unref();
       }
       return homeCache.h;
     }
