@@ -18,6 +18,7 @@
  * ledger. The order is always export, verify, record, then delete.
  */
 import { createGzip } from "node:zlib";
+import { setImmediate as yieldToLoop } from "node:timers/promises";
 import { createHash } from "node:crypto";
 import { config } from "./config.ts";
 import { openDb } from "./db.ts";
@@ -121,6 +122,10 @@ export async function offloadTrades(db: any, o: OffloadOptions = {}): Promise<Of
     const windowEnd = cursor + partRows * 8;
     const rows = rowsIn.all(cursor, windowEnd, cutoff, partRows) as any[];
     if (!rows.length) {
+      // Give the loop back before stepping to the next window. This process is also decoding two websockets, and
+      // the first pass in production blocked long enough to disconnect both of them - which costs launches, the
+      // one loss that cannot be repaired. Every synchronous step here is now followed by a yield.
+      await yieldToLoop();
       const next = (nextIdAfter.get(windowEnd) as any)?.a;
       if (next == null) { res.skipped = res.parts ? "" : "nothing older than the retention window"; break; }
       // The window held nothing eligible; step over it rather than giving up, because a gap of deleted ids is
@@ -141,7 +146,16 @@ export async function offloadTrades(db: any, o: OffloadOptions = {}): Promise<Of
 
     if ((doneKey?.get(key) as any)?.deleted_at) { cursor = idTo + 1; part--; continue; }
 
-    const csv = COLUMNS.join(",") + "\n" + rows.map((r) => COLUMNS.map((c) => cell(r[c])).join(",")).join("\n") + "\n";
+    /**
+     * Built in slices with a yield between them. A single map+join over 150,000 rows produces ~40 MB of string in
+     * one uninterruptible go; the feeds notice.
+     */
+    const pieces: string[] = [COLUMNS.join(",") + "\n"];
+    for (let i = 0; i < rows.length; i += 10_000) {
+      pieces.push(rows.slice(i, i + 10_000).map((r) => COLUMNS.map((c) => cell(r[c])).join(",")).join("\n") + "\n");
+      await yieldToLoop();
+    }
+    const csv = pieces.join("");
     const body = await gzip(csv);
     const sha = createHash("sha256").update(body).digest("hex");
 
@@ -164,12 +178,22 @@ export async function offloadTrades(db: any, o: OffloadOptions = {}): Promise<Of
       throw new Error(`${key} stored ${stored} bytes, sent ${body.length}; refusing to delete anything`);
 
     ins!.run(key, day, idFrom, idTo, rows.length, body.length, sha, tsMin, tsMax, Date.now(), null, null);
-    const removed = del.run(idFrom, idTo, cutoff).changes as number;
+    /**
+     * Deleted in sub-ranges for the same reason: one DELETE covering 150,000 rows is a single long write, and the
+     * ledger row above is already committed, so a pass interrupted midway resumes correctly rather than orphaning
+     * an upload. The range is bounded by ids we have just exported, so a partial delete loses nothing.
+     */
+    let removed = 0;
+    for (let from = idFrom; from <= idTo; from += 10_000) {
+      removed += del.run(from, Math.min(from + 9_999, idTo), cutoff).changes as number;
+      await yieldToLoop();
+    }
     db.prepare("UPDATE trade_offloads SET deleted_at = ?, deleted_rows = ? WHERE key = ?").run(Date.now(), removed, key);
 
     log(`[offload] ${key}: ${rows.length.toLocaleString()} rows, ${(body.length / 1048576).toFixed(1)} MB gz, deleted ${removed.toLocaleString()} locally`);
     res.parts++; res.rows += rows.length; res.bytes += body.length; res.deleted += removed;
     cursor = idTo + 1;
+    await yieldToLoop();
   }
   return res;
 }
