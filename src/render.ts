@@ -355,7 +355,7 @@ ${body}
 </main>
 <footer class="band-bot"><div class="shell"><div class="note"><a href="${root}live.html">Watch launches live</a> · <a href="${root}method.html">How this is decided</a> · <a href="${root}corrections.html">Tell us we are wrong</a> · <a href="${root}data.html">Take the data</a> · <a href="${root}api.html">API</a> · <a href="${root}pledge.html">Pledge</a> · <a href="${root}index.html">${BRAND}</a><br>
 The documented history of a token from its first block. Coverage begins ${c.coverageFrom}${c.gapMin >= 1 ? `, with ${fmt(c.gapMin)} min of recorded downtime` : ", no recorded downtime"}.
-Everything here is read from the Solana chain. Where we recorded a launch's creation transaction, its page cites it and you can check every figure yourself; where we did not, the page says so. A clean record means a launch was <b>not manufactured</b>. It is not a prediction and not advice.
+Everything here is read from the Solana chain. Where we recorded a launch's creation transaction, its page cites it and you can check every figure yourself; where we did not, the page says so. A record with no markers means none of the patterns we record are present in it. That is a statement about the record, not a prediction and not advice.
 Most tokens lose money regardless: of 19,412 bonding-curve positions measured, none reached 5x.
 <div class="who">Kept by <b>${esc(KEEPER)}</b> · <a href="mailto:${esc(CONTACT)}">${esc(CONTACT)}</a>${SOURCE_URL ? ` · <a href="${esc(SOURCE_URL)}">Source</a>` : ""}<br>
 Free to use, with no account and no wallet connection. The archive is public domain (<a href="${root}data.html">CC0</a>) and
@@ -432,13 +432,13 @@ export function tokenPreview(t: any, a: Assessment, clean: boolean): { title: st
   const sym = t.symbol ?? "This token";
   if (!a.watched)
     return { title: `${sym}: launch not observed`,
-      summary: `We have no record of this launch, so we cannot tell you what it was at birth. That is not a clean result: once a token's float has been spread, a manufactured launch is indistinguishable from a real one.` };
+      summary: `We hold no record of this launch, so we cannot say what it was at birth. That absence is not a finding: once a float has been spread, a launch that was assembled and one that was not look the same on-chain.` };
   const bits: string[] = [];
   if (t.dev_pct != null) bits.push(`the creator took ${t.dev_pct.toFixed(1)}% of supply in the first block`);
   if (a.curveBuyers != null) bits.push(`${fmt(a.curveBuyers)} outside wallet${a.curveBuyers === 1 ? "" : "s"} bought on the bonding curve`);
   if (t.graduated_at && t.created_at) bits.push(`the curve filled in ${dur(t.graduated_at - t.created_at)}`);
   const evidence = bits.join(", ") + ".";
-  if (clean) return { title: `${sym}: launched clean`, summary: `Recorded live at launch: ${evidence} Not manufactured, which is not a prediction, and most tokens lose money regardless.` };
+  if (clean) return { title: `${sym}: no markers on record`, summary: `Recorded live at launch: ${evidence} None of the markers we look for are on this record, which is a statement about the record and not a prediction.` };
   const headline = manufactureHeadline(t, a);
   return { title: headline ? `${sym}: ${headline}` : `${sym}: launch record`, summary: `Recorded live at launch: ${evidence}` };
 }
@@ -464,7 +464,11 @@ function manufactureHeadline(t: any, a: Assessment): string | null {
      * die, and it is not evidence of anything.
      */
     : a.completed && a.curveBuyers === 0 ? "nobody bought its curve"
-    : a.completed && gradS !== null && gradS <= 60 ? `the curve was taken ${Math.round(gradS)}s after launch`
+    : a.completed && gradS !== null && gradS <= 60 ? (Math.round(gradS) < 1
+        // Below a second the figure is an artifact of how events were batched on the way in, not a measurement.
+        // Saying "0s" asserts a precision the timestamps do not carry; `curveAge` states the same fact honestly.
+        ? "the curve completed in the same batch of events as the launch"
+        : `the curve completed ${Math.round(gradS)}s after launch`)
     : a.completed && a.curveBuyers !== null && a.curveBuyers < 10 ? `only ${a.curveBuyers} outside buyer${a.curveBuyers === 1 ? "" : "s"} bought its curve`
     // A buyout is an observed trade of 40+ SOL, true whether or not the curve went on to complete.
     : a.buyout ? `one wallet bought its curve for ${a.buyout.sol.toFixed(0)} SOL`
@@ -476,35 +480,42 @@ function manufactureHeadline(t: any, a: Assessment): string | null {
 export type Verdict = { level: "OK" | "DANGER" | "CAUTION" | "UNKNOWN"; label: string; why: string };
 
 /**
- * The one line a record page exists to deliver.
+ * The one line a record page exists to deliver, said the way a register says it.
  *
- * The distinctions are kept narrow on purpose. "Manufactured" is said only when the launch record itself shows the
- * pattern — the creator held the float, or nobody outside bought, or one wallet took the curve. A token that merely
- * fails a threshold is "not certified", and a token we did not watch is "not observed", because neither is evidence
- * of manufacture and saying otherwise would spend the precision that makes the clean verdict worth anything.
+ * This used to render a judgement: "Manufactured launch" over a token whose record showed a creator share, and
+ * "Launched clean" over one that cleared four thresholds. Both were conclusions we do not get to draw. Manufacture
+ * is a claim about somebody's purpose, and we observe supply shares and buyer counts, not purposes; and a clean
+ * result is an endorsement, which is the one shape of claim that hurts a reader who relies on it.
+ *
+ * So the finding is the headline. `manufactureHeadline` already wrote every phrase as a complete observation - "the
+ * creator took 79% of supply at launch", "nobody bought its curve" - and those go straight in the label, where the
+ * conclusion used to be. Where there is nothing to report we say what a register says: nothing is recorded here.
+ * That is a statement about our record, which we can stand behind, rather than about the token, which we cannot.
+ *
+ * The four `level` values are kept. They drive colour and ordering, and they are read by the API, so renaming them
+ * is a version decision rather than a wording one.
  */
 export function verdict(t: any, a: Assessment, clean: boolean): Verdict {
   if (!a.watched) return { level: "UNKNOWN", label: "Launch not observed",
-    why: "We have no record of this launch, so we cannot say what it was at birth. That is not a clean result. Once the float has been spread, a manufactured launch is indistinguishable from a real one." };
-  // The "not a prediction" half of this moved to `.vscope`, which every verdict now carries.
+    why: "We hold no record of this launch, so we cannot say what it was at birth. That absence is not a finding about the token. Once a float has been spread, a launch that was assembled and one that was not look the same on-chain." };
   /**
-   * A claim about the first blocks, and it says so. It is no longer conditioned on present liquidity — that is a
-   * different question with a different shelf life — but a thin pool right now is still a warning a reader needs,
-   * and a green all-clear printed above "a position cannot be sold" would be true in the letter and false in the
-   * effect. So a clean launch whose pool is currently thin keeps the finding and loses the green: one line, both
-   * facts, neither one deleting the other.
+   * A thin pool now is a separate reading with a separate shelf life, and it is reported as a reading rather than
+   * as a warning: the age of the measurement is on the page beside it, and what a reader does with it is theirs.
    */
   const thinNow = a.flags.some((f) => f.kind === "liquidity" && f.level === "DANGER");
-  if (clean && thinNow) return { level: "CAUTION", label: "Launched clean, thin pool now",
-    why: "The launch record shows no sign of manufacture — that part is settled and does not change. But the pool was nearly empty when we last read it, so whatever this was at birth, you may not be able to sell it now." };
-  if (clean) return { level: "OK", label: "Launched clean",
-    why: "The launch record shows no sign of manufacture. That is a fact about how this token was created, not about what it is worth or whether you could sell it now." };
+  if (clean && thinNow) return { level: "CAUTION", label: "No markers on record; pool thin when last read",
+    why: `The launch record carries none of the markers we look for. Separately, the pool held ${(t.vault_sol ?? 0) < 10 ? (t.vault_sol ?? 0).toFixed(1) : fmt(t.vault_sol ?? 0)} SOL when it was last read, which is a present-tense measurement and not part of the launch record.` };
+  if (clean) return { level: "OK", label: "No markers on record",
+    why: `The launch record carries none of the markers we look for: the creator kept ${t.dev_pct != null ? `${t.dev_pct.toFixed(1)}%` : "an unrecorded share"}, ${a.curveBuyers != null ? `${fmt(a.curveBuyers)} outside wallets bought on the curve` : "the buyer count is unrecorded"}, and no single wallet took it. A statement about what this record contains, not a judgement about the token.` };
   const headline = manufactureHeadline(t, a);
-  if (headline) return { level: "DANGER", label: "Manufactured launch", why: `The record shows ${headline}.` };
-  if (a.flags.some((f) => f.level === "DANGER")) return { level: "DANGER", label: "Carries a danger flag",
-    why: "The launch itself does not show a manufacturing pattern, but something below is serious enough to warn about." };
-  return { level: "UNKNOWN", label: "Not certified",
-    why: "This launch failed at least one of the tests for a clean record without matching a manufacturing pattern. It is neither endorsed nor accused." };
+  // The observation, capitalised, in place of the word we used to put here. The evidence and the headline are now
+  // the same sentence, so there is no gap between what we found and what we called it.
+  if (headline) return { level: "DANGER", label: headline.charAt(0).toUpperCase() + headline.slice(1),
+    why: "Read from the launch record. What it means is the reader's to decide; we record what happened, not why." };
+  if (a.flags.some((f) => f.level === "DANGER")) return { level: "DANGER", label: "Findings on record",
+    why: "The launch itself matches none of the patterns we record, and something below is on the record against it." };
+  return { level: "UNKNOWN", label: "No finding either way",
+    why: "We watched this launch. It matches none of the patterns we record, and it does not meet every criterion for a record with no markers. Neither endorsed nor accused." };
 }
 
 /**
@@ -528,7 +539,7 @@ export interface Priors {
   /** other launches using the identical image bytes, by sha256. null when we hold no picture for this launch. */
   sameImage: number | null;
   imageSha: string | null;
-  /** other launches by this creator, and how many of those carry a danger flag */
+  /** other launches by this creator, and how many of those have findings on record */
   byCreator: number;
   creatorFlagged: number;
 }
@@ -594,7 +605,7 @@ export function tokenBody(
       bits.push(`<tr><td class="k">This picture</td><td>No other launch we hold a picture for used this one.</td></tr>`);
     if (priors.byCreator > 0)
       bits.push(`<tr><td class="k">This creator</td><td><b>Has launched ${fmt(priors.byCreator + 1)} tokens${
-        priors.creatorFlagged > 0 ? `, ${fmt(priors.creatorFlagged)} of them carrying a danger flag` : ""}.</b>
+        priors.creatorFlagged > 0 ? `, ${fmt(priors.creatorFlagged)} of them with findings on record` : ""}.</b>
         <a href="../c/${esc(t.creator)}.html">See the others &rarr;</a></td></tr>`);
     return bits.length ? `<h2>Seen before</h2><table>${bits.join("")}</table>` : "";
   })();
@@ -716,7 +727,7 @@ export interface Home {
  * stated at a threshold a reader can act on, and the clean count still follows it.
  */
 export function homeTitle(h: Home): string {
-  return `${fmt(h.danger24h)} of ${fmt(h.graduated24h)} launches carry a danger flag`;
+  return `${fmt(h.danger24h)} of ${fmt(h.graduated24h)} launches have findings on record`;
 }
 
 export function homeBody(h: Home): string {
@@ -739,10 +750,10 @@ export function homeBody(h: Home): string {
   <div class="hero">
     <div class="col-a">
     <h1 class="headline">${h.windowEnd && h.now - h.windowEnd > 3600_000 ? `In the 24 hours to ${when(h.windowEnd)}` : "In the last 24 hours"} ${fmt(h.graduated24h)} tokens finished their bonding curve.
-    <b>${fmt(h.danger24h)}</b> carry a danger flag. ${h.cleanBirth24h === 0 ? `<b class="q">None</b> launched clean.` : `Only <b class="q">${fmt(h.cleanBirth24h)}</b> launched clean.`}</h1>
-    <p class="lede">Most were manufactured. The creator took the supply, or a single wallet bought the whole curve and
-    called it demand. That evidence exists for about thirty seconds and is unrecoverable afterwards, so we watch every
-    launch on pump.fun and keep the record.</p>
+    <b>${fmt(h.danger24h)}</b> have findings on record. ${h.cleanBirth24h === 0 ? `<b class="q">None</b> are without markers.` : `Only <b class="q">${fmt(h.cleanBirth24h)}</b> carry no markers at all.`}</h1>
+    <p class="lede">In most of them the creator took the supply, or a single wallet bought the whole curve. That
+    evidence exists for about thirty seconds and is unrecoverable afterwards, so we watch every launch on pump.fun
+    and keep the record. What it means is yours to decide; keeping it is our job.</p>
     <p class="lede">Paste any mint. If we hold its launch, you get what happened. If we do not, we rebuild it from the
     chain, and if we cannot do that we say so rather than guess.</p>
     ${SEARCH}
@@ -777,7 +788,7 @@ export function homeBody(h: Home): string {
         stated in the headline above by something that counted rather than chose.
       */ ""}
     ${h.startHere.length ? `<div class="starts">
-      <span class="sh">No address to hand? Three of the ${fmt(h.danger24h)} flagged in that window</span>
+      <span class="sh">No address to hand? Three of the ${fmt(h.danger24h)} with findings in that window</span>
       ${h.startHere.map((r) => `<a href="t/${esc(r.mint)}.html">
         <span class="ss">${esc(r.symbol ?? "?")}</span>
         <span class="sl ${r.level}">${esc(r.label)}</span>
@@ -787,8 +798,8 @@ export function homeBody(h: Home): string {
     <div class="col-b">
     <div class="stats" style="margin:4px 0 0">
       <div class="stat"><span>graduated, 24h to ${h.windowEnd ? when(h.windowEnd) : "now"}</span><b class="big">${fmt(h.graduated24h)}</b></div>
-      <div class="stat"><span>launched clean</span><b class="big">${fmt(h.cleanBirth24h)}</b></div>
-      <div class="stat"><span>carrying a danger flag</span><b class="big">${fmt(h.danger24h)}</b></div>
+      <div class="stat"><span>no markers on record</span><b class="big">${fmt(h.cleanBirth24h)}</b></div>
+      <div class="stat"><span>with findings on record</span><b class="big">${fmt(h.danger24h)}</b></div>
       <div class="stat"><span>launches recorded</span><b class="big" id="rec" data-n="${h.onFile}">${fmt(h.onFile)}</b></div>
     </div>
     <p class="sub" style="margin:6px 0 0"><span id="recnote">Launch counts as of ${h.builtAt ? `${when(h.builtAt)}, ${ago(h.now - h.builtAt)}` : "an unrecorded time"}, the age of the archive this reads.</span>
@@ -866,9 +877,10 @@ export function homeBody(h: Home): string {
   every step, and it is the only thing here that could not be bought.</p>` : ""}
 
   <div class="sec"><h2>Who takes the curves</h2><span class="cnt">${fmt(h.wallets)} wallets on file</span></div>
-  <p class="lede">A single large buy that completes a bonding curve is not demand, it is a purchase of the float. These
-  are the wallets doing it, what they spent, and what they did with the tokens afterwards. This is the part no
-  contract scanner can produce, because it needs a wallet's history across many tokens rather than one token's state.</p>
+  <p class="lede">These wallets each completed a bonding curve with a single buy of ${h.buyoutSol} SOL or more, taking
+  the whole remaining float in one transaction. Here is what they spent and what they did with the tokens afterwards.
+  It needs a wallet's history across many tokens rather than one token's present state, which is why it is here and
+  not in a contract scanner.</p>
   <table class="data"><tr><th>Wallet</th><th class="num">Curves taken</th><th class="num">Spent</th><th class="num">Sold after</th><th class="num">Bought back</th></tr>${ops}</table>
 
   ${h.clusterRows.length ? `
@@ -889,10 +901,10 @@ export function homeBody(h: Home): string {
   the same way a wallet farm funds its own, and we cannot tell those apart from the chain alone. What each page
   shows is what the wallets did, with the transaction for every purchase.</p>` : ""}
 
-  <div class="sec"><h2>Launched clean, last ${h.windowDays === 1 ? "24 hours" : `${h.windowDays} days`}</h2><span class="cnt">${fmt(h.cleanBirthWindow)} of ${fmt(h.gradWindow)} graduations${h.cleanRows.length < h.cleanBirthWindow ? ` · newest ${fmt(h.cleanRows.length)} shown` : ""}</span></div>
+  <div class="sec"><h2>No markers on record, last ${h.windowDays === 1 ? "24 hours" : `${h.windowDays} days`}</h2><span class="cnt">${fmt(h.cleanBirthWindow)} of ${fmt(h.gradWindow)} graduations${h.cleanRows.length < h.cleanBirthWindow ? ` · newest ${fmt(h.cleanRows.length)} shown` : ""}</span></div>
   <p class="lede">Creator kept under ${h.maxDevPct}% and has not sold, at least ${h.minBuyers} distinct buyers on the curve,
   and the curve took over a minute to fill and was not taken by a single ${h.buyoutSol}+ SOL buy. That means
-  <b>not manufactured</b>. It is a statement about the launch, not about the price: it is not a recommendation, and
+  <b>none of the patterns we record</b>. It is a statement about the launch record, not about the price: it is not a recommendation, and
   most of these will still lose money.</p>
   ${h.cleanRows.length ? `<table class="data"><tr><th>Token</th><th class="num">Creator kept</th><th class="num">Buyers</th><th class="num">Time to fill</th><th class="num">Liquidity</th><th class="num">Read</th></tr>${rows}</table>`
     : `<p class="callout">No launch in this window passed every test on the launch record. That is a finding about the
@@ -904,7 +916,7 @@ export function homeBody(h: Home): string {
       past: 423 launches passed every birth test over seven days and ten were published. The liquidity column is now
       reported beside the claim rather than gating it, and "not read" says so in the row instead of removing it.
     */ ""}
-  <p class="callout">Two different claims, kept apart. <b>Launched clean</b> is a fact about the first blocks and does
+  <p class="callout">Two different claims, kept apart. <b>No markers on record</b> is a fact about the first blocks and does
   not expire. <b>Liquidity</b> is one balance read at one moment, shown with its age. ${h.unread
     ? `<b>${fmt(h.unread)}</b> of these have no reading under ${Math.round(h.maxReadingAgeMs / 60000)} minutes old and say <i>not read</i> — a gap in our pool coverage, never a finding about the token. `
     : `Every row here carries a reading under ${Math.round(h.maxReadingAgeMs / 60000)} minutes old. `}A balance shown in red is one we did read, and it is under ${h.minPoolSol} SOL. We never quote a balance we could not confirm.</p>`;
@@ -1036,7 +1048,7 @@ export function siblingsBody(
   </div>
   <div class="col-b"><div class="stats" style="margin:4px 0 0">
     <div class="stat"><span>launches</span><b class="big">${fmt(total)}</b></div>
-    <div class="stat"><span>carrying a danger flag</span><b class="big">${fmt(flagged)}</b></div>
+    <div class="stat"><span>with findings on record</span><b class="big">${fmt(flagged)}</b></div>
     <div class="stat"><span>finished the curve</span><b class="big">${fmt(grad)}</b></div>
     ${span > 0 ? `<div class="stat"><span>across</span><b class="big">${dur(span)}</b></div>` : ""}
   </div>

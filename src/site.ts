@@ -184,9 +184,10 @@ writeFileSync(join(OUT, "404.html"), page("No record", `
   <h1>We have no record of this launch</h1>
   <div class="sub">Either it launched outside our coverage, or it is not a pump.fun token.
   Coverage begins ${chrome.coverageFrom}.</div>
-  <div class="flag UNKNOWN"><span class="tag UNKNOWN">unknown</span>This is <b>not</b> a clean result.
-  Once a token's float has been spread across wallets, a manufactured launch is indistinguishable from a real one by
-  present-tense inspection, which is why the record has to be kept at the time, and why we will not guess.</div>
+  <div class="flag UNKNOWN"><span class="tag UNKNOWN">unknown</span>An absence from this archive is <b>not</b> a
+  finding about the token. Once a float has been spread across wallets, a launch that was assembled and one that was
+  not look the same to present-tense inspection, which is why the record has to be kept at the time, and why we do
+  not guess afterwards.</div>
   ${SEARCH}`, chrome, 0, undefined, "/404.html"));
 
 // ---------- method ----------
@@ -227,15 +228,16 @@ writeFileSync(join(OUT, "method.html"), page("How this is decided", `
   <p class="callout">Coverage begins ${chrome.coverageFrom}${chrome.gapMin >= 1 ? `, with ${fmt(chrome.gapMin)} minutes of recorded downtime` : ", with no recorded downtime"}. A launch that
   happened while the collector was down has no record, and is reported as unobserved rather than as anything else.</p>
 
-  <div class="sec"><h2>The one judgement: "launched clean"</h2></div>
-  <p class="lede">It means <b>not manufactured</b>. It is not a prediction, not a recommendation, and not a statement
-  that the token will hold its value; most tokens lose money regardless. A launch is called clean only when every one
-  of these is true of the record:</p>
+  <div class="sec"><h2>What "no markers on record" means</h2></div>
+  <p class="lede">It means the launch record carries none of the patterns below. It is a statement about what this
+  archive contains, not a judgement about the token: not a prediction, not a recommendation, and not a claim that it
+  will hold its value; most tokens lose money regardless. A record is described that way only when every one of these
+  is true of it:</p>
   <table>
     <tr><th>Test</th><th>Threshold</th><th>Why</th></tr>
-    <tr><td>Creator's share in the first block</td><td class="num">under ${MAX_DEV_PCT}%</td><td>above this the creator is the market, and every buyer is bidding against their inventory</td></tr>
-    <tr><td>Distinct outside buyers on the curve</td><td class="num">at least ${MIN_BUYERS}</td><td>a curve filled by a handful of wallets was bought, not demanded</td></tr>
-    <tr><td>Time to complete the curve</td><td class="num">over ${MIN_GRAD_MS / 1000}s</td><td>a curve that fills faster than this was taken before anyone could buy at a normal price</td></tr>
+    <tr><td>Creator's share in the first block</td><td class="num">under ${MAX_DEV_PCT}%</td><td>above this share, the creator holds more of the supply than everyone who buys on the curve combined</td></tr>
+    <tr><td>Distinct outside buyers on the curve</td><td class="num">at least ${MIN_BUYERS}</td><td>below this, the curve was completed by a handful of wallets rather than many</td></tr>
+    <tr><td>Time to complete the curve</td><td class="num">over ${MIN_GRAD_MS / 1000}s</td><td>a curve filled this fast was completed before other wallets recorded a buy on it</td></tr>
     <tr><td>Largest single buy on the curve</td><td class="num">under ${BUYOUT_SOL} SOL</td><td>one buy that completes a curve is a purchase of the float, not a market</td></tr>
     <tr><td>Creator sold</td><td class="num">no</td><td>self-explanatory</td></tr>
   </table>
@@ -243,7 +245,7 @@ writeFileSync(join(OUT, "method.html"), page("How this is decided", `
   fact about the first blocks of a token's life: once true, always true, and unrecoverable once the float has been
   spread. A pool balance is a reading taken at one moment and it decays. Requiring both before calling a launch clean
   meant an hour of unanswered RPC calls silently withdrew findings about the past — over seven days, 423 launches
-  passed every test above and ten were published. We still read the pool, still refuse to quote a balance we could
+  matched every line above and ten were published. We still read the pool, still refuse to quote a balance we could
   not confirm, and now show it beside the launch record with the age of the reading instead of gating the record on
   it. A row reading <i>not read</i> is a gap in our pool coverage, never a finding about the token.</p>
 
@@ -291,7 +293,7 @@ writeFileSync(join(OUT, "method.html"), page("How this is decided", `
     <tr><td>A trade is timestamped when we decode it, not by block time, so the interval between a launch and the buy that completed its curve is only as fine as the batch both arrived in. Where that interval reads as zero we say the events arrived together, rather than quoting a duration. The slot is published in <span class="mono">trades</span> for anyone who wants to settle it exactly.</td></tr>
     <tr><td>Coverage of pump.fun begins ${chrome.coverageFrom}. Other launchpads are not yet recorded at all.</td></tr>
   </table>`, chrome, 0,
-  `How Chain of Title decides what to say about a token launch: what is recorded live, how "launched clean" is defined, the labelled-set test behind it, and the four situations where we refuse to answer.`, "/method.html"));
+  `How Chain of Title decides what to say about a token launch: what is recorded live, how a record with no markers is defined, the labelled-set test behind it, and the four situations where we refuse to answer.`, "/method.html"));
 
 // ---------- data ----------
 // A public good has to be downloadable, or the claim is rhetorical. The record database is the archive itself, not an
@@ -601,5 +603,5 @@ console.log(`\nwrote ${OUT}/`);
 console.log(PAGES
   ? `  ${toks.length.toLocaleString()} token pages + ${wallets.size} wallet pages written (--pages)`
   : `  ${toks.length.toLocaleString()} graduations and ${wallets.size} curve-taking wallets assessed; their pages are rendered on request by \`npm run serve\` (pass --pages to write them)`);
-console.log(`  ${clean.length} launched clean; ${dayClean.length} in the last 24 h of ${day.length} graduations`);
+console.log(`  ${clean.length} with no markers on record; ${dayClean.length} in the last 24 h of ${day.length} graduations`);
 console.log(`  method.html, data.html, 404.html, api.html, pledge.html, corrections.html` + (PAGES ? `, api/${API_VERSION}/token/<mint>.json, api/${API_VERSION}/wallet/<wallet>.json` : ""));

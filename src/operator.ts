@@ -158,7 +158,7 @@ export function walletVerdict(p: Profile): WalletVerdict | null {
   const back = p.ammBuy > 0 ? `${sol(p.ammBuy)} SOL` : "nothing";
   const ratio = p.ammBuy > 0 ? p.ammSell / p.ammBuy : Infinity;
   if (p.ammSell >= 20 && ratio >= 3)
-    return { label: "It distributes; it does not hold",
+    return { label: "Sold into the market, bought back little",
       why: `Took ${curves} outright for ${sol(p.curveSol)} SOL and sold ${sol(p.ammSell)} SOL into buyers on the open market, buying back ${back}.` };
   if (p.ammSell >= 20 && ratio >= 1.2)
     return { label: "A net seller on the open market",

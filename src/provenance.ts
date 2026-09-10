@@ -180,7 +180,7 @@ export function assess(db: DatabaseSync, t: any, covered: (ts: number) => boolea
   // permanently unjudgeable, which defeats the point of rebuilding it.
   const curveBuyers = cb.rows > 0 ? cb.n : (t.rebuilt_complete ? (t.unique_buyers ?? null) : null);
   if (!watched) {
-    flags.push({ level: "UNKNOWN", text: "We did not observe this launch, so its creator share and outside-buyer count are unknown. A manufactured token is indistinguishable from a real one once its float has been spread." });
+    flags.push({ level: "UNKNOWN", text: "We did not observe this launch, so its creator share and outside-buyer count are not on record. Once a float has been spread, a launch that was assembled and one that was not look the same on-chain." });
     return { flags, watched, buyout: bo, curveBuyers, completed: false };
   }
   /**
@@ -227,9 +227,9 @@ export function assess(db: DatabaseSync, t: any, covered: (ts: number) => boolea
   if (completed) {
     if (selfBought) flags.push({ level: "DANGER", text:
       "That purchase completed the curve, so the graduation was paid for by the creator rather than bought by demand." });
-    if (curveBuyers === 0) flags.push({ level: "DANGER", text: "It completed its bonding curve with zero outside buyers. The graduation was funded by the creator, not by demand." });
+    if (curveBuyers === 0) flags.push({ level: "DANGER", text: "It completed its bonding curve with zero outside buyers on record." });
     else if (curveBuyers !== null && curveBuyers < 10) flags.push({ level: "DANGER", text: `Only ${curveBuyers} outside buyer${curveBuyers === 1 ? "" : "s"} bought on the bonding curve before it graduated.` });
-    if (gradS <= 60) flags.push({ level: "DANGER", text: `It left the curve ${Math.round(gradS)}s after launch — the float was taken before anyone could buy at a normal price.` });
+    if (gradS <= 60) flags.push({ level: "DANGER", text: `It left the curve ${Math.round(gradS)}s after launch.` });
   } else if (gradS !== null) {
     // Recorded as graduating, not confirmed. Say exactly that and make no claim about how it filled.
     flags.push({ level: "UNKNOWN", text: "Our feed recorded this curve reaching the graduation threshold, but we have not confirmed that against the curve account or a PumpSwap pool, so we do not state that it completed or how it filled." });

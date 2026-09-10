@@ -210,7 +210,7 @@ export function unknownRecord(mint: string, why: string, cov: Coverage): object 
     verdict: {
       level: "UNKNOWN",
       label: "Launch not observed",
-      why: `${why} This is not a clean result: once a token's float has been spread across wallets, a manufactured launch is indistinguishable from a real one by present-tense inspection.`,
+      why: `${why} An absence from this archive is not a finding about the token: once a float has been spread across wallets, a launch that was assembled and one that was not look the same to present-tense inspection.`,
     },
     cleanAtBirth: null,
     observedAtLaunch: false,
