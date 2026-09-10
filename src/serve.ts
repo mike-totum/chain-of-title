@@ -131,7 +131,7 @@ const LAUNCH_URL = HEALTH_URL ? HEALTH_URL.replace(/\/health$/, "/launch/") : ""
  * and the difference is only visible from inside a container nobody can open.
  */
 let lastLaunchLookup = "no lookup attempted yet";
-let live: { observed: number; held: number; operators?: number | null; at: number } | null = null;
+let live: { observed: number; held: number; operators?: number | null; operatorsError?: string | null; at: number } | null = null;
 /**
  * Why the last poll produced nothing. The page renders the same either way — no counter — but "the collector is
  * unreachable" and "the collector answered and could not count" are different faults with different fixes, and a
@@ -1217,7 +1217,7 @@ const server = createServer(async (req, res) => {
           // The operator map the collector holds, against what this service serves. The pull is refused when the
           // first drops below 90% of the second, so these two numbers are the whole answer to "can the archive
           // advance", and until now neither was reported anywhere.
-          operators: l?.operators ?? null,
+          operators: l?.operators ?? null, operatorsError: (l as any)?.operatorsError ?? null,
           operatorsServed: (() => { try { return (db.prepare("SELECT COUNT(*) c FROM operator_wallets").get() as any).c; } catch { return null; } })(),
           published: observed, generatedAt: Date.now(), liveLookup: lastLaunchLookup,
           // Null when the counter is working. Says which fault when it is not, including the case where a poll

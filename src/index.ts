@@ -1396,10 +1396,21 @@ if (process.env.RECORD_PORT) {
            * endpoint reported it, so "is the archive able to advance yet" could not be answered without a deploy.
            * A figure that gates publishing has to be observable, or the next freeze is diagnosed the same slow way.
            */
-          operators = (db.prepare("SELECT COUNT(*) c FROM operator_wallets").get() as any).c as number;
         } catch { /* null, and the consumer shows the published figure alone */ }
+        /**
+         * Counted separately, and its failure reported rather than swallowed.
+         *
+         * Folded into the try above, a throw here left `held` and `observed` set and `operators` null — which is
+         * indistinguishable from "the collector is old and does not send this field", and that is exactly how it was
+         * first misread. The two states have different causes and different fixes, so they are told apart: `null`
+         * plus `operatorsError` is a query that failed and says why, `null` alone is a field that was never sent.
+         */
+        let operatorsError: string | null = null;
+        try {
+          operators = (db.prepare("SELECT COUNT(*) c FROM operator_wallets").get() as any).c as number;
+        } catch (e) { operatorsError = (e as Error).message.slice(0, 120); }
         res.writeHead(200, { "content-type": "application/json" });
-        return res.end(JSON.stringify({ record: RECORD_PATH, bytes: size, builtAt: mtime, building: buildingRecord, observed, held, operators, at: Date.now() }));
+        return res.end(JSON.stringify({ record: RECORD_PATH, bytes: size, builtAt: mtime, building: buildingRecord, observed, held, operators, operatorsError, at: Date.now() }));
       }
       /**
        * One launch, answered by the machine that watched it.
