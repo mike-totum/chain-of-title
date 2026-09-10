@@ -503,8 +503,14 @@ export function verdict(t: any, a: Assessment, clean: boolean): Verdict {
    * as a warning: the age of the measurement is on the page beside it, and what a reader does with it is theirs.
    */
   const thinNow = a.flags.some((f) => f.kind === "liquidity" && f.level === "DANGER");
-  if (clean && thinNow) return { level: "CAUTION", label: "No markers on record; pool thin when last read",
-    why: `The launch record carries none of the markers we look for. Separately, the pool held ${(t.vault_sol ?? 0) < 10 ? (t.vault_sol ?? 0).toFixed(1) : fmt(t.vault_sol ?? 0)} SOL when it was last read, which is a present-tense measurement and not part of the launch record.` };
+  if (clean && thinNow) return { level: "CAUTION", label: "No markers on record; pool below threshold when last read",
+    /**
+     * The figure is deliberately not repeated here. The liquidity flag is set from the pool reading the request
+     * made, and this function only has the row - two sources for one number, which is how this line came to read
+     * "pool thin" above "the pool held 42 SOL" on a 40 SOL threshold. The flag states the balance and its age; this
+     * says what kind of claim it is and leaves the number where it is measured.
+     */
+    why: "The launch record carries none of the markers we look for. Separately, the pool balance was below our threshold when it was last read - a present-tense measurement with its own age, stated below, and not part of the launch record." };
   if (clean) return { level: "OK", label: "No markers on record",
     why: `The launch record carries none of the markers we look for: the creator kept ${t.dev_pct != null ? `${t.dev_pct.toFixed(1)}%` : "an unrecorded share"}, ${a.curveBuyers != null ? `${fmt(a.curveBuyers)} outside wallets bought on the curve` : "the buyer count is unrecorded"}, and no single wallet took it. A statement about what this record contains, not a judgement about the token.` };
   const headline = manufactureHeadline(t, a);

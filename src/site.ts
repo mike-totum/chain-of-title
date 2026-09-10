@@ -130,7 +130,7 @@ for (const { t, a } of assessed) {
   // files make the same split; until this line they did not.
   const cleanTok = isClean(t, a);
   if (r && r.sol < MIN_POOL_SOL)
-    a.flags.push({ level: "DANGER", kind: "liquidity", text: `Only ${r.sol.toFixed(1)} SOL of liquidity was in the pool ${r.fresh ? "just now" : `when it was last read, ${ago(now - r.at)}`}; a position cannot be sold near the quoted price.` });
+    a.flags.push({ level: "DANGER", kind: "liquidity", text: `Only ${r.sol.toFixed(1)} SOL of liquidity was in the pool ${r.fresh ? "just now" : `when it was last read, ${ago(now - r.at)}`}.` });
   if (cleanTok) { clean.push(t); cleanBuyers.set(t.mint, a.curveBuyers ?? 0); }
   if (a.buyout) {
     const w = wallets.get(a.buyout.wallet) ?? { mints: [] };

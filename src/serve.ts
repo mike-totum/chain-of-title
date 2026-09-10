@@ -713,7 +713,7 @@ async function readRecord(t: any, judgeable: boolean, precomputed?: any): Promis
    */
   const clean = cleanAtBirth(t, a);
   if (reading && reading.sol < MIN_POOL_SOL)
-    a.flags.push({ level: "DANGER", kind: "liquidity", text: `Only ${reading.sol.toFixed(1)} SOL of liquidity was in the pool ${reading.fresh ? "just now" : "when it was last read"}; a position cannot be sold near the quoted price.` });
+    a.flags.push({ level: "DANGER", kind: "liquidity", text: `Only ${reading.sol.toFixed(1)} SOL of liquidity was in the pool ${reading.fresh ? "just now" : "when it was last read"}.` });
   const liquid = !!reading?.fresh && reading.sol >= MIN_POOL_SOL;
   return { a, reading, origin: rebuilt ? "rebuilt" : "observed", clean, liquid };
 }
