@@ -66,6 +66,23 @@ const insWallet = db.prepare(`INSERT INTO operator_wallets (wallet, funder, clus
   ON CONFLICT(wallet) DO UPDATE SET funder = COALESCE(operator_wallets.funder, excluded.funder), cluster = COALESCE(operator_wallets.cluster, excluded.cluster),
   role = CASE WHEN operator_wallets.role = 'seeded' AND excluded.role != 'seeded' THEN excluded.role ELSE operator_wallets.role END, seeded_at = COALESCE(operator_wallets.seeded_at, excluded.seeded_at),
   source_mint = COALESCE(operator_wallets.source_mint, excluded.source_mint), traced = MAX(operator_wallets.traced, excluded.traced)`);
+/**
+ * Whether the reconstruction tables exist in this database.
+ *
+ * `hist_tokens` and `hist_trades` are written by `history.ts`, which has only ever run on a laptop. Three queries
+ * here read them, and in the collector every one throws `no such table` — so wiring this module into the collector
+ * made it fail on entry, on every pass, while the operator map it exists to grow sat unchanged and the published
+ * archive stayed frozen behind a guard that map decides.
+ *
+ * Degrading rather than creating the tables: an empty `hist_tokens` would be a schema this file does not own and a
+ * claim that we hold reconstructions we do not. What the tables contribute is seeds and an ordering preference —
+ * useful, not required — so without them the pass does less and says nothing false.
+ */
+const hasHistory = (): boolean => {
+  try { return !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name IN ('hist_tokens','hist_trades') LIMIT 1").get(); }
+  catch { return false; }
+};
+
 const clusterName = (funder: string) => funder.slice(0, 6);
 
 // ---- seeds ----
@@ -80,10 +97,12 @@ function collectSeeds(): number {
       for (const w of c.wallets ?? []) { insWallet.run(w, c.funder, clusterName(c.funder), "seeded", null, null, 1, Date.now()); n++; }
     }
   }
-  // the wallet whose buy completed each reconstructed winner's curve
+  // the wallet whose buy completed each reconstructed winner's curve — only where reconstructions exist
+  if (hasHistory()) {
   const grads = db.prepare(`SELECT h.mint, (SELECT wallet FROM hist_trades t WHERE t.mint = h.mint AND t.side = 'buy' AND t.vsol >= 114.4 ORDER BY t.ts LIMIT 1) w
     FROM hist_tokens h WHERE h.status IN ('done', 'partial')`).all() as any[];
   for (const g of grads) if (g.w) { insWallet.run(g.w, null, null, "buyout", null, g.mint, 0, Date.now()); n++; }
+  }
   // live curve buys >= 40 SOL (the buyout size) by anyone
   const live = db.prepare(`SELECT DISTINCT wallet, mint FROM trades WHERE venue = 'curve' AND side = 'buy' AND sol >= 40`).all() as any[];
   for (const l of live) { insWallet.run(l.wallet, null, null, "buyout", null, l.mint, 0, Date.now()); n++; }
@@ -302,8 +321,16 @@ export async function traceClusters(opts: { limit?: number; db?: typeof db; log?
   const seeds = collectSeeds();
   log(`[clusters] ${seeds} seed rows collected`);
   // trace seeds: organic-looking winners first, then the rest
-  const todo = db.prepare(`SELECT w.wallet, w.source_mint, h.buyers, h.graduated_min FROM operator_wallets w LEFT JOIN hist_tokens h ON h.mint = w.source_mint
-    WHERE w.traced = 0 ORDER BY (COALESCE(h.buyers, 0) >= 30 OR COALESCE(h.graduated_min, 0) >= 1) DESC, h.ath_usd DESC LIMIT ?`).all(LIMIT) as any[];
+  /**
+   * Organic-looking winners first when we can tell, otherwise newest first. The ordering is a preference about which
+   * seeds are worth the RPC calls, not a correctness condition, so a database without reconstructions still traces —
+   * it just cannot prioritise, which is a far smaller loss than tracing nothing at all.
+   */
+  const todo = (hasHistory()
+    ? db.prepare(`SELECT w.wallet, w.source_mint, h.buyers, h.graduated_min FROM operator_wallets w LEFT JOIN hist_tokens h ON h.mint = w.source_mint
+        WHERE w.traced = 0 ORDER BY (COALESCE(h.buyers, 0) >= 30 OR COALESCE(h.graduated_min, 0) >= 1) DESC, h.ath_usd DESC LIMIT ?`)
+    : db.prepare(`SELECT w.wallet, w.source_mint, NULL buyers, NULL graduated_min FROM operator_wallets w
+        WHERE w.traced = 0 ORDER BY w.added_at DESC LIMIT ?`)).all(LIMIT) as any[];
   log(`[clusters] tracing ${todo.length} seed wallets to their funders`);
   let traced = 0, found = 0;
   for (const s of todo) {
@@ -344,8 +371,24 @@ export async function traceClusters(opts: { limit?: number; db?: typeof db; log?
   }
   // rename every wallet after its root funder so the live strategy and the report see one cluster per operation
   for (const w of db.prepare(`SELECT wallet, funder FROM operator_wallets WHERE funder IS NOT NULL`).all() as any[]) db.prepare(`UPDATE operator_wallets SET cluster = ? WHERE wallet = ?`).run(clusterName(rootOf(w.funder)), w.wallet);
-  buildClusterTrades();
-  computePolicies();
+  /**
+   * The derived analysis, and it is allowed to fail.
+   *
+   * `buildClusterTrades` and `computePolicies` read `token_outcomes` and the reconstruction tables — laptop-only,
+   * like `hist_tokens`. They summarise what the clusters DID; the tracing loop above is what discovers the wallets,
+   * and that is the part the published archive depends on, because the record's operator map is what the shrink
+   * guard measures.
+   *
+   * So a missing analysis table costs a scorecard, not the map. Wrapping these was the difference between a pass
+   * that grows the archive and one that throws on its last line and writes nothing — which is what happened, every
+   * pass, for the first hour this ran in the cloud.
+   */
+  try {
+    buildClusterTrades();
+    computePolicies();
+  } catch (e) {
+    log(`[clusters] wallets traced; cluster analysis skipped (${(e as Error).message})`);
+  }
   log(`[clusters] done; ${rpcStats()}`);
 
   const wallets = (db.prepare("SELECT COUNT(*) c FROM operator_wallets").get() as any).c as number;
