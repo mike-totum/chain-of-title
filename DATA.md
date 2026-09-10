@@ -89,14 +89,14 @@ graduation was never confirmed, not that it did not happen.
 | `venue` | launch venue. `pumpfun` throughout this release; the column exists because the record format is venue-neutral |
 | `updated_at` | last write to this row |
 | `uri` | the metadata URI declared in the creation transaction |
-| `image`, `description` | what the token claimed to be at launch, read from that URI. Captured from 2026-09-08 onward; NULL on earlier rows because nothing read them then, and they are deliberately **not** backfilled — re-fetching a URI today records what it resolves to now and stamping that as the launch claim would be manufacturing evidence about the past |
-| `meta_at` | when that read succeeded. This is what separates "the launch declared no image" (`image` NULL, `meta_at` set) from "we never looked" (both NULL) |
+| `image`, `description` | what the token served at that URI **when we read it**, which for most rows is at launch and for some is days later — always read `meta_at` before treating one as the other. Live capture began 2026-09-08; 2026-09-02 to 09-07 were recovered on 09-10, so a document there is what the URI resolved to on the 10th and cannot be assumed identical to what it served on the 2nd. This reverses an earlier decision, stated here as a refusal, that backfilling would be "manufacturing evidence about the past". It would be, if the fetch time were hidden. It is not hidden: `meta_at` carries it, the token page prints it, and the alternative was letting the documents be deleted at source while we held a principle about them. Several thousand were deleted before we reached them |
+| `meta_at` | when that read succeeded — and the only honest way to date the two columns above. It does **not** separate "we never looked" from "we looked and nobody served it": a NULL here means we do not hold a document, for whichever reason. The reason is recorded in the collector as `meta_error` and is not published, because it describes our fetch and not the launch |
 | `image_sha256` | sha256 of the image bytes as we fetched them, when we hold them. The record carries the proof, never the picture: 64 hex characters against a few hundred KB, which is what keeps this file mirrorable |
 | `image_bytes`, `image_at` | size of those bytes, and when they were fetched — the fetch time, not the launch time |
 
 ### Why the picture is only kept for some launches
 
-`image_sha256` is NULL on most rows, and that means **we did not fetch the bytes**, not that the launch had no
+`image_sha256` is NULL on many rows, and that means **we did not fetch the bytes**, not that the launch had no
 image. The URL is on the row either way.
 
 The bytes are now fetched for **every launch**, not only those that completed their bonding curve. Restricting it

@@ -655,8 +655,9 @@ export function tokenBody(
         ${t.name ? `<tr><td class="k">Name</td><td>${esc(t.name)}</td></tr>` : ""}
         ${t.description ? `<tr><td class="k">Description</td><td>${esc(t.description)}</td></tr>` : ""}
         ${t.meta_sha256 ? `<tr><td class="k">Metadata held</td><td><span class="mono">sha256 ${esc(t.meta_sha256)}</span>${
-          t.meta_bytes ? ` · ${fmt(t.meta_bytes)} bytes` : ""}<br><span class="sub">The document is kept but not
-          published; this hash lets anyone who obtains it prove it is the one we read.</span></td></tr>` : ""}
+          t.meta_bytes ? ` · ${fmt(t.meta_bytes)} bytes` : ""}<br><span class="sub"><a href="../d/${esc(t.mint)}">Read the
+          document</a> — the bytes themselves, not our reading of them. The hash above is what the record commits to,
+          so anyone can check the two agree.</span></td></tr>` : ""}
         ${t.image_sha256
           ? `<tr><td class="k">Picture held</td><td><span class="mono">sha256 ${esc(t.image_sha256)}</span>${
               t.image_bytes ? ` · ${fmt(t.image_bytes)} bytes` : ""}</td></tr>`
