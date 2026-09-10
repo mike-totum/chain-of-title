@@ -304,7 +304,22 @@ async function collectorHasNewer(): Promise<boolean> {
         return Number(m?.v ?? 0) || 0;
       } catch { return 0; }
     })();
-    if (theirs <= ours) { console.log(`[record] collector's build is not newer than ours; skipping the pull`); return false; }
+    /**
+     * Size decides, and the clock only breaks ties.
+     *
+     * This compared build times alone, and on 2026-09-10 that stranded the public archive 29,205 launches behind:
+     * every deploy bakes whatever `data/record.db` was on the laptop into the image, that copy happened to carry a
+     * later `built_at` than the collector's current build, and so the service sat serving 202,938 launches while
+     * the collector held 232,143 and declined to pull, correctly by the rule it was given. A build time says when
+     * a file was made. It says nothing about which file is more of the archive, and that is the actual question.
+     * The pull still has to clear the shrink guards afterwards, which is what protects against the reverse error.
+     */
+    const theirLaunches = Number(h?.observed ?? h?.launches ?? 0);
+    if (Number.isFinite(theirLaunches) && theirLaunches > observed * 1.001) {
+      console.log(`[record] collector holds ${theirLaunches.toLocaleString()} launches against the ${observed.toLocaleString()} being served; pulling`);
+      return true;
+    }
+    if (theirs <= ours) { console.log(`[record] collector's build is not newer than ours (${new Date(ours).toISOString()}) and holds no more launches (${theirLaunches.toLocaleString()} vs ${observed.toLocaleString()}); skipping the pull`); return false; }
     return true;
   } catch { return false; }
 }
