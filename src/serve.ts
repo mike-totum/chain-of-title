@@ -1170,16 +1170,32 @@ function buildHome(now: number): Home {
   };
 }
 
-function currentHome(): Home {
-  const now = Date.now();
-  if (homeCache && now - homeCache.at < HOME_TTL_MS) return homeCache.h;
-  /**
-   * The front page is assessed, not read: a cache miss walks every graduation in the window. It is the largest
-   * synchronous unit of work this process does on a request, and node runs it on the only thread there is, so
-   * everything else - other pages, the API, the deploy gate - waits behind it. That is timed rather than assumed
-   * because on 2026-09-10 a smoke check timed out with zero bytes after thirty seconds, and nothing in the logs
-   * could say what the process had been doing. A build slow enough to be felt says so.
-   */
+/**
+ * Serve what we have and refresh behind the request, rather than making one visitor pay for the rebuild.
+ *
+ * Measured against production on 2026-09-10: a warm front page answers in 0.10-0.14 s and the first request after
+ * the 60 s cache lapses takes 3.2 s. On a site with sparse traffic that is not an edge case — it is most visitors,
+ * because most arrivals follow a gap longer than the TTL. Every one of them was paying for the whole assessment
+ * pass while the page they were waiting for already existed in memory, one field away, only slightly out of date.
+ *
+ * Staleness costs nothing here and the arithmetic says so plainly: the record itself is up to six hours old by
+ * design (build interval plus pull interval), and every page states the age of what it is showing. A front page a
+ * couple of minutes behind that is not a different kind of claim, it is the same claim rounded.
+ *
+ * This does not make the rebuild cheaper, and node has one thread, so the 3 s still blocks the loop when it runs —
+ * it just no longer blocks it in front of somebody. The deeper fix is that `assess()` recomputes launch facts that
+ * cannot change: for a graduated token everything except the liquidity reading is settled forever, so the pass is
+ * re-deriving thousands of immutable answers every minute. Memoising by mint is the real win and belongs with
+ * whoever owns the clean/liquidity split, not in a latency patch.
+ *
+ * STALE_LIMIT caps it. If a rebuild is failing, serving an ever-older page silently is exactly the frozen-archive
+ * failure this project already has a probe for, so past ten intervals we go back to building synchronously and the
+ * visitor waits rather than being lied to quickly.
+ */
+const HOME_STALE_LIMIT_MS = HOME_TTL_MS * 10;
+let homeRebuilding = false;
+
+function rebuildHome(now: number): Home {
   const t0 = performance.now();
   const h = buildHome(now);
   const html = page(homeTitle(h), homeBody(h), chrome, 0, undefined, "/");
@@ -1187,6 +1203,34 @@ function currentHome(): Home {
   if (ms > 1000) console.log(`[home] rebuilt in ${Math.round(ms)} ms, blocking everything else for that long`);
   homeCache = { at: now, h, html };
   return h;
+}
+
+function currentHome(): Home {
+  const now = Date.now();
+  if (homeCache) {
+    const age = now - homeCache.at;
+    if (age < HOME_TTL_MS) return homeCache.h;
+    if (age < HOME_STALE_LIMIT_MS) {
+      // Hand back the page we already have, then refresh. setImmediate so the response is flushed first.
+      if (!homeRebuilding) {
+        homeRebuilding = true;
+        setImmediate(() => {
+          try { rebuildHome(Date.now()); }
+          catch (e) { console.log(`[home] background rebuild failed: ${(e as Error).message}`); }
+          finally { homeRebuilding = false; }
+        });
+      }
+      return homeCache.h;
+    }
+  }
+  /**
+   * The front page is assessed, not read: a cache miss walks every graduation in the window. It is the largest
+   * synchronous unit of work this process does on a request, and node runs it on the only thread there is, so
+   * everything else - other pages, the API, the deploy gate - waits behind it. That is timed rather than assumed
+   * because on 2026-09-10 a smoke check timed out with zero bytes after thirty seconds, and nothing in the logs
+   * could say what the process had been doing. A build slow enough to be felt says so.
+   */
+  return rebuildHome(now);
 }
 function renderHome(): string { currentHome(); return homeCache!.html; }
 
