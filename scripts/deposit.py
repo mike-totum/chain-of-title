@@ -80,11 +80,26 @@ def counts(path):
         out["built_at"] = q("SELECT v FROM meta WHERE k='built_at'")
     except sqlite3.Error:
         out["built_at"] = None
+    # Coverage comes from `runs`, never from MIN(created_at).
+    #
+    # The old query took the earliest launch in the file and labelled it "Continuous coverage from". Two rows in this
+    # archive are reconstructions of older launches — one from 2026-05-10 — so the mirror's front page advertised four
+    # months of continuous observation on a record holding eight days of it, computed from a single rebuilt row. That
+    # is the exact overstatement DATA.md opens by warning against ("anyone describing this as four months of history
+    # is reading the span and not the coverage"), published on the artefact a grant reviewer reads first.
+    #
+    # `runs` holds the intervals the collector was actually observing, which is what coverage means here. The span is
+    # still reported, separately and under its own name, because it is a true and different fact.
     try:
-        first = q("SELECT MIN(created_at) FROM tokens WHERE created_at > 1756000000000")
+        first = q("SELECT MIN(started_at) FROM runs")
         out["coverage_from"] = datetime.datetime.utcfromtimestamp(first / 1000).isoformat() + "Z"
     except Exception:
         out["coverage_from"] = None
+    try:
+        first = q("SELECT MIN(created_at) FROM tokens WHERE created_at > 1756000000000")
+        out["span_from"] = datetime.datetime.utcfromtimestamp(first / 1000).isoformat() + "Z"
+    except Exception:
+        out["span_from"] = None
     db.close()
     return out
 
@@ -133,7 +148,8 @@ deposit describes itself.
 | Reconstructed buyout history | {c['hist_trades']:,} |
 | Operator wallets | {c['operator_wallets']:,} |
 | Launches with their declared metadata captured | {c['with_metadata']:,} |
-| Continuous coverage from | `{c['coverage_from']}` |
+| Continuous observation from | `{c['coverage_from']}` |
+| Earliest launch in the file (span, not coverage) | `{c['span_from']}` |
 
 `launches` counts what was watched from the creation transaction — the population every claim is about. `records`
 counts every row, which additionally includes launches restored after the fact and those rebuilt from chain history.
