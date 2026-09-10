@@ -18,8 +18,11 @@
 # put whichever machine deploys back in the publish path and would grow by ~570 MB a day.
 data/images
 data/pump.db*
-# data/seed.db is NOT shipped. It was, deliberately, for the two boots that merged it (13:12 and 14:13 on
-# 2026-09-08, both recorded in the collector's `seed_merges`); this is the negation being removed afterwards, which
+# data/seed.db is NOT shipped. It was, deliberately, for the three boots that merged it (13:12 and 14:13 on
+# 2026-09-08, and 20:13 on 2026-09-10 — all recorded in the collector's `seed_merges`). The third carried
+# 110,565 metadata documents the collector did not have, and took 09-02 through 09-07 from no documents at
+# all to between 11% and 87% held; about 3,448 of them exist in no other copy, their source host having
+# deleted them. The negation was removed again the same hour, which is this note; this is the negation being removed afterwards, which
 # the plan called putting the shovel back. Leaving it in bakes 91 MB into every image for no benefit, and worse: the
 # merge is keyed on the seed's size and hash, so the day someone re-runs `npm run seed` the next ordinary deploy
 # would carry a file with a new key and merge it on boot, unasked. To seed a fresh collector, re-add `!data/seed.db`
