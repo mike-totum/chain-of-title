@@ -25,7 +25,7 @@ of a different object. That distinction is the same one the site had wrong all m
 Needs HF_TOKEN in .env. Exits non-zero on failure and says why: a deposit that quietly does nothing is exactly the
 failure it exists to prevent.
 """
-import os, re, sqlite3, sys, datetime, pathlib
+import os, re, sqlite3, sys, datetime, pathlib, json, gzip, hashlib
 
 REPO = "chainoftitle/chain-of-title"
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -35,6 +35,8 @@ def arg(flag, default=None):
 
 DRY = "--dry-run" in sys.argv
 REC = pathlib.Path(arg("--record", str(ROOT / "data/record.db")))
+DOCS = pathlib.Path(arg("--documents", str(ROOT / "data/documents.ndjson.gz")))
+DOCS_MANIFEST = pathlib.Path(arg("--documents-manifest", str(ROOT / "data/documents.json")))
 
 def token():
     if os.environ.get("HF_TOKEN"):
@@ -103,7 +105,35 @@ def counts(path):
     db.close()
     return out
 
-def readme(c, size, built_iso):
+def documents(path, manifest_path):
+    """The launch documents sidecar, verified against its own manifest before it can be deposited.
+
+    This is the layer with the strongest claim to be in a permanent deposit, and it is the one that was not in it.
+    record.db describes on-chain facts, which an archival node can rebuild for anyone willing to pay. A launch's own
+    account of itself lives behind a URI its creator controls, is ~99% retrievable for two days and ~12% after a
+    week, and for several thousand launches this is now the only surviving copy. Reconstructible data was being
+    preserved forever while unreconstructible data was not.
+
+    Verified, not trusted: the manifest carries a sha256 of the uncompressed NDJSON, and this recomputes it from the
+    bytes about to be uploaded. A mismatch is refused rather than reported, because a deposit cannot be withdrawn and
+    a corpus that does not match its own manifest is worse than no corpus — it would put a hash on the permanent
+    record that nothing in the world satisfies.
+    """
+    if not path.exists() or not manifest_path.exists():
+        return None
+    m = json.loads(manifest_path.read_text())
+    h = hashlib.sha256()
+    with gzip.open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    if m.get("sha256") and h.hexdigest() != m["sha256"]:
+        raise SystemExit(f"FAIL  documents sidecar does not match its manifest\n"
+                         f"      manifest {m['sha256']}\n      actual   {h.hexdigest()}\n"
+                         f"      Refusing to deposit. A permanent record must not carry a hash nothing satisfies.")
+    m["gzipBytes"] = path.stat().st_size
+    return m
+
+def readme(c, size, built_iso, docs=None):
     # Errata, rendered from the file's own corrections table. A deposit that cannot be withdrawn needs a way to be
     # corrected, and pointing at a website for it defeats the reason the deposit exists.
     if c["corrections"]:
@@ -118,6 +148,32 @@ def readme(c, size, built_iso):
                   "row naming it, never edited.\n\n" + "\n".join(rows))
     else:
         errata = ""
+    if docs:
+        cov = docs.get("launchesWithBytesHeld") or docs.get("launchesCovered") or 0
+        corpus = (
+            "\n## The launch documents\n\n"
+            "`documents.ndjson.gz` is the second artefact in this deposit and the one that cannot be rebuilt.\n\n"
+            f"| | |\n|---|---|\n"
+            f"| Documents | {docs.get('documents', 0):,} |\n"
+            f"| Launches with their bytes held | {cov:,} |\n"
+            f"| Compressed | {docs.get('gzipBytes', 0):,} bytes |\n"
+            f"| Uncompressed | {docs.get('ndjsonBytes', 0):,} bytes |\n"
+            f"| sha256 of the uncompressed NDJSON | `{docs.get('sha256','')}` |\n\n"
+            "Everything in `record.db` describes the chain, and an archival node can rebuild it for anyone willing "
+            "to pay. This file cannot be rebuilt at any price. A launch's own account of itself — what it claimed to "
+            "be — lives behind a URI its creator owns, and measured on 2026-09-09 those assets are about 99% "
+            "retrievable after two days and 12% after a week. For several thousand launches here this is the only "
+            "surviving copy.\n\n"
+            "One JSON document per line, each carrying the mint, the URI it was fetched from, when it was fetched, "
+            "and the document as served. The sha256 above is of the uncompressed stream and is verified against this "
+            "file before every deposit. CC0-1.0, like the rest.\n"
+        )
+    else:
+        corpus = (
+            "\n## Scope of this deposit\n\n"
+            "This deposit contains `record.db` only. The launch documents corpus published at "
+            "`chainoftitle.org/data/documents.ndjson.gz` is **not** included in this revision.\n"
+        )
     return f"""---
 license: cc0-1.0
 pretty_name: Chain of Title — Solana launch provenance
@@ -155,6 +211,7 @@ deposit describes itself.
 counts every row, which additionally includes launches restored after the fact and those rebuilt from chain history.
 They are different numbers and are never used interchangeably.
 
+{corpus}
 {errata}
 ## Read this before quoting a number
 
@@ -187,6 +244,7 @@ def main():
 
     size = REC.stat().st_size
     c = counts(REC)
+    docs = documents(DOCS, DOCS_MANIFEST)
     built_ms = c["built_at"]
     built_iso = (datetime.datetime.utcfromtimestamp(int(built_ms) / 1000).isoformat() + "Z") if built_ms else "unrecorded"
     print(f"record   {REC}  {size:,} bytes, built {built_iso}")
@@ -209,11 +267,19 @@ def main():
             return 1
 
     if DRY:
+        if docs: print(f"         + {docs['documents']:,} launch documents, {docs['gzipBytes']:,} bytes, hash verified")
+        else:    print("         no documents sidecar found — README will scope itself to record.db")
         print("DRY RUN — nothing uploaded."); return 0
 
-    (ROOT / "data/_README.md").write_text(readme(c, size, built_iso))
+    (ROOT / "data/_README.md").write_text(readme(c, size, built_iso, docs))
     api.upload_file(path_or_fileobj=str(REC), path_in_repo="record.db", repo_id=REPO, repo_type="dataset",
                     commit_message=f"Record of {built_iso}: {c['launches']:,} launches")
+    if docs:
+        api.upload_file(path_or_fileobj=str(DOCS), path_in_repo="documents.ndjson.gz", repo_id=REPO,
+                        repo_type="dataset",
+                        commit_message=f"Launch documents: {docs.get('documents', 0):,} unreconstructible records")
+        api.upload_file(path_or_fileobj=str(DOCS_MANIFEST), path_in_repo="documents.json", repo_id=REPO,
+                        repo_type="dataset", commit_message="Manifest for the launch documents corpus")
     api.upload_file(path_or_fileobj=str(ROOT / "data/_README.md"), path_in_repo="README.md", repo_id=REPO,
                     repo_type="dataset", commit_message=f"Describe the deposit of {built_iso}")
     print(f"PASS  deposited {size:,} bytes to {REPO} — doi:10.57967/hf/10338")
