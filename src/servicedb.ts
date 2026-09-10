@@ -113,6 +113,17 @@ db.exec(`
     -- anyone willing to pay for archival RPC: they live behind a URI the creator controls and vanish when it is
     -- repointed or unpinned. meta_at distinguishes "declared none" from "we never looked". See db.ts.
     uri TEXT, image TEXT, description TEXT, meta_at INTEGER,
+    -- How long after the launch we read its document, in milliseconds: meta_at minus created_at, published as a
+    -- column so that reading a launch claim never requires a subtraction against a threshold we did not state.
+    -- A document read eight days after a launch is what the URI served on the eighth day. It may be identical to
+    -- what it served at launch and it may be the operator's later story; nothing on-chain distinguishes them,
+    -- because the creator owns the URI. That makes this the reader's most important qualifier on image and
+    -- description, and the reader most exposed is the one pulling both in bulk to study what launches claimed.
+    -- Published as the lag itself rather than a backfilled/not flag, because the lag is a fact and the flag would
+    -- be a threshold we invented. Measured 2026-09-10 the distribution is sharply bimodal: 80,448 rows under one
+    -- minute, 69,597 over a day, 2,174 in between. Any cut between ten minutes and a day selects the same cohort,
+    -- and a reader can see that rather than trust it.
+    meta_lag_ms INTEGER,
     -- The proof of the picture, never the picture. A sha256 is 64 bytes and lets anyone verify that a copy of an
     -- image is the one we saw; the bytes average a few hundred KB and would inflate a 334-bytes-per-launch archive
     -- by four orders of magnitude, destroying the property that makes it mirrorable. The files travel separately.
@@ -247,7 +258,7 @@ try { db.exec("UPDATE rec.tokens SET graduated_confirmed_by = 'pool' WHERE gradu
  */
 for (const c of ["uri TEXT", "image TEXT", "description TEXT", "meta_at INTEGER",
                  "image_sha256 TEXT", "image_bytes INTEGER", "image_at INTEGER", "meta_bytes INTEGER",
-                 "meta_sha256 TEXT", "curve_checked_at INTEGER", "curve_complete INTEGER"])
+                 "meta_sha256 TEXT", "curve_checked_at INTEGER", "curve_complete INTEGER", "meta_lag_ms INTEGER"])
   try { db.exec(`ALTER TABLE rec.tokens ADD COLUMN ${c}`); } catch {}
 
 /**
@@ -289,6 +300,8 @@ db.function("sha256", (v: unknown) =>
  */
 for (const [col, expr] of [
   ["meta_sha256", "sha256(m.meta_json)"],
+  // Arrives whenever the document does, which for a recovered launch is days after the row stopped changing.
+  ["meta_lag_ms", "CASE WHEN m.meta_at IS NOT NULL AND m.created_at IS NOT NULL THEN m.meta_at - m.created_at END"],
   ["image_sha256", "m.image_sha256"],
   ["image_bytes", "m.image_bytes"],
   ["image_at", "m.image_at"],
@@ -373,7 +386,7 @@ try {
        unique_buyers, curve_buyers, snap30_buyers, bundled_buyers, graduated, graduated_at,
        pool, vault_sol, vault_at, last_price, rebuilt_at, rebuilt_complete, updated_at,
        venue, graduated_confirmed_by, create_sig, create_slot, uri, image, description, meta_at,
-       image_sha256, image_bytes, image_at, meta_sha256, meta_bytes)
+       image_sha256, image_bytes, image_at, meta_sha256, meta_bytes, meta_lag_ms)
     SELECT mint, name, symbol, creator, created_at, COALESCE(late_discovery,0), dev_pct, dev_sold,
            unique_buyers,
            ${READ_ONLY ? `COALESCE(curve_buyers, (SELECT COUNT(DISTINCT tr.wallet) FROM trades tr
@@ -395,7 +408,10 @@ try {
            sha256(meta_json),
            -- The document's size as served, which is what tells "too big to store" apart from "never fetched".
            -- meta_json itself is deliberately not published: see the DROP below.
-           meta_bytes
+           meta_bytes,
+           -- How long after the launch we read its document. A fact, not a classification: the reader chooses the
+           -- cut, and DATA.md publishes the distribution so they can see the choice barely matters.
+           CASE WHEN meta_at IS NOT NULL AND created_at IS NOT NULL THEN meta_at - created_at END
     FROM main.tokens WHERE COALESCE(updated_at, 0) >= ${since}
       -- The quote asset is not a launch. Wrapped SOL was copied into the record as one and served as a token page.
       AND main.tokens.mint NOT IN ('So11111111111111111111111111111111111111112',
