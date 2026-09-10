@@ -17,12 +17,13 @@
  * Nothing is deleted that has not been uploaded, verified by size against what we sent, and written into a local
  * ledger. The order is always export, verify, record, then delete.
  */
-import { createGzip } from "node:zlib";
+import { createGzip, gunzipSync } from "node:zlib";
 import { setImmediate as yieldToLoop } from "node:timers/promises";
 import { createHash } from "node:crypto";
 import { config } from "./config.ts";
 import { openDb } from "./db.ts";
-import { r2Config, putKey, headKey, type R2Config } from "./r2.ts";
+import { r2Config, putKey, headKey, getKey, type R2Config } from "./r2.ts";
+import { BUYOUT_SOL } from "./provenance.ts";
 
 /** Every column, because the point of the archive is that it is complete. */
 const COLUMNS = ["id", "mint", "wallet", "side", "sol", "tokens", "price", "ts", "slot", "sig", "age_ms", "buyer_rank", "is_dev", "venue"];
@@ -115,10 +116,27 @@ export async function offloadTrades(db: any, o: OffloadOptions = {}): Promise<Of
   if (lowest == null) return { ...empty, skipped: "no trades on disk" };
   const oldest = { a: lowest, b: highest };
 
+  /**
+   * Rows the published record is built from, which must never leave this disk.
+   *
+   * `servicedb` builds `rec.trades` from buyout-sized curve buys plus the AMM trades on those same (wallet, mint)
+   * pairs. They are the evidence behind every operator page. The first version of this offloader did not know that
+   * and took some of them with the bulk, so the next record carried 4,260 trade rows against the 4,955 already
+   * published - and the web service's shrink guard correctly refused the pull, which left the public archive
+   * 29,419 launches behind until it was found. The bulk is commodity data anyone can re-derive; these few thousand
+   * rows are the part that is ours, and they are small enough that keeping them forever costs nothing.
+   */
+  const keep = new Set<string>();
+  for (const b of db.prepare(
+    `SELECT DISTINCT wallet, mint FROM trades WHERE venue='curve' AND side='buy' AND sol >= ?`).all(BUYOUT_SOL) as any[])
+    keep.add(`${b.wallet} ${b.mint}`);
+  const isEvidence = (r: any) =>
+    (r.venue === "curve" && r.side === "buy" && Number(r.sol) >= BUYOUT_SOL) ||
+    (r.venue === "amm" && keep.has(`${r.wallet} ${r.mint}`));
+
   const rowsIn = db.prepare(
     `SELECT ${COLUMNS.join(", ")} FROM trades WHERE id >= ? AND id < ? AND ts IS NOT NULL AND ts < ? ORDER BY id LIMIT ?`);
   const nextIdAfter = db.prepare("SELECT MIN(id) a FROM trades WHERE id >= ?");
-  const del = db.prepare("DELETE FROM trades WHERE id >= ? AND id <= ? AND ts IS NOT NULL AND ts < ?");
   const ins = o.dryRun ? null : db.prepare(`INSERT OR REPLACE INTO trade_offloads
     (key, day, id_from, id_to, rows, bytes, sha256, ts_min, ts_max, uploaded_at, deleted_at, deleted_rows)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`);
@@ -130,7 +148,7 @@ export async function offloadTrades(db: any, o: OffloadOptions = {}): Promise<Of
   for (let part = 0; part < maxParts; part++) {
     // A window of ids wide enough to contain a full part even when most of its rows are already gone or too new.
     const windowEnd = cursor + partRows * 8;
-    const rows = rowsIn.all(cursor, windowEnd, cutoff, partRows) as any[];
+    let rows = rowsIn.all(cursor, windowEnd, cutoff, partRows) as any[];
     if (!rows.length) {
       // Give the loop back before stepping to the next window. This process is also decoding two websockets, and
       // the first pass in production blocked long enough to disconnect both of them - which costs launches, the
@@ -147,6 +165,10 @@ export async function offloadTrades(db: any, o: OffloadOptions = {}): Promise<Of
     }
 
     const idFrom = Number(rows[0].id), idTo = Number(rows[rows.length - 1].id);
+    // Evidence rows stay. They are still counted in the window we advance past, so the pass makes progress.
+    const held = rows.filter(isEvidence);
+    rows = rows.filter((r) => !isEvidence(r));
+    if (!rows.length) { cursor = idTo + 1; part--; await yieldToLoop(); continue; }
     // Folded rather than spread: `Math.min(...rows)` on a 250,000-row part exceeds the argument limit and throws
     // RangeError: Maximum call stack size exceeded, which is a confusing way to learn that a part got large.
     let tsMin = Infinity, tsMax = -Infinity;
@@ -193,14 +215,21 @@ export async function offloadTrades(db: any, o: OffloadOptions = {}): Promise<Of
      * ledger row above is already committed, so a pass interrupted midway resumes correctly rather than orphaning
      * an upload. The range is bounded by ids we have just exported, so a partial delete loses nothing.
      */
+    /**
+     * Deleted by explicit id, not by range. The range now contains rows we deliberately kept, and a range delete
+     * would take them - which is the very fault this part of the pass exists to avoid.
+     */
     let removed = 0;
-    for (let from = idFrom; from <= idTo; from += 10_000) {
-      removed += del.run(from, Math.min(from + 9_999, idTo), cutoff).changes as number;
+    const ids = rows.map((r) => Number(r.id));
+    for (let i = 0; i < ids.length; i += 500) {
+      const slice = ids.slice(i, i + 500);
+      removed += db.prepare(`DELETE FROM trades WHERE id IN (${slice.map(() => "?").join(",")})`).run(...slice).changes as number;
       await yieldToLoop();
     }
     db.prepare("UPDATE trade_offloads SET deleted_at = ?, deleted_rows = ? WHERE key = ?").run(Date.now(), removed, key);
 
-    log(`[offload] ${key}: ${rows.length.toLocaleString()} rows, ${(body.length / 1048576).toFixed(1)} MB gz, deleted ${removed.toLocaleString()} locally`);
+    log(`[offload] ${key}: ${rows.length.toLocaleString()} rows, ${(body.length / 1048576).toFixed(1)} MB gz, ` +
+      `deleted ${removed.toLocaleString()} locally${held.length ? `, kept ${held.length.toLocaleString()} evidence rows` : ""}`);
     res.parts++; res.rows += rows.length; res.bytes += body.length; res.deleted += removed;
     cursor = idTo + 1;
     await yieldToLoop();
@@ -208,10 +237,58 @@ export async function offloadTrades(db: any, o: OffloadOptions = {}): Promise<Of
   return res;
 }
 
+/**
+ * Put back what an earlier pass should never have taken.
+ *
+ * The first version of this offloader did not know which rows the published record is built from and exported some
+ * of them. Nothing was lost - that is the point of uploading before deleting - but the collector no longer held
+ * them, so the next record build came out with less evidence than the one it would replace and the web service
+ * refused it. This reads every object the ledger names back out of R2 and re-inserts its rows under their original
+ * ids, which are still free because nothing else has used them.
+ *
+ * Idempotent by INSERT OR IGNORE on the primary key: running it twice restores nothing the second time. Bounded
+ * per object, and it yields, for the same reason everything else here does.
+ */
+export async function restoreOffloaded(db: any, o: { log?: (s: string) => void } = {}): Promise<{ objects: number; restored: number }> {
+  const log = o.log ?? ((s: string) => console.log(s));
+  const cfg = r2Config();
+  if (!cfg) { log("[restore] R2 is not configured"); return { objects: 0, restored: 0 }; }
+  ensureLedger(db);
+  try { db.exec("ALTER TABLE trade_offloads ADD COLUMN restored_at INTEGER"); } catch { /* already there */ }
+
+  const todo = db.prepare("SELECT key, rows FROM trade_offloads WHERE deleted_at IS NOT NULL AND restored_at IS NULL ORDER BY key").all() as any[];
+  let restored = 0;
+  for (const t of todo) {
+    const body = await getKey(cfg, t.key);
+    if (!body) { log(`[restore] ${t.key} is not in the store; skipping`); continue; }
+    const lines = gunzipSync(body).toString("utf8").trim().split("\n");
+    const header = lines[0].split(",");
+    const ins = db.prepare(`INSERT OR IGNORE INTO trades (${header.join(", ")}) VALUES (${header.map(() => "?").join(",")})`);
+    let n = 0;
+    for (let i = 1; i < lines.length; i++) {
+      // The exporter escapes only when it has to, and these columns are base58, numbers and short words.
+      const v = lines[i].split(",").map((x) => (x === "" ? null : x));
+      n += ins.run(...v).changes as number;
+      if (i % 2000 === 0) await yieldToLoop();
+    }
+    db.prepare("UPDATE trade_offloads SET restored_at = ? WHERE key = ?").run(Date.now(), t.key);
+    restored += n;
+    log(`[restore] ${t.key}: ${n.toLocaleString()} rows put back`);
+    await yieldToLoop();
+  }
+  return { objects: todo.length, restored };
+}
+
 // CLI. Importing must not run a pass.
 const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop() ?? " ");
 if (isMain) {
   const dryRun = process.argv.includes("--dry-run");
+  if (process.argv.includes("--restore")) {
+    const db = openDb(config.dbPath);
+    const r = await restoreOffloaded(db);
+    console.log(`restored ${r.restored.toLocaleString()} rows from ${r.objects} objects`);
+    process.exit(0);
+  }
   const db = openDb(config.dbPath);
   if (dryRun) db.exec("PRAGMA query_only = 1");
   const r = await offloadTrades(db, { dryRun, log: (s) => console.log(s) });

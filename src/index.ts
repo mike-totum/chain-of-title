@@ -1353,6 +1353,17 @@ if (process.env.CLUSTERS_TRACE === "1") {
  * repair. Bounded per pass so it always terminates, and it never deletes a row it has not first uploaded and read
  * back the size of.
  */
+/** One-shot: put back rows an earlier offload took that the record is built from. Unset once it has run. */
+if (process.env.TRADES_RESTORE === "1") {
+  setTimeout(() => void (async () => {
+    try {
+      const { restoreOffloaded } = await import("./offload.ts");
+      const r = await restoreOffloaded(db, { log: (s) => log(s) });
+      log(`[restore] complete: ${r.restored.toLocaleString()} rows from ${r.objects} objects`);
+    } catch (e) { log(`[restore] failed: ${(e as Error).message}`); }
+  })(), 45_000);
+}
+
 if (process.env.TRADES_OFFLOAD === "1") {
   const EVERY_MS = Number(process.env.TRADES_OFFLOAD_EVERY_MINUTES ?? 20) * 60_000;
   let running = false;
