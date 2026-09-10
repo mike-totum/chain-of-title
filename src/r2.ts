@@ -81,11 +81,49 @@ function sign(cfg: R2Config, method: string, key: string, payloadHash: string, e
 
 /** Does the store already hold these bytes? Content-addressed, so this is a real dedup check and not a guess. */
 export async function head(cfg: R2Config, sha256: string, timeoutMs = 15_000): Promise<boolean> {
-  const { url, headers } = sign(cfg, "HEAD", objectKey(sha256), "UNSIGNED-PAYLOAD");
+  return (await headKey(cfg, objectKey(sha256), timeoutMs)) !== null;
+}
+
+/**
+ * The stored size of an object, or null if it is not there.
+ *
+ * Images are content-addressed, so their existence is the whole check: the bytes cannot differ from the name. The
+ * trade archive is not - its keys are dates - so "is it there" is not sufficient and the size is what a caller
+ * compares against what it uploaded before deleting anything locally.
+ */
+export async function headKey(cfg: R2Config, key: string, timeoutMs = 15_000): Promise<number | null> {
+  const { url, headers } = sign(cfg, "HEAD", key, "UNSIGNED-PAYLOAD");
   const res = await fetch(url, { method: "HEAD", headers, signal: AbortSignal.timeout(timeoutMs) });
-  if (res.status === 404) return false;
+  if (res.status === 404) return null;
   if (!res.ok) throw new Error(`HEAD ${res.status}`);
-  return true;
+  const len = res.headers.get("content-length");
+  return len === null ? -1 : Number(len);
+}
+
+/** Read an object by key. The archive's own readers need this; so does anything verifying what was stored. */
+export async function getKey(cfg: R2Config, key: string, timeoutMs = 120_000): Promise<Buffer | null> {
+  const { url, headers } = sign(cfg, "GET", key, "UNSIGNED-PAYLOAD");
+  const res = await fetch(url, { method: "GET", headers, signal: AbortSignal.timeout(timeoutMs) });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`GET ${res.status}`);
+  return Buffer.from(await res.arrayBuffer());
+}
+
+/** Remove an object. Used by the offload self-test to clean up after itself; the archive itself never deletes. */
+export async function deleteKey(cfg: R2Config, key: string, timeoutMs = 15_000): Promise<void> {
+  const { url, headers } = sign(cfg, "DELETE", key, "UNSIGNED-PAYLOAD");
+  const res = await fetch(url, { method: "DELETE", headers, signal: AbortSignal.timeout(timeoutMs) });
+  if (!res.ok && res.status !== 404) throw new Error(`DELETE ${res.status}`);
+}
+
+/** Store bytes under a chosen key. Same signing path as `put`, without the content-addressed naming rule. */
+export async function putKey(cfg: R2Config, key: string, body: Buffer, contentType = "application/octet-stream", timeoutMs = 120_000): Promise<void> {
+  const { url, headers } = sign(cfg, "PUT", key, sha(body), {
+    "content-type": contentType,
+    "content-length": String(body.length),
+  });
+  const res = await fetch(url, { method: "PUT", headers, body: new Uint8Array(body), signal: AbortSignal.timeout(timeoutMs) });
+  if (!res.ok) throw new Error(`PUT ${res.status} ${(await res.text().catch(() => "")).slice(0, 200)}`);
 }
 
 /**

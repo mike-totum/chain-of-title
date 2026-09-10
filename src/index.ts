@@ -1345,6 +1345,35 @@ if (process.env.CLUSTERS_TRACE === "1") {
  * Cheap and self-terminating: it writes only where `create_sig IS NULL` and a matching trade row exists, so once
  * caught up every pass does nothing. Bounded batches, because the process this runs inside must not stop ingesting.
  */
+/**
+ * Move old trade rows to the object store and out of the local database.
+ *
+ * Runs on the ingesting process's own connection, like every other sweep here, because a second writer against the
+ * collector's 10 s busy_timeout costs dropped launches - and a dropped launch is the one loss this project cannot
+ * repair. Bounded per pass so it always terminates, and it never deletes a row it has not first uploaded and read
+ * back the size of.
+ */
+if (process.env.TRADES_OFFLOAD === "1") {
+  const EVERY_MS = Number(process.env.TRADES_OFFLOAD_EVERY_MINUTES ?? 20) * 60_000;
+  let running = false;
+  const run = async () => {
+    if (running) return;
+    running = true;
+    try {
+      const { offloadTrades } = await import("./offload.ts");
+      const r = await offloadTrades(db, { log: (s) => log(s) });
+      if (r.parts) log(`[offload] pass complete: ${r.parts} objects, ${r.rows.toLocaleString()} rows, ` +
+        `${(r.bytes / 1048576).toFixed(1)} MB stored, ${r.deleted.toLocaleString()} rows freed locally`);
+      else if (r.skipped) log(`[offload] nothing to do: ${r.skipped}`);
+    } catch (e) {
+      // Loudly, and without deleting anything: the pass throws before the delete on any upload it cannot verify.
+      log(`[offload] FAILED, nothing deleted: ${(e as Error).message}`);
+    } finally { running = false; }
+  };
+  setTimeout(() => void run(), 90_000);
+  setInterval(() => void run(), EVERY_MS);
+}
+
 if (process.env.BACKFILL_SIG === "1") {
   const EVERY_MS = Number(process.env.BACKFILL_SIG_EVERY_MINUTES ?? 30) * 60_000;
   const BATCH = Number(process.env.BACKFILL_SIG_BATCH ?? 5000);
