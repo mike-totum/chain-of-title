@@ -149,7 +149,16 @@ async function pollLive(): Promise<void> {
     // A collector that answers without a count is not a collector that has zero launches: it is one whose own
     // COUNT(*) threw, which is a fault on its side and must not be rendered as a number.
     if (typeof h.observed === "number" && typeof h.held === "number") {
-      live = { observed: h.observed, held: h.held, at: Date.now() };
+      /**
+       * Carry the fields through rather than picking two of them.
+       *
+       * This picked `observed` and `held` and dropped everything else, so `operators` — added to /health precisely
+       * to make the publish guard observable — arrived and was discarded, and /api/v1/live reported null. Two
+       * deploys were spent diagnosing the producer for a fault in the consumer, which is this evening's shape
+       * exactly: the thing that looked broken was the thing being read, not the thing being sent.
+       */
+      live = { observed: h.observed, held: h.held, operators: h.operators ?? null,
+        operatorsError: h.operatorsError ?? null, at: Date.now() };
       liveErr = null;
     } else liveErr = "collector reachable but reported no counts";
   } catch (e) {
