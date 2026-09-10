@@ -257,10 +257,6 @@ td.mut,.mut{color:var(--mut)}
 .sample .swhy{display:block;color:var(--mut);font-size:13.5px;line-height:1.5}
 .sample .scta{display:block;margin-top:9px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut)}
 .sample:hover .scta{color:var(--fg)}
-/* An operator's heading is its funding address, which is 44 characters of base58 and has to be allowed to wrap
-   without pushing the page sideways on a phone. */
-.oph1{font-size:22px;margin:0 0 4px}
-.oph1 .a{display:block;margin-top:5px;font-size:15px;font-weight:600;word-break:break-all;line-height:1.35}
 /* Three records to open, for the visitor who has nothing to paste - which is most of them. */
 .starts{margin:14px 0 0;border:1px solid var(--line);background:var(--card)}
 .starts .sh{display:block;padding:8px 14px;font-size:11px;text-transform:uppercase;letter-spacing:.09em;
@@ -880,6 +876,13 @@ export function homeBody(h: Home): string {
   <p class="lede">Where we can trace who paid to open a buying wallet, that same address has often opened dozens
   more. These are the groups that have taken the most curves. Each one has a page: every wallet, every purchase,
   the wait between the launch and the buy, and the transaction behind each of them.</p>
+  ${/*
+      Said here because of what sits directly above it: the wallet table truncates addresses with an ellipsis, so
+      a six-character operator name in the next table reads as one more address with its end cut off. It is not an
+      address at all, and on a phone the two tables are a thumb apart.
+    */ ""}
+  <p class="sub">The name in the first column is ours: the first six characters of the address that funded the
+  group, used as a label. It is not a shortened wallet address, and each group's page gives the address in full.</p>
   <table class="data"><tr><th>Operator</th><th class="num">Wallets funded</th><th class="num">Wallets used</th>
     <th class="num">Curves taken</th><th class="num">Spent</th><th class="num">Last seen</th></tr>${clusters}</table>
   <p class="callout">A shared funder is a lead, not a finding. Trading terminals fund their users from one address
@@ -1285,17 +1288,15 @@ export function clusterBody(p: {
 
   return `
     ${/*
-        The heading carries the funding address in full. It used to show `cluster`, which is the first six
-        characters of that address and is what the database stores as the group's name - fine as a key, and wrong
-        as a title: a reader cannot look up six characters, cannot match them against a wallet they were shown
-        elsewhere, and reasonably reads the stub as us having cut the address short.
-
-        Where the group has several funding addresses the short name stays, because there is no single address to
-        promote and inventing one would be worse than the stub ever was.
+        A short name is fine; a short name that looks like a chopped address is not, and that is what this was.
+        `operator_wallets.cluster` holds the first six characters of a funding address, so the heading read as an
+        address with the end missing - reported from a phone, where it is the first thing on the screen. It stays
+        short, because it is what we call the group and it is what the URL and every link to this page use. The
+        line under it says so, and the address itself is in the table below, in full and unabbreviated.
       */ ""}
-    <h1 class="oph1">Operator cluster${p.funders.length === 1
-      ? `<span class="a mono">${esc(p.funders[0].funder)}</span>`
-      : ` <span class="mono">${esc(p.cluster)}</span>`}</h1>
+    <h1>Operator cluster <span class="mono">${esc(p.cluster)}</span></h1>
+    <p class="sub"><span class="mono">${esc(p.cluster)}</span> is our name for this group rather than an address:
+      the first six characters of the ${p.funders.length > 1 ? "address at the root of its funding chain" : "wallet that funded it"}.</p>
     <p class="lede">${fmt(p.wallets.length)} wallet${p.wallets.length === 1 ? "" : "s"} funded from ${
       p.funders.length > 1 ? `${fmt(p.funders.length)} addresses that trace to one` : "one address"}.
       ${used.length ? `<b>${fmt(used.length)}</b> of them bought <b>${fmt(p.curves)}</b> bonding curve${p.curves === 1 ? "" : "s"}
@@ -1311,10 +1312,12 @@ export function clusterBody(p: {
       <div class="stat"><span>curves taken</span><b class="big">${fmt(p.curves)}</b></div>
       <div class="stat"><span>spent on curves</span><b class="big">${fmt(p.sol)}</b> SOL</div>
     </div>
-    ${p.funders.length ? `<table>${p.funders.length > 1 ? `<tr><td class="k">Funded by</td><td>
+    ${p.funders.length ? `<table>${p.funders.length === 1
+      ? `<tr><td class="k">Funded by</td><td class="mono">${esc(p.funders[0].funder)}</td></tr>`
+      : `<tr><td class="k">Funded by</td><td>
         <b>${fmt(p.funders.length)}</b> different addresses, which is why this group is named after the first six
         characters of the one at the root of the chain rather than after an address of its own.
-        ${p.funders.map((f) => `<div class="mono">${esc(f.funder)} <span class="mut">· ${fmt(f.wallets)} wallet${f.wallets === 1 ? "" : "s"}</span></div>`).join("")}</td></tr>` : ""}
+        ${p.funders.map((f) => `<div class="mono">${esc(f.funder)} <span class="mut">· ${fmt(f.wallets)} wallet${f.wallets === 1 ? "" : "s"}</span></div>`).join("")}</td></tr>`}
       ${p.policy ? `<tr><td class="k">Cluster behaviour</td><td>${esc(p.policy)}</td></tr>` : ""}
       ${timed ? `<tr><td class="k">Bought at launch</td><td><b>${fmt(atLaunch)}</b> of ${fmt(timed)} purchases came
         within fifteen minutes of the token being created${timed < p.events.length
