@@ -257,6 +257,19 @@ td.mut,.mut{color:var(--mut)}
 .sample .swhy{display:block;color:var(--mut);font-size:13.5px;line-height:1.5}
 .sample .scta{display:block;margin-top:9px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut)}
 .sample:hover .scta{color:var(--fg)}
+/* Three records to open, for the visitor who has nothing to paste - which is most of them. */
+.starts{margin:14px 0 0;border:1px solid var(--line);background:var(--card)}
+.starts .sh{display:block;padding:8px 14px;font-size:11px;text-transform:uppercase;letter-spacing:.09em;
+  color:var(--mut);font-weight:700;border-bottom:1px solid var(--line)}
+.starts a{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:baseline;padding:9px 14px;
+  border-bottom:1px solid var(--line);text-decoration:none;font-size:14px}
+.starts a:last-child{border-bottom:0}
+.starts a:hover{background:var(--bg)}
+.starts .ss{font-weight:600;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;
+  max-width:14ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.starts .sl.DANGER{color:var(--bad)}.starts .sl.OK{color:var(--ok)}
+.starts .sl.CAUTION{color:var(--warn)}.starts .sl.UNKNOWN{color:var(--mut)}
+.starts .sa{color:var(--mut);font-size:12px;font-variant-numeric:tabular-nums}
 /* Scope, next to the claim it qualifies rather than in the footer. */
 .vscope{margin:9px 0 20px;color:var(--mut);font-size:13px;line-height:1.55;max-width:70ch}
 /* A wallet page is identified by its address, so the address is the heading rather than a word about it. */
@@ -689,6 +702,8 @@ export interface Home {
   danger24h: number; onFile: number;
   windowDays: number; gradWindow: number; cleanBirthWindow: number; unchecked: number; unread: number; unchecked24h: number;
   cleanRows: CleanRow[]; wallets: number; opRows: OpRow[]; clusterRows: HomeCluster[];
+  /** Records to open, for the visitor who has no address to paste. Newest first, uncurated. */
+  startHere: { mint: string; symbol: string | null; label: string; level: Verdict["level"]; at: number }[];
   proof: null | { mint: string; symbol: string | null; devPct: number; gradMs: number | null;
     nowSol: number; nowAt: number; verdict: Verdict };
   maxDevPct: number; minBuyers: number; buyoutSol: number; minPoolSol: number; maxReadingAgeMs: number;
@@ -752,6 +767,22 @@ export function homeBody(h: Home): string {
       <span class="swhy">${esc(p.verdict.why)}</span>
       <span class="scta">${esc(p.symbol ?? "?")} · read the record &rarr;</span>
     </a>` : ""}
+    ${/*
+        Everything else the page offers needs the visitor to have arrived with a token in mind: paste a mint, and
+        that is the whole tool. Most arrivals have no address to paste, and for them the page was a description of
+        a service rather than a way into it. These are three real records, one click each.
+
+        Uncurated on purpose - the newest three that finished a curve, whatever they turned out to be. Picking the
+        three most damning would make a better advertisement and a worse instrument, and the base rate is already
+        stated in the headline above by something that counted rather than chose.
+      */ ""}
+    ${h.startHere.length ? `<div class="starts">
+      <span class="sh">No address to hand? Three of the ${fmt(h.danger24h)} flagged in that window</span>
+      ${h.startHere.map((r) => `<a href="t/${esc(r.mint)}.html">
+        <span class="ss">${esc(r.symbol ?? "?")}</span>
+        <span class="sl ${r.level}">${esc(r.label)}</span>
+        <span class="sa">${ago(h.now - r.at)}</span></a>`).join("")}
+    </div>` : ""}
     </div>
     <div class="col-b">
     <div class="stats" style="margin:4px 0 0">

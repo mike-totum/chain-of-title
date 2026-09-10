@@ -997,6 +997,27 @@ function buildHome(now: number): Home {
      */
     clusterRows: clusterTable(db, 10),
     /**
+     * Three records to open, newest first, for a visitor with nothing to paste. Taken from the same assessed set
+     * the counters above are built from, so the page cannot offer a record it would describe differently, and the
+     * proof token is skipped because it is already shown as a card directly above these.
+     */
+    startHere: day
+      /**
+       * Chosen on the danger flag, which is a permanent finding about the launch record, and not on recency alone.
+       * Recency alone offered three launches all reading "Not certified" - which is a statement about whether we
+       * have a fresh pool balance, not about the token - so the one door into the archive taught a first-time
+       * visitor that the tool has nothing to say. These are three of the flagged count in the headline above, so
+       * they are representative of the majority rather than picked for effect.
+       */
+      .filter(({ t, a }) => t.mint !== proofRow?.t.mint && t.graduated_at &&
+        a.flags.some((f) => f.level === "DANGER"))
+      .sort((x, y) => (y.t.graduated_at ?? 0) - (x.t.graduated_at ?? 0))
+      .slice(0, 3)
+      .map(({ t, a }) => {
+        const v = verdict(t, a, false);
+        return { mint: t.mint, symbol: t.symbol, label: v.label, level: v.level, at: t.graduated_at as number };
+      }),
+    /**
       * `fundedSol` used to be here, hardcoded to 0, and the front page printed "pool funded to 0 SOL of real
       * liquidity" as step 2 of an argument whose whole point is that the pool looked funded before it was drained.
       * It rendered as liquidity going up. We store one pool balance per token (`vault_sol`, with the time it was
