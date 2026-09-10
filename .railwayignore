@@ -6,7 +6,11 @@
 # no channels and sat at "watching 0/21" while the laptop did the capturing. Re-included here so the collector can
 # read it; the image is private, the repo is not, and those are different questions.
 !channels.txt
-!data/record.db
+# data/record.db is NO LONGER shipped. It was, as a boot fallback so an unreachable collector could not take the
+# site down, and on 2026-09-10 that fallback put a laptop back in the publish path of a public archive: the copy
+# baked in from whoever ran `railway up` carried a later build timestamp than the collector's, the service
+# preferred it, and the archive sat 29,419 launches behind until someone read the log. The web service now keeps
+# its record on its own volume at /data/record.db and fetches one from the collector before it will serve.
 !site
 !site/**
 # Captured launch images are NEVER shipped in a build context. They live on the collector's volume, where they are
