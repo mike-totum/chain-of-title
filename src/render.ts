@@ -48,6 +48,8 @@ a:focus-visible,button:focus-visible,input:focus-visible,summary:focus-visible{o
 .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;word-break:break-all}
 .sub{color:var(--mut);font-size:13px;margin-bottom:24px}
 td.mut{color:var(--mut)}
+.shot{margin:14px 0;max-width:220px;border:1px solid var(--line);background:var(--card);padding:6px}
+.shot img{display:block;width:100%;height:auto;image-rendering:auto}
 td.thin{color:var(--bad)}
 table{width:100%;border-collapse:collapse;font-size:14px}th{text-align:left;font-weight:600;color:var(--mut);font-size:12px;text-transform:uppercase;letter-spacing:.05em}
 th,td{padding:7px 10px 7px 0;border-bottom:1px solid var(--line);vertical-align:top}
@@ -452,8 +454,31 @@ export function verdict(t: any, a: Assessment, clean: boolean): Verdict {
  * The body of a token page. `origin` says how we know what we know, which the reader is entitled to:
  * "observed" — watched live from creation; "rebuilt" — reconstructed completely from chain history.
  */
+/**
+ * What else this launch is a copy of.
+ *
+ * Two facts the record has always been able to answer and never did, both computed by the caller because they are
+ * index lookups against the whole archive rather than anything about this row: how many other launches used this
+ * exact picture, and what else this creator has launched.
+ *
+ * They matter more than any single figure on the page. 57% of the launches whose picture we hold use a picture
+ * another launch also used — one image is shared by 194 launches all called STONKPUMP — and 81% of all launches come
+ * from a wallet that has launched more than one, the busiest having launched 1,994. A reader looking at creator
+ * share and buyer counts is being asked to judge a token. A reader told this is the 194th launch of the same picture
+ * is being told what it is.
+ */
+export interface Priors {
+  /** other launches using the identical image bytes, by sha256. null when we hold no picture for this launch. */
+  sameImage: number | null;
+  imageSha: string | null;
+  /** other launches by this creator, and how many of those carry a danger flag */
+  byCreator: number;
+  creatorFlagged: number;
+}
+
 export function tokenBody(
   t: any, a: Assessment, r: Reading | null, origin: "observed" | "rebuilt", clean: boolean, now: number,
+  priors?: Priors,
 ): string {
   const rows = a.watched ? `
     <tr><td class="k">Created</td><td>${when(t.created_at)}</td></tr>
@@ -497,6 +522,26 @@ export function tokenBody(
 
   // How the record was obtained is part of the record. A rebuild is the same transactions, read later — but it cannot
   // include what the token claimed to be at launch, because that lives off-chain and the operator can change it.
+  /**
+   * Stated as counts with a route to the evidence, never as a conclusion. "Used by 193 other launches" is a fact
+   * about our archive; "this is a scam factory" is a claim about people, and the second is not ours to make on the
+   * strength of the first. The reader who follows the link sees the launches and decides.
+   */
+  const priorsBlock = !priors ? "" : (() => {
+    const bits: string[] = [];
+    if (priors.sameImage !== null && priors.sameImage > 0 && priors.imageSha)
+      bits.push(`<tr><td class="k">This picture</td><td><b>Used by ${fmt(priors.sameImage)} other launch${priors.sameImage === 1 ? "" : "es"}.</b>
+        Identical bytes, matched by sha256 — not a similar image, the same one.
+        <a href="../i/${esc(priors.imageSha)}.html">See them all &rarr;</a></td></tr>`);
+    else if (priors.sameImage === 0)
+      bits.push(`<tr><td class="k">This picture</td><td>No other launch we hold a picture for used this one.</td></tr>`);
+    if (priors.byCreator > 0)
+      bits.push(`<tr><td class="k">This creator</td><td><b>Has launched ${fmt(priors.byCreator + 1)} tokens${
+        priors.creatorFlagged > 0 ? `, ${fmt(priors.creatorFlagged)} of them carrying a danger flag` : ""}.</b>
+        <a href="../c/${esc(t.creator)}.html">See the others &rarr;</a></td></tr>`);
+    return bits.length ? `<h2>Seen before</h2><table>${bits.join("")}</table>` : "";
+  })();
+
   const provenance = origin === "rebuilt" ? `<div class="flag UNKNOWN"><span class="tag UNKNOWN">rebuilt</span>
     We did not watch this launch. Its record was reconstructed from the bonding curve's complete transaction history,
     so the figures below are the same on-chain events, read later. What it cannot tell you is what the token
@@ -564,7 +609,7 @@ export function tokenBody(
       var b=document.getElementById('cpb'),o=b.textContent;b.textContent='Copied';setTimeout(function(){b.textContent=o},1200)})}</script>
     ${provenance}
     ${a.flags.map((f) => `<div class="flag ${f.level}"><span class="tag ${f.level}">${f.level}</span>${esc(f.text)}</div>`).join("")}
-    <h2>At launch</h2><table>${rows}</table>${boBlock}${nowBlock}${claimed}
+    <h2>At launch</h2><table>${rows}</table>${priorsBlock}${boBlock}${nowBlock}${claimed}
     <div class="sec"><h2>Check another</h2></div>${SEARCH}`;
 }
 
@@ -818,3 +863,80 @@ export function walletBody(w: string, p: any, v: { label: string; why: string } 
 }
 
 export { MIN_POOL_SOL };
+
+/** One row in a list of launches that share something — a picture, or a creator. */
+/** Aggregates over the entire matching set, not over the page of rows shown. */
+export interface SiblingStats { total: number; flagged: number; grad: number; span: number }
+
+export interface SiblingRow {
+  mint: string; symbol: string | null; name: string | null; createdAt: number;
+  devPct: number | null; curveBuyers: number | null; graduated: boolean; danger: boolean;
+}
+
+/**
+ * Every launch that used one picture, or came from one creator, oldest first.
+ *
+ * This is the view the archive was always able to produce and never showed. A single token page can tell you the
+ * creator took 79% of supply; only this can tell you they have done it 1,994 times, or that the identical image has
+ * been launched 194 times under the same ticker. Serial reuse is not visible in any one launch, which is precisely
+ * why a scanner reading present state cannot see it at all.
+ *
+ * Oldest first on purpose: the interesting shape is the cadence — a burst of launches minutes apart, or a picture
+ * that returns every few days — and that reads forwards, not backwards.
+ */
+export function siblingsBody(
+  kind: "image" | "creator", key: string, rows: SiblingRow[], stats: SiblingStats, now: number, shownCap: number,
+): string {
+  /**
+   * Every headline figure is computed over the WHOLE set, never over the rows that happen to be displayed.
+   *
+   * The first version took the span from the listed rows while the heading counted all of them, so a wallet with
+   * 1,994 launches was described as spanning 3.2 hours — the span of the oldest 300. Two numbers side by side drawn
+   * from different populations, which is the fault this project spent the day removing from its own front page.
+   */
+  const { total, flagged, grad, span } = stats;
+  const title = kind === "image"
+    ? `${fmt(total)} launches used this picture`
+    : `${fmt(total)} launches by this wallet`;
+  const lede = kind === "image"
+    ? `Identical bytes, matched by sha256 — the same file, not a similar one. We keep the picture because the creator
+       controls the URI it came from and can repoint or unpin it at any time; once that happens this is the only
+       place the launch's own image survives.`
+    : `Every launch we hold from this creator wallet. A creator address is on-chain and permanent, so this list is as
+       complete as our coverage of the days it launched on.`;
+
+  const body = rows.map((r) => `<tr>
+    <td><a href="../t/${esc(r.mint)}.html">${esc(r.symbol ?? "?")}</a>${
+      r.name && r.name !== r.symbol ? `<br><span class="sub">${esc(String(r.name).slice(0, 40))}</span>` : ""}</td>
+    <td class="num">${when(r.createdAt)}</td>
+    <td class="num">${r.devPct === null ? "?" : `${r.devPct.toFixed(1)}%`}</td>
+    <td class="num">${r.curveBuyers === null ? "?" : fmt(r.curveBuyers)}</td>
+    <td class="num">${r.graduated ? "yes" : "no"}</td>
+    <td>${r.danger ? `<span class="tag DANGER">danger</span>` : ""}</td></tr>`).join("");
+
+  return `
+  <div class="hero"><div class="col-a">
+    <h1 class="headline">${title}</h1>
+    <p class="lede">${lede}</p>
+    ${kind === "image" ? `<div class="shot"><img src="../i/${esc(key)}" alt="the picture these launches used" loading="lazy"></div>` : ""}
+    <p class="mono sub">${esc(key)}</p>
+  </div>
+  <div class="col-b"><div class="stats" style="margin:4px 0 0">
+    <div class="stat"><span>launches</span><b class="big">${fmt(total)}</b></div>
+    <div class="stat"><span>carrying a danger flag</span><b class="big">${fmt(flagged)}</b></div>
+    <div class="stat"><span>finished the curve</span><b class="big">${fmt(grad)}</b></div>
+    ${span > 0 ? `<div class="stat"><span>across</span><b class="big">${dur(span)}</b></div>` : ""}
+  </div>
+  <p class="sub" style="margin:6px 0 0">Counts are over the launches this archive holds. Flags are the same
+  criteria every record page applies.</p></div></div>
+
+  <div class="sec"><h2>${kind === "image" ? "Launches using this picture" : "Launches by this wallet"}</h2>
+    <span class="cnt">${rows.length < total ? `oldest ${fmt(rows.length)} of ${fmt(total)}` : `${fmt(rows.length)}`}</span></div>
+  ${rows.length ? `<table class="data"><tr><th>Token</th><th class="num">Launched</th><th class="num">Creator kept</th>
+    <th class="num">Buyers</th><th class="num">Graduated</th><th></th></tr>${body}</table>`
+    : `<p class="callout">We hold no other launch for this ${kind === "image" ? "picture" : "wallet"}.</p>`}
+  ${rows.length < total ? `<p class="callout">${fmt(total - rows.length)} more are held and not listed; the page shows
+    the oldest ${fmt(shownCap)} so the sequence reads from the beginning.</p>` : ""}
+  <p class="callout">A repeated picture or a repeated creator is a fact about the record, not an accusation about a
+  person. What each launch did is on its own page, with the transaction it was read from.</p>`;
+}

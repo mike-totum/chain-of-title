@@ -23,6 +23,7 @@ import { profile, verdictLine, walletVerdict } from "./operator.ts";
 import { poolReservesPooled } from "./outcomes.ts";
 import { rebuild, store, curveExists } from "./backfill.ts";
 import { page, tokenBody, walletBody, tokenPreview, SEARCH, when, fmt, homeBody, homeTitle, verdict, CANONICAL_HOST,
+  siblingsBody, type Priors, type SiblingRow, type SiblingStats,
   type Home, type Chrome, type Reading } from "./render.ts";
 import { r2Config, getWithType as r2Get } from "./r2.ts";
 import { tokenRecord, walletRecord, statusRecord, unknownRecord, errorRecord,
@@ -708,10 +709,38 @@ async function readRecord(t: any, judgeable: boolean, precomputed?: any): Promis
   return { a, reading, origin: rebuilt ? "rebuilt" : "observed", clean, liquid };
 }
 
+/**
+ * What else this launch is a copy of. Two index lookups, single-digit milliseconds on the served record.
+ *
+ * `tokens_image` is partial (`WHERE image_sha256 IS NOT NULL`) and `tokens_creator` covers the other, so neither of
+ * these scans. They are computed per request rather than stored because they change as the archive grows: the
+ * answer to "how many other launches used this picture" is different tomorrow, and a stored count would quietly age.
+ */
+function priorsFor(t: any): Priors {
+  let sameImage: number | null = null;
+  if (t.image_sha256) {
+    sameImage = ((db.prepare(`SELECT COUNT(*) c FROM tokens WHERE image_sha256 = ? AND mint != ?`)
+      .get(t.image_sha256, t.mint)) as any).c as number;
+  }
+  const byCreator = !t.creator ? 0 : ((db.prepare(`SELECT COUNT(*) c FROM tokens WHERE creator = ? AND mint != ?`)
+    .get(t.creator, t.mint)) as any).c as number;
+  /**
+   * "Carrying a danger flag" is counted with SQL that mirrors the loudest criteria rather than by running `assess`
+   * over what can be thousands of rows on a request. It is deliberately a floor: the real flag set is broader, so
+   * this understates and never overstates, which is the correct direction for a number sitting beside a creator's
+   * address. The linked page runs the real criteria per launch.
+   */
+  const creatorFlagged = !t.creator || byCreator === 0 ? 0 : ((db.prepare(
+    `SELECT COUNT(*) c FROM tokens WHERE creator = ? AND mint != ?
+       AND (dev_pct >= 50 OR (graduated_confirmed_by IS NOT NULL AND curve_buyers = 0))`)
+    .get(t.creator, t.mint)) as any).c as number;
+  return { sameImage, imageSha: t.image_sha256 ?? null, byCreator, creatorFlagged };
+}
+
 async function renderToken(t: any, judgeable: boolean, precomputed?: any): Promise<string> {
   const r = await readRecord(t, judgeable, precomputed);
   const pv = tokenPreview(t, r.a, r.clean);
-  return page(pv.title, tokenBody(t, r.a, r.reading, r.origin, r.clean, Date.now()), chrome, 1, pv.summary,
+  return page(pv.title, tokenBody(t, r.a, r.reading, r.origin, r.clean, Date.now(), priorsFor(t)), chrome, 1, pv.summary,
     `/t/${t.mint}.html`);
 }
 
@@ -1037,6 +1066,51 @@ const server = createServer(async (req, res) => {
     const safe = normalize(path).replace(/^(\.\.[/\\])+/, "");
 
     // job status, for the waiting page's poll
+    /**
+     * The two "seen before" views: every launch that used one picture, and every launch by one creator.
+     *
+     * Bounded at SIBLINGS_MAX rows because a creator with 1,994 launches would otherwise render a page nobody can
+     * read and this service would build it on every request. Oldest first, so the sequence reads from the start —
+     * the cadence is the finding, and a burst of launches minutes apart is invisible if the newest are shown.
+     */
+    const SIBLINGS_MAX = 300;
+    const imgSibs = safe.match(/^\/i\/([0-9a-f]{64})\.html$/);
+    const creatorSibs = safe.match(/^\/c\/([1-9A-HJ-NP-Za-km-z]{32,44})\.html$/);
+    if (imgSibs || creatorSibs) {
+      const kind: "image" | "creator" = imgSibs ? "image" : "creator";
+      const key = (imgSibs ?? creatorSibs)![1];
+      const where = kind === "image" ? "image_sha256 = ?" : "creator = ?";
+      /**
+       * Aggregates over the whole set in one pass. The page lists at most SIBLINGS_MAX rows, and every figure beside
+       * the heading must describe all of them or the two disagree — see the note in siblingsBody.
+       */
+      const agg = db.prepare(`SELECT COUNT(*) c,
+          SUM(CASE WHEN dev_pct >= 50 OR (graduated_confirmed_by IS NOT NULL AND curve_buyers = 0) THEN 1 ELSE 0 END) flagged,
+          SUM(COALESCE(graduated,0)) grad, MIN(created_at) a, MAX(created_at) b
+        FROM tokens WHERE ${where}`).get(key) as any;
+      const total = (agg?.c ?? 0) as number;
+      if (!total) return send(404, page("Not held", `<h1 class="headline">Nothing on file</h1>
+        <p class="lede">We hold no launch for that ${kind === "image" ? "picture" : "creator"}. That is a statement
+        about our records and not about the ${kind === "image" ? "image" : "wallet"}.</p>${SEARCH}`, chrome, 1,
+        undefined, safe));
+      const rows = (db.prepare(`SELECT mint, symbol, name, created_at, dev_pct, curve_buyers, graduated,
+          graduated_confirmed_by FROM tokens WHERE ${where} ORDER BY created_at ASC LIMIT ?`)
+        .all(key, SIBLINGS_MAX) as any[]).map((x): SiblingRow => ({
+          mint: x.mint, symbol: x.symbol, name: x.name, createdAt: x.created_at,
+          devPct: x.dev_pct ?? null, curveBuyers: x.curve_buyers ?? null,
+          graduated: !!x.graduated,
+          // Same floor the count on the token page uses, and for the same reason: understate, never overstate.
+          danger: (x.dev_pct ?? 0) >= 50 || (x.graduated_confirmed_by != null && x.curve_buyers === 0),
+        }));
+      const stats = { total, flagged: Number(agg?.flagged ?? 0), grad: Number(agg?.grad ?? 0),
+        span: agg?.a != null && agg?.b != null ? Number(agg.b) - Number(agg.a) : 0 };
+      const title = kind === "image" ? `${fmt(total)} launches used this picture` : `${fmt(total)} launches by this wallet`;
+      return send(200, page(title, siblingsBody(kind, key, rows, stats, Date.now(), SIBLINGS_MAX), chrome, 1,
+        kind === "image"
+          ? `Every launch in the archive that used this exact image, matched by sha256, oldest first.`
+          : `Every launch in the archive from this creator wallet, oldest first.`, safe), "text/html; charset=utf-8", "short");
+    }
+
     const jobMatch = safe.match(/^\/api\/job\/([1-9A-HJ-NP-Za-km-z]{32,44})$/);
     if (jobMatch) {
       const j = jobs.get(jobMatch[1]);
