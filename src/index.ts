@@ -1310,17 +1310,27 @@ if (process.env.CLUSTERS_TRACE === "1") {
   const LIMIT = Number(process.env.CLUSTERS_LIMIT ?? 60);
   let running = false;
   const run = async () => {
-    if (running) return;
+    if (running) { log("[clusters] previous pass still running, skipping"); return; }
     running = true;
+    /**
+     * Logged on entry, not only on completion.
+     *
+     * Logging the result alone cannot distinguish "the timer never fired" from "it fired and is still inside an RPC
+     * call" — and those need opposite fixes. An hour went into that ambiguity tonight: the operator map sat at
+     * 8,598 with no line either way, and the only honest reading was that something might be hanging, might be
+     * unconfigured, or might simply not have reached a log window. A start line and an end line answer it.
+     */
+    log(`[clusters] pass starting, ${LIMIT} seeds`);
+    const t0 = Date.now();
     try {
       const { traceClusters } = await import("./clusters.ts");
       const st = await traceClusters({ limit: LIMIT, db, log: () => {} });
-      log(`[clusters] traced ${st.traced}, ${st.found} funders found, ${st.wallets} wallets on file`);
+      log(`[clusters] traced ${st.traced}, ${st.found} funders found, ${st.wallets} wallets on file (${Math.round((Date.now() - t0) / 1000)}s)`);
     } catch (e) {
-      log(`[clusters] trace failed: ${(e as Error).message}`);
+      log(`[clusters] trace failed after ${Math.round((Date.now() - t0) / 1000)}s: ${(e as Error).message}`);
     } finally { running = false; }
   };
-  setTimeout(() => void run(), 240_000);
+  setTimeout(() => void run(), Number(process.env.CLUSTERS_FIRST_SECONDS ?? 240) * 1000);
   setInterval(() => void run(), EVERY_MS);
 }
 
