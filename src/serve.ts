@@ -308,8 +308,30 @@ async function collectorHasNewer(): Promise<boolean> {
     return true;
   } catch { return false; }
 }
+/**
+ * Whether this process has finished its first attempt at pulling a record, and when it started.
+ *
+ * Every deploy ships the `data/record.db` that was on disk when the image was built, and the service boots serving
+ * it - by design, so a collector that cannot be reached does not take the site down. The consequence is that for
+ * the first half-minute of every deploy the process is knowingly serving an old file, and the freshness watchdog
+ * was judging it there: on 2026-09-10 it alarmed at "a record built 10h 30m ago" and the pull landed seconds
+ * later with one built eight minutes ago. An alarm that fires on every deploy is worse than no alarm, because it
+ * teaches the person reading it that this check does not mean anything.
+ */
+const bootAt = Date.now();
+let firstPullSettled = !RECORD_URL;
+/** How long the boot pull gets before the watchdog starts judging the record anyway. */
+const BOOT_PULL_GRACE_MS = 5 * 60_000;
+
 if (RECORD_URL) {
-  setTimeout(() => void (async () => { if (await collectorHasNewer()) void pullRecord(false); })(), 20_000);
+  setTimeout(() => void (async () => {
+    try { if (await collectorHasNewer()) await pullRecord(false); }
+    finally {
+      // Settled means attempted, not succeeded. A pull that fails must let the watchdog resume judging, or a
+      // collector that is permanently unreachable would silence the check it exists to trip.
+      firstPullSettled = true;
+    }
+  })(), 20_000);
   setInterval(() => void pullRecord(false), REFRESH_MS);
 }
 
@@ -457,6 +479,10 @@ startWatchdog({
   repeatMs: 6 * 3600_000,
   send: (text) => telegramSend(config.telegramBotToken, config.telegramChatId, text),
   probe: async () => {
+    // Still inside the boot window, with the first pull not yet attempted: the age being measured belongs to the
+    // file the image was built with, not to the archive. Bounded, so an unreachable collector still trips this.
+    if (!firstPullSettled && Date.now() - bootAt < BOOT_PULL_GRACE_MS)
+      return { ok: true, detail: `still completing the first record pull of this process` };
     if (!recordBuiltAt) return { ok: false, detail: `the record being served carries no built_at, so its age cannot be stated` };
     const age = Date.now() - recordBuiltAt;
     // Not a pedantic guard: a builder with a wrong clock produces a record that is permanently "fresh" and would silence this
