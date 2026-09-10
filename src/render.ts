@@ -853,11 +853,20 @@ export function homeBody(h: Home): string {
         */ ""}
       ${h.findings.map((f) => `<div class="stat"><span>${esc(f.label)}</span><b class="big">${fmt(f.n)}</b></div>`).join("")}
       <div class="stat"><span>none of these</span><b class="big">${fmt(h.cleanBirth24h)}</b></div>
-      <div class="stat"><span>launches recorded</span><b class="big" id="rec" data-n="${h.onFile}">${fmt(h.onFile)}</b></div>
     </div>
     <p class="sub" style="margin:6px 0 0">A launch can carry more than one of these, so they add to more than the
-    ${fmt(h.danger24h)} that carry at least one. <span id="recnote">Launch counts as of ${h.builtAt ? `${when(h.builtAt)}, ${ago(h.now - h.builtAt)}` : "an unrecorded time"}, the age of the archive this reads.</span>
+    ${fmt(h.danger24h)} that carry at least one. <span id="recnote">Counts as of ${h.builtAt ? `${when(h.builtAt)}, ${ago(h.now - h.builtAt)}` : "an unrecorded time"}, the age of the archive this reads.</span>
     Pool balances are read separately and continuously; each carries its own age below.</p>
+    ${/*
+        The archive total was the last row of the block above, under a heading that says "24h to <time>", so one
+        bordered box held five figures about a day and one about four months. Whatever the row was labelled, its
+        neighbours framed it as part of the window. It is a different question and it gets its own box.
+      */ ""}
+    <div class="stats" style="margin:22px 0 0">
+      <div class="stat"><span>launches on record, all of them</span><b class="big" id="rec" data-n="${h.onFile}">${fmt(h.onFile)}</b></div>
+    </div>
+    <p class="sub" style="margin:6px 0 0">Every launch this archive holds, not just the window above. The coverage
+    it starts from is in the footer.</p>
     <!--
       The counter climbs because the collector never stops, and this is the one number on the page that is a claim
       about the archive rather than about the published file. It was read out of the snapshot, so it sat frozen for
