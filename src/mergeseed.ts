@@ -293,8 +293,30 @@ export async function mergeSeed(
     db.exec("BEGIN IMMEDIATE");
     try {
       db.exec(MARKER_DDL);
+      /**
+       * Mints the target does not have yet. The INSERT below carries their columns VERBATIM — TOKEN_POLICY governs
+       * only the conflict branch — so every rule the policy encodes is bypassed for a row that is new here, and any
+       * contradiction the seed carries is imported intact.
+       *
+       * That is not hypothetical: the laptop holds 1,255 rows with a pool balance and no reading time, and the
+       * collector held exactly 1,255. The pair was never written that way by any collector path — it arrived by
+       * this INSERT, from a seed, past a policy that says vault_sol and vault_at move together or not at all.
+       */
+      db.exec(`CREATE TEMP TABLE inserted_mints AS
+               SELECT s.mint FROM seed.tokens s LEFT JOIN main.tokens t ON t.mint = s.mint WHERE t.mint IS NULL`);
       db.exec(`INSERT INTO main.tokens (${list}) SELECT ${list} FROM seed.tokens WHERE true
                ON CONFLICT(mint) DO UPDATE SET ${setClause}`);
+      /**
+       * A balance we cannot date is not a reading, and importing one manufactures a contradiction the record then
+       * has to refuse to publish. Dropped only for rows this merge CREATED — a row the collector already owned is
+       * the collector's to keep or fix, and a merge is not the place to revise it.
+       */
+      const orphaned = db.prepare(`UPDATE main.tokens SET vault_sol = NULL
+        WHERE vault_sol IS NOT NULL AND vault_at IS NULL
+          AND mint IN (SELECT mint FROM inserted_mints)`).run();
+      if (Number(orphaned.changes ?? 0) > 0)
+        log(`[seed] dropped ${Number(orphaned.changes).toLocaleString()} imported pool balances that carried no reading time`);
+      db.exec("DROP TABLE inserted_mints");
 
       // Live wins on everything below: the collector's own observations are never overwritten by an older export.
       db.exec(`INSERT OR IGNORE INTO main.operator_wallets (wallet, funder, cluster, role, seeded_at, source_mint, traced, added_at)
