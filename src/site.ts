@@ -606,6 +606,10 @@ writeFileSync(join(OUT, "findings.html"), page("What the record shows", `
   after-the-fact analysis.</p>
 
   <div class="sec"><h2>What this does not say</h2></div>
+  <p class="lede"><b>These figures were computed on ${when(builtAt)}</b>, from the record this page was built
+  against, and they are a static snapshot: the archive keeps collecting and the counts keep rising, so a number here
+  is a fact about that moment and not a live total. The queries below return the current answer from the current
+  file.</p>
   <p class="lede">Coverage begins <b>${when(COV.from ?? 0)}</b>. A token that launched before then was not watched
   and this archive answers <span class="mono">UNKNOWN</span> for it — the honest answer, and not a useful one.
   Reconstruction of older launches is in progress and is marked as reconstruction wherever it lands.</p>
