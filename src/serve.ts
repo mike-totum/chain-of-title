@@ -913,7 +913,18 @@ const isFile = (p: string): boolean => { try { return statSync(p).isFile(); } ca
 const IMAGE_DIR = process.env.IMAGE_DIR ?? "data/images";
 /** Resolved once at boot. Null unless all four R2 variables are set, so a half-configured store never looks enabled. */
 const imageStore = r2Config();
-const HOME_TTL_MS = Number(process.env.HOME_TTL_SECONDS ?? 15) * 1000;
+/**
+ * How long a rendered front page is reused. Was 15 seconds, which cost more than it bought: a miss assesses every
+ * graduation in the window - 0.6 s on a laptop, longer on the container - and node has one thread, so for that
+ * whole time the site answers nothing at all. At 15 seconds the service spent a measurable share of its life
+ * unable to serve anyone, to keep a page fresher than its own contents. Nothing on it is younger than this: the
+ * launch counts are as old as the archive, hours behind, and the page says so beside them; the liquidity readings
+ * come from a refresher on its own cycle; and the only genuinely live figure, the launch counter, is fetched by
+ * the browser from /api/v1/live, which is never cached.
+ */
+const HOME_TTL_MS = Number(process.env.HOME_TTL_SECONDS ?? 60) * 1000;
+/** A stall worth a log line. Below this a reader feels a slow page; above it, requests in flight are timing out. */
+const LOOP_STALL_MS = Number(process.env.LOOP_STALL_MS ?? 2000);
 const HOME_DAYS = Number(process.env.HOME_DAYS ?? 7);
 let homeCache: { at: number; h: Home; html: string } | null = null;
 
@@ -1040,8 +1051,19 @@ function buildHome(now: number): Home {
 function currentHome(): Home {
   const now = Date.now();
   if (homeCache && now - homeCache.at < HOME_TTL_MS) return homeCache.h;
+  /**
+   * The front page is assessed, not read: a cache miss walks every graduation in the window. It is the largest
+   * synchronous unit of work this process does on a request, and node runs it on the only thread there is, so
+   * everything else - other pages, the API, the deploy gate - waits behind it. That is timed rather than assumed
+   * because on 2026-09-10 a smoke check timed out with zero bytes after thirty seconds, and nothing in the logs
+   * could say what the process had been doing. A build slow enough to be felt says so.
+   */
+  const t0 = performance.now();
   const h = buildHome(now);
-  homeCache = { at: now, h, html: page(homeTitle(h), homeBody(h), chrome, 0, undefined, "/") };
+  const html = page(homeTitle(h), homeBody(h), chrome, 0, undefined, "/");
+  const ms = performance.now() - t0;
+  if (ms > 1000) console.log(`[home] rebuilt in ${Math.round(ms)} ms, blocking everything else for that long`);
+  homeCache = { at: now, h, html };
   return h;
 }
 function renderHome(): string { currentHome(); return homeCache!.html; }
@@ -1537,6 +1559,29 @@ if (!NO_REFRESH) {
     if (!refresher.cycles) return;
     console.log(`[refresh] ${refresher.cycles} cycles, ${refresher.read} read, ${refresher.failed} failed, ${refresher.due} due last cycle (${refresher.lastCycleMs} ms)`);
   }, 10 * 60_000);
+}
+
+/**
+ * How long the single thread was unavailable, and when.
+ *
+ * Every stall this service can suffer looks identical from outside - a request that connects and then receives
+ * nothing - and looks like nothing at all from inside, because the process is up, healthy and busy. This is the
+ * one measurement that distinguishes "the site is down" from "the site was thinking": `monitorEventLoopDelay`
+ * records how long the loop went unserviced, so a stall names itself in the log instead of being reconstructed
+ * afterwards from a failed check and a guess. It samples in C++ and costs nothing measurable.
+ *
+ * Only stalls a visitor could notice are reported. A page that takes two seconds is slow; a page that takes
+ * thirty has already failed for everyone who was waiting.
+ */
+{
+  const { monitorEventLoopDelay } = await import("node:perf_hooks");
+  const loop = monitorEventLoopDelay({ resolution: 20 });
+  loop.enable();
+  setInterval(() => {
+    const worst = loop.max / 1e6;
+    loop.reset();
+    if (worst >= LOOP_STALL_MS) console.log(`[loop] blocked for ${Math.round(worst)} ms at some point in the last minute — every request in flight waited that long`);
+  }, 60_000).unref();
 }
 
 server.listen(PORT, () => {
