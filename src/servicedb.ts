@@ -300,8 +300,14 @@ db.function("sha256", (v: unknown) =>
  */
 for (const [col, expr] of [
   ["meta_sha256", "sha256(m.meta_json)"],
-  // Arrives whenever the document does, which for a recovered launch is days after the row stopped changing.
-  ["meta_lag_ms", "CASE WHEN m.meta_at IS NOT NULL AND m.created_at IS NOT NULL THEN m.meta_at - m.created_at END"],
+  /**
+   * The document and when we read it, moving together. `meta_at` is the timestamp `meta_lag_ms` is computed from,
+   * so refreshing one without the other publishes a lag for a launch the record does not admit holding a document
+   * for. All four are listed adjacently and deliberately: they are one observation.
+   */
+  ["meta_at", "m.meta_at"],
+  ["image", "m.image"],
+  ["description", "m.description"],
   ["image_sha256", "m.image_sha256"],
   ["image_bytes", "m.image_bytes"],
   ["image_at", "m.image_at"],
@@ -320,6 +326,26 @@ for (const [col, expr] of [
     if (Number(r.changes ?? 0) > 0) log(`  backfilled ${Number(r.changes).toLocaleString()} ${col}`);
   } catch (e) { log(`  WARNING: ${col} backfill failed: ${String((e as any)?.message ?? e).slice(0, 120)}`); }
 }
+
+/**
+ * The lag, derived from the record's OWN two columns rather than copied from the collector — so it cannot disagree
+ * with the row it is published beside.
+ *
+ * The first version computed it from `main.tokens` in the list above, and the build published 154,374 lags against
+ * 152,711 timestamps: a lag for launches the record did not admit holding a document for. That is the same
+ * incoherence a watermark produces when it refreshes one column of a row and not another, reproduced by hand in the
+ * fix for it. Deriving from `rec.tokens` makes the two agree by construction, and the unconditional recompute
+ * repairs any file already carrying the contradiction rather than leaving it to age out.
+ */
+try {
+  const r = db.prepare(`UPDATE rec.tokens SET meta_lag_ms = meta_at - created_at
+    WHERE meta_at IS NOT NULL AND created_at IS NOT NULL
+      AND (meta_lag_ms IS NULL OR meta_lag_ms != meta_at - created_at)`).run();
+  if (Number(r.changes ?? 0) > 0) log(`  derived ${Number(r.changes).toLocaleString()} meta_lag_ms`);
+  // A lag without a timestamp is the contradiction itself. Clear it rather than publish it.
+  const c = db.prepare(`UPDATE rec.tokens SET meta_lag_ms = NULL WHERE meta_at IS NULL AND meta_lag_ms IS NOT NULL`).run();
+  if (Number(c.changes ?? 0) > 0) log(`  cleared ${Number(c.changes).toLocaleString()} meta_lag_ms with no meta_at`);
+} catch (e) { log(`  WARNING: meta_lag_ms derive failed: ${String((e as any)?.message ?? e).slice(0, 120)}`); }
 /**
  * DO NOT add a DROP COLUMN here. It was tried and it does not hold.
  *
@@ -359,11 +385,18 @@ try {
            WHERE uri IS NULL AND EXISTS (SELECT 1 FROM main.tokens t WHERE t.mint = rec.tokens.mint AND t.uri IS NOT NULL AND t.uri != '')`);
 } catch {}
 /**
- * `image`, `description` and `meta_at` get none, and that is a decision rather than an omission. They were never
- * captured before 2026-09-08: `fetchMeta` did not read the image field and there was no column for the description it
- * did read. There is nothing to backfill from. Re-fetching the URIs now would record what they resolve to *today* and
- * stamp it as the launch claim, which is manufacturing evidence about the past, and this project does not get to do
- * that to anyone. Historical rows stay NULL because NULL is the true answer.
+ * `image`, `description` and `meta_at` USED to get none, on the grounds that there was nothing to backfill from —
+ * nothing had captured them before 2026-09-08 and re-fetching a URI today would stamp today's content as the launch
+ * claim. The first half stopped being true on 2026-09-10, when the documents for 09-02 to 09-07 were recovered into
+ * the collector; the second half is answered by `meta_lag_ms`, which publishes how late each read was instead of
+ * hiding it. Copying them now invents nothing, exactly as copying `uri` above invents nothing: these are values the
+ * collector recorded, and the only question was whether the record could see them.
+ *
+ * They are in the late-arriving list above rather than here, because a document recovered days after a launch
+ * arrives after the row has stopped changing and can reach the record no other way. Leaving them out produced the
+ * incoherence this file elsewhere guards against: a build that published 154,374 values of `meta_lag_ms` against
+ * 152,711 of `meta_at` — more lags than timestamps, because the lag was refreshed from the collector while the
+ * timestamp beside it was not.
  */
 
 const since = FULL ? 0 : Number((db.prepare("SELECT v FROM rec.meta WHERE k='watermark'").get() as any)?.v ?? 0);
