@@ -99,11 +99,17 @@ graduation was never confirmed, not that it did not happen.
 `image_sha256` is NULL on most rows, and that means **we did not fetch the bytes**, not that the launch had no
 image. The URL is on the row either way.
 
-The bytes are fetched for launches that **completed their bonding curve**, and the reason is arithmetic rather
-than principle. Roughly 24,000 launches a day declare an image, and they average 409 KB — about **13.6 GB a day**,
-or the entire storage volume every 33 hours. Graduations run near 1,400 a day, which is about 570 MB a day, and
-that is what can actually be kept. Images are stored content-addressed, so the many launches that reuse the same
-picture cost one copy: roughly a quarter of what we fetch is already held.
+The bytes are now fetched for **every launch**, not only those that completed their bonding curve. Restricting it
+to graduations meant the archive kept the picture only for launches that had already passed a test, so it could
+never establish what an ordinary launch looked like to compare a suspicious one against. Images go to object
+storage rather than the collector's volume, which is what makes the arithmetic survivable: they average 203 KB,
+and because they are content-addressed the ~46% of launches reusing another launch's picture cost one copy.
+
+A row with a NULL `image_sha256` is therefore a launch we have not reached **yet**, or one whose bytes nobody would
+serve us, rather than one outside the policy. Corrected 2026-09-10: this section previously described the
+graduated-only rule after capture had already been widened, and the schedule that fed it was under-sized for the
+wider scope — 900 fetches an hour against roughly 1,070 launches an hour, oldest rows starved because the pass
+always took the newest first. Both are fixed; the backlog it left is draining.
 
 This is a real limit and it is stated rather than hidden, because the gap it leaves is exactly the kind we
 criticise elsewhere. A launch that never graduated has its declared image URL recorded and its bytes unheld, and
@@ -112,6 +118,42 @@ URLs are in the file and nothing stops you fetching them; the reason we did not 
 
 `image_error` exists in the collector's own database but is **not** published here: it records why *our* fetch
 failed, which is a fact about our infrastructure and not about the launch.
+
+## The launch documents — `documents.ndjson.gz`, alongside this file
+
+`record.db` carries `meta_sha256` for every launch whose metadata document we hold, and does not carry the
+document. That lets you verify bytes you already have and not obtain any, which for the one artefact here that
+cannot be rebuilt from chain at any price is the wrong way round. The documents are published as a **separate,
+optional download**, so this file's size and the property that one person can mirror the whole archive are
+untouched.
+
+| | |
+|---|---|
+| `/data/documents.ndjson.gz` | every distinct document, one JSON object per line, gzipped |
+| `/data/documents.json` | the manifest: counts, byte sizes, and the sha256 of the uncompressed NDJSON |
+| `/d/{mint}` | one launch's document, with its sha256 in the `x-content-sha256` header |
+
+Each line is `{sha256, bytes, launches, firstSeen, lastSeen, doc}`. `doc` is the document **as served, verbatim, as
+a string** — not a parsed object, because the bytes are what the hash commits to. Rows are sorted by hash, so the
+same corpus produces the same file and two mirrors can be compared directly.
+
+**Deduplicated by content, and the duplicate count is evidence.** `launches` is how many launches declared that
+exact document. One document in the current bundle is shared by **401 launches**. That is a factory, and it is
+visible only because the unremarkable launches were kept too.
+
+**To verify anything here**, take a launch's `meta_sha256` from `record.db`, fetch `/d/{mint}`, and hash what you
+receive. It will match or we have a bug worth reporting. Nothing asks you to trust that our copy is the true copy;
+the record's commitment and the bytes are published separately and either agree or do not.
+
+**Why this matters more than it sounds.** `metadata.j7tracker.io` hosted 30,443 of these launches and now answers
+404 for every document it ever served — the host is up, the files are gone. For those launches, the bytes in this
+bundle are the only ones left anywhere, and no amount of money or archival RPC recovers what is not in it.
+
+**The gap, stated.** The manifest publishes `launchesWithDocumentRecorded` and `launchesWithBytesHeld` separately
+and they differ — 149,834 against 126,369 at the time of writing. The difference is launches fetched before the
+document itself was kept, when only five fields were extracted and the file discarded. Their URL is on the row and
+most are still fetchable; they are recorded as held because we did read them, and the bundle does not contain them
+because we did not keep what we read. Both numbers are published so neither can be mistaken for the other.
 
 ## `runs` (59 rows) — when the collector was watching
 
