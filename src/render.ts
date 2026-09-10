@@ -770,27 +770,30 @@ export function homeBody(h: Home): string {
     <div class="col-a">
     <h1 class="headline">${h.windowEnd && h.now - h.windowEnd > 3600_000 ? `In the 24 hours to ${when(h.windowEnd)}` : "In the last 24 hours"} ${fmt(h.graduated24h)} tokens finished their bonding curve.
     ${/*
-        A partition, because the alternative reads as missing data.
+        Say what was found, not that something was found.
         
-        This said "a finding against 646, and none at all against 50" out of 943, and a researcher's first question
-        is where the other 247 went. Two counts that do not sum to the total look like coverage holes, however
-        carefully the sentence is worded - and they are not holes. Measured over one window: the in-between group is
-        launches with nothing recorded against them that still fall short of one of our tests, most often because
-        the creator sold or fewer than MIN_BUYERS outside wallets bought the curve. Substantive, checked, and
-        neither of the two things the sentence was offering.
+        "646 carry a finding" is precise, is the right word for a register, and means nothing to somebody who has
+        just arrived - it counts an undefined thing. The four findings that actually occur are easy to say in plain
+        words, and measured over one window they are evenly spread: creator kept the supply (38), creator bought
+        its own curve (37), curve filled in seconds (31), almost no outside buyers (24). So the headline lists them
+        and the reader learns what we look for by reading what we found.
         
-        So all three are stated and they add up, and "we checked every one" says the coverage is complete before the
-        numbers arrive rather than leaving a reader to work it out.
+        The other two counts moved to the lede below. All three in the headline came to eight lines of display
+        serif that pushed the search box off the screen; the partition still has to be stated, and it does not have
+        to be stated in forty-point type.
       */ ""}
-    We checked every one. <b>${fmt(h.danger24h)}</b> carry a finding, ${h.cleanBirth24h === 0
-      ? `not one carries none`
-      : `<b class="q">${fmt(h.cleanBirth24h)}</b> carry none`}, and ${fmt(Math.max(0, h.graduated24h - h.danger24h - h.cleanBirth24h))} fall between.</h1>
-    <p class="lede">Behind most of those findings is a creator who took the supply, or a single wallet that bought
-    the whole curve. That evidence exists for about thirty seconds and is unrecoverable afterwards, so we watch every
-    launch on pump.fun and keep the record. What it means is yours to decide; keeping it is our job.</p>
-    <p class="lede">The ones in between have nothing recorded against them and still fall short of one of our tests
-    &mdash; most often the creator sold, or fewer than ${h.minBuyers} outside wallets bought the curve. They are
-    checked, not unexamined.</p>
+    On <b>${fmt(h.danger24h)}</b> the creator kept the supply, bought their own curve, or the curve filled in
+    seconds with almost no one outside buying.</h1>
+    ${/* The completeness claim, in prose rather than in the headline, and it still has to add up. */ ""}
+    <p class="lede">We checked all ${fmt(h.graduated24h)}. ${h.cleanBirth24h === 0
+      ? `Not one was free of all four.`
+      : `<b>${fmt(h.cleanBirth24h)}</b> showed none of it.`} The other
+    ${fmt(Math.max(0, h.graduated24h - h.danger24h - h.cleanBirth24h))} fall between: nothing recorded against them,
+    and still short of one of our tests &mdash; most often the creator sold, or fewer than ${h.minBuyers} outside
+    wallets bought the curve. Checked, not unexamined.</p>
+    <p class="lede">All of that is visible for about thirty seconds and unrecoverable afterwards: once the float has
+    been spread across wallets, none of it can be read off the chain any more. So we watch every launch on pump.fun
+    and keep the record. What it means is yours to decide; keeping it is our job.</p>
     <p class="lede">Paste any mint. If we hold its launch, you get what happened. If we do not, we rebuild it from the
     chain, and if we cannot do that we say so rather than guess.</p>
     ${SEARCH}
