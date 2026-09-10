@@ -187,7 +187,15 @@ export interface ClusterEvent {
 }
 
 export interface ClusterProfile {
-  cluster: string; funder: string | null; policy: string | null;
+  cluster: string; policy: string | null;
+  /**
+   * Every distinct address that funded a wallet in this group, busiest first — not one of them.
+   *
+   * 33 of 396 clusters carry more than one, because a cluster is named after the root of a funding chain and the
+   * wallets under it record whichever address paid them directly. Reporting `funders[0]` as "funded by" would state
+   * one arbitrary address as the operator's, which is the kind of claim this project does not get to make loosely.
+   */
+  funders: { funder: string; wallets: number }[];
   /** Every wallet on file for the cluster, including those seeded and never used: the size of the machine. */
   wallets: { wallet: string; role: string | null; curves: number; sol: number }[];
   events: ClusterEvent[];
@@ -211,7 +219,7 @@ export function clusterProfile(dbh: any, cluster: string): ClusterProfile {
   const wallets = dbh.prepare(
     `SELECT wallet, role, funder FROM operator_wallets WHERE cluster = ? ORDER BY wallet`
   ).all(cluster) as any[];
-  if (!wallets.length) return { cluster, funder: null, policy: null, wallets: [], events: [], curves: 0, sol: 0 };
+  if (!wallets.length) return { cluster, funders: [], policy: null, wallets: [], events: [], curves: 0, sol: 0 };
 
   const list = wallets.map((w) => w.wallet);
   const holes = list.map(() => "?").join(",");
@@ -254,7 +262,12 @@ export function clusterProfile(dbh: any, cluster: string): ClusterProfile {
   }
   return {
     cluster,
-    funder: wallets.find((w) => w.funder)?.funder ?? null,
+    funders: (() => {
+      const n = new Map<string, number>();
+      for (const w of wallets) if (w.funder) n.set(w.funder, (n.get(w.funder) ?? 0) + 1);
+      return [...n.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        .map(([funder, wallets]) => ({ funder, wallets }));
+    })(),
     policy: (dbh.prepare("SELECT policy FROM operator_policy WHERE cluster = ?").get(cluster) as any)?.policy ?? null,
     wallets: wallets.map((w) => ({
       wallet: w.wallet, role: w.role ?? null,

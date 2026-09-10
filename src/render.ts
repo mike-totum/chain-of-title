@@ -257,6 +257,10 @@ td.mut,.mut{color:var(--mut)}
 .sample .swhy{display:block;color:var(--mut);font-size:13.5px;line-height:1.5}
 .sample .scta{display:block;margin-top:9px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut)}
 .sample:hover .scta{color:var(--fg)}
+/* An operator's heading is its funding address, which is 44 characters of base58 and has to be allowed to wrap
+   without pushing the page sideways on a phone. */
+.oph1{font-size:22px;margin:0 0 4px}
+.oph1 .a{display:block;margin-top:5px;font-size:15px;font-weight:600;word-break:break-all;line-height:1.35}
 /* Three records to open, for the visitor who has nothing to paste - which is most of them. */
 .starts{margin:14px 0 0;border:1px solid var(--line);background:var(--card)}
 .starts .sh{display:block;padding:8px 14px;font-size:11px;text-transform:uppercase;letter-spacing:.09em;
@@ -1237,7 +1241,7 @@ export function swimlane(events: LaneEvent[], walletCurves: Map<string, number>)
  * under it, because a reader who stops halfway must not leave with the stronger claim.
  */
 export function clusterBody(p: {
-  cluster: string; funder: string | null; policy: string | null;
+  cluster: string; funders: { funder: string; wallets: number }[]; policy: string | null;
   wallets: { wallet: string; role: string | null; curves: number; sol: number }[];
   events: LaneEvent[]; curves: number; sol: number;
   sigs: Map<string, string | null>;
@@ -1280,8 +1284,20 @@ export function clusterBody(p: {
     <td class="num">${w.curves ? `${fmt(w.sol)} SOL` : ""}</td></tr>`).join("");
 
   return `
-    <h1>Operator cluster <span class="mono">${esc(p.cluster)}</span></h1>
-    <p class="lede">${fmt(p.wallets.length)} wallet${p.wallets.length === 1 ? "" : "s"} funded from one address.
+    ${/*
+        The heading carries the funding address in full. It used to show `cluster`, which is the first six
+        characters of that address and is what the database stores as the group's name - fine as a key, and wrong
+        as a title: a reader cannot look up six characters, cannot match them against a wallet they were shown
+        elsewhere, and reasonably reads the stub as us having cut the address short.
+
+        Where the group has several funding addresses the short name stays, because there is no single address to
+        promote and inventing one would be worse than the stub ever was.
+      */ ""}
+    <h1 class="oph1">Operator cluster${p.funders.length === 1
+      ? `<span class="a mono">${esc(p.funders[0].funder)}</span>`
+      : ` <span class="mono">${esc(p.cluster)}</span>`}</h1>
+    <p class="lede">${fmt(p.wallets.length)} wallet${p.wallets.length === 1 ? "" : "s"} funded from ${
+      p.funders.length > 1 ? `${fmt(p.funders.length)} addresses that trace to one` : "one address"}.
       ${used.length ? `<b>${fmt(used.length)}</b> of them bought <b>${fmt(p.curves)}</b> bonding curve${p.curves === 1 ? "" : "s"}
       outright for <b>${fmt(p.sol)} SOL</b>${span ? `, over ${dur(span)}` : ""}.` : `None of them has bought a bonding curve outright in this archive.`}</p>
     <p class="callout">A shared funder is a lead, not a finding. Trading terminals fund their users from one address
@@ -1295,7 +1311,10 @@ export function clusterBody(p: {
       <div class="stat"><span>curves taken</span><b class="big">${fmt(p.curves)}</b></div>
       <div class="stat"><span>spent on curves</span><b class="big">${fmt(p.sol)}</b> SOL</div>
     </div>
-    ${p.funder ? `<table><tr><td class="k">Funded by</td><td class="mono">${esc(p.funder)}</td></tr>
+    ${p.funders.length ? `<table>${p.funders.length > 1 ? `<tr><td class="k">Funded by</td><td>
+        <b>${fmt(p.funders.length)}</b> different addresses, which is why this group is named after the first six
+        characters of the one at the root of the chain rather than after an address of its own.
+        ${p.funders.map((f) => `<div class="mono">${esc(f.funder)} <span class="mut">· ${fmt(f.wallets)} wallet${f.wallets === 1 ? "" : "s"}</span></div>`).join("")}</td></tr>` : ""}
       ${p.policy ? `<tr><td class="k">Cluster behaviour</td><td>${esc(p.policy)}</td></tr>` : ""}
       ${timed ? `<tr><td class="k">Bought at launch</td><td><b>${fmt(atLaunch)}</b> of ${fmt(timed)} purchases came
         within fifteen minutes of the token being created${timed < p.events.length
