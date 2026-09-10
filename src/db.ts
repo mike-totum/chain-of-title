@@ -312,6 +312,18 @@ export function openDb(path: string, opts: { migrate?: boolean } = {}): Database
   try { db.exec("ALTER TABLE tokens ADD COLUMN image_at INTEGER"); } catch {}
   try { db.exec("ALTER TABLE tokens ADD COLUMN image_error TEXT"); } catch {}
   /**
+   * The same three states for the metadata document, and it belongs HERE rather than in the tool that first needed
+   * it. `backfillmeta` created this column itself, so it existed on any database that tool had run against and
+   * nowhere else. The moment the collector's own sweep started recording a cause, it referenced a column its schema
+   * had never been given and every sweep failed with "no such column: meta_error" — recovery stopped dead while
+   * ingestion carried on and the process looked entirely healthy.
+   *
+   * That is the third time this shape has bitten: a writer that provisions its own storage privately, and a second
+   * writer that assumes it. Columns the collector reads or writes are the collector's schema, and `openDb` is where
+   * a schema is declared.
+   */
+  try { db.exec("ALTER TABLE tokens ADD COLUMN meta_error TEXT"); } catch {}
+  /**
    * The metadata document itself, not our reading of it.
    *
    * `fetchMeta` extracted five fields and dropped the file. Everything else an operator wrote there — the off-chain
