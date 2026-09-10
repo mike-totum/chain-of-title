@@ -19,7 +19,7 @@ import { config } from "./config.ts";
 import { openDb } from "./db.ts";
 import { type Assessment, assess, cleanAtBirth, coverageWindows, TOKEN_COLUMNS, MIN_POOL_SOL,
   readingCertifies, readingIsFresh, MAX_READING_AGE_MS, MAX_DEV_PCT, MIN_BUYERS, BUYOUT_SOL } from "./provenance.ts";
-import { profile, verdictLine, walletVerdict, clusterProfile } from "./operator.ts";
+import { profile, verdictLine, walletVerdict, clusterProfile, clusterTable } from "./operator.ts";
 import { poolReservesPooled } from "./outcomes.ts";
 import { rebuild, store, curveExists } from "./backfill.ts";
 import { page, tokenBody, walletBody, tokenPreview, SEARCH, when, fmt, homeBody, homeTitle, verdict, CANONICAL_HOST,
@@ -989,6 +989,13 @@ function buildHome(now: number): Home {
     })),
     wallets: walletCount,
     opRows: ops.map((w) => ({ wallet: w.wallet, taken: w.tokens, spent: w.curve_sol, sold: w.amm_sell, bought: w.amm_buy })),
+    /**
+     * The groups behind those wallets. A cluster column on the table above would have been the obvious move and was
+     * wrong: only three of the fifteen busiest wallets carry a traced funder, so the column would have been twelve
+     * dashes, and a dash there reads as "this one acts alone" when it means "we have not traced it". The clusters
+     * we did trace get their own list, where every row is something we know.
+     */
+    clusterRows: clusterTable(db, 10),
     /**
       * `fundedSol` used to be here, hardcoded to 0, and the front page printed "pool funded to 0 SOL of real
       * liquidity" as step 2 of an argument whose whole point is that the pool looked funded before it was drained.

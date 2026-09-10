@@ -57,6 +57,32 @@ export function findBuyout(dbh: any, mint: string, minSol = 40): { wallet: strin
   } catch { return null; }
 }
 
+/**
+ * One buyout is one (wallet, mint) pair, whichever table it was recorded in.
+ *
+ * A purchase watched live lands in `trades`; the same purchase recovered from chain history lands in `hist_trades`
+ * with its timestamp truncated to the second, so the two copies cannot be matched on time and must be matched on
+ * the pair. Every count of a cluster's curves goes through this, because the alternative is what happened: three
+ * call sites, two of them reading only `trades`, and two pages linked to each other disagreeing by five.
+ */
+const CLUSTER_BUYS = `SELECT t.wallet wallet, t.mint mint FROM trades t JOIN operator_wallets w ON w.wallet = t.wallet
+     WHERE t.venue='curve' AND t.side='buy' AND t.sol >= ${BUYOUT_SOL} AND w.cluster = ?
+     GROUP BY t.wallet, t.mint
+   UNION
+   SELECT h.wallet, h.mint FROM hist_trades h JOIN operator_wallets w ON w.wallet = h.wallet
+     WHERE h.side='buy' AND h.sol >= ${BUYOUT_SOL} AND w.cluster = ?
+     GROUP BY h.wallet, h.mint`;
+
+/** How many distinct bonding curves a cluster has taken. Null-safe against a database with no `hist_trades`. */
+export function clusterCurveCount(dbh: any, cluster: string): number {
+  try {
+    return Number((dbh.prepare(`SELECT COUNT(DISTINCT mint) c FROM (${CLUSTER_BUYS})`).get(cluster, cluster) as any).c);
+  } catch {
+    return Number((dbh.prepare(`SELECT COUNT(DISTINCT t.mint) c FROM trades t JOIN operator_wallets w ON w.wallet = t.wallet
+      WHERE t.venue='curve' AND t.side='buy' AND t.sol >= ${BUYOUT_SOL} AND w.cluster = ?`).get(cluster) as any).c);
+  }
+}
+
 export function profile(dbh: any, w: string): Profile {
   const buyouts = dbh.prepare(`SELECT t.mint, tk.symbol, MAX(t.sol) sol, MIN(t.ts) ts, tk.created_at
     FROM trades t LEFT JOIN tokens tk ON tk.mint = t.mint
@@ -93,11 +119,15 @@ export function profile(dbh: any, w: string): Profile {
    * wallet's history across many tokens rather than one token's state. It was computed and stored and then not
    * carried out of this function, so no page could say it.
    */
-  const grp = op?.cluster ? dbh.prepare(
-    `SELECT (SELECT COUNT(*) FROM operator_wallets WHERE cluster = ?) wallets,
-            (SELECT COUNT(DISTINCT mint) FROM trades WHERE venue='curve' AND side='buy' AND sol >= ${BUYOUT_SOL}
-               AND wallet IN (SELECT wallet FROM operator_wallets WHERE cluster = ?)) curves`
-  ).get(op.cluster, op.cluster) as any : null;
+  const grp = op?.cluster ? {
+    wallets: (dbh.prepare("SELECT COUNT(*) c FROM operator_wallets WHERE cluster = ?").get(op.cluster) as any).c,
+    // Counted by clusterCurveCount and not here, because this sentence and the cluster page it links to are two
+    // renderings of one fact. Reading `trades` alone made a wallet page say "together took 22 bonding curves"
+    // above a link to a page that said 27: the same group, counted twice, differing by the curves we reconstructed
+    // from chain history rather than watched live. Neither number was wrong, which is what made it unfixable by
+    // looking at either page.
+    curves: clusterCurveCount(dbh, op.cluster),
+  } : null;
   const pol = op?.cluster ? (dbh.prepare("SELECT policy FROM operator_policy WHERE cluster = ?").get(op.cluster) as any) : null;
   return {
     buyouts: buyouts.map((b) => ({ mint: b.mint, symbol: b.symbol, sol: b.sol, ts: b.ts,
@@ -234,6 +264,46 @@ export function clusterProfile(dbh: any, cluster: string): ClusterProfile {
     curves: new Set(events.map((e) => e.mint)).size,
     sol: events.reduce((s, e) => s + e.sol, 0),
   };
+}
+
+/** A cluster as one row of a list: enough to decide whether to open it, and nothing that needs a caveat of its own. */
+export interface ClusterRow {
+  cluster: string; funded: number; used: number; curves: number; sol: number; last: number;
+}
+
+/**
+ * The clusters with the most curves taken, for a page that wants to list them.
+ *
+ * Deliberately the same arithmetic as `clusterProfile`, including the UNION over `hist_trades` and the one-event-per
+ * (wallet, mint) rule, because a list that says 22 above a page that says 27 is worse than no list: the reader has
+ * no way to tell which is wrong, and the answer would be "neither, they counted different things". The cheaper
+ * trades-only version was measured at 4 ms against 6 ms for this one, which is not a saving worth a discrepancy.
+ *
+ * `used >= 2` because a cluster of one wallet is a wallet. Nothing about a single address is made clearer by
+ * calling the group it belongs to an operator, and the wallet page already says everything we know about it.
+ */
+export function clusterTable(dbh: any, limit = 10): ClusterRow[] {
+  const shape = (from: string) => `SELECT cluster, COUNT(DISTINCT wallet) used, COUNT(DISTINCT mint) curves,
+      SUM(sol) sol, MAX(ts) last, (SELECT COUNT(*) FROM operator_wallets x WHERE x.cluster = b.cluster) funded
+    FROM (${from}) b GROUP BY cluster HAVING used >= 2 ORDER BY curves DESC, sol DESC LIMIT ?`;
+  const live = `SELECT w.cluster cluster, t.wallet wallet, t.mint mint, MIN(t.ts) ts, MAX(t.sol) sol
+      FROM trades t JOIN operator_wallets w ON w.wallet = t.wallet
+     WHERE t.venue='curve' AND t.side='buy' AND t.sol >= ${BUYOUT_SOL} AND w.cluster IS NOT NULL
+     GROUP BY t.wallet, t.mint`;
+  // A collector database has no `hist_trades` at all, so the reconstructed half is attempted and not required.
+  const both = `${live}
+    UNION
+    SELECT w.cluster, h.wallet, h.mint, MIN(h.ts), MAX(h.sol)
+      FROM hist_trades h JOIN operator_wallets w ON w.wallet = h.wallet
+     WHERE h.side='buy' AND h.sol >= ${BUYOUT_SOL} AND w.cluster IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM trades t2 WHERE t2.wallet = h.wallet AND t2.mint = h.mint
+                        AND t2.venue='curve' AND t2.side='buy' AND t2.sol >= ${BUYOUT_SOL})
+     GROUP BY h.wallet, h.mint`;
+  const run = (sql: string) => (dbh.prepare(sql).all(limit) as any[]).map((r): ClusterRow => ({
+    cluster: r.cluster, funded: Number(r.funded), used: Number(r.used),
+    curves: Number(r.curves), sol: Number(r.sol), last: Number(r.last),
+  }));
+  try { return run(shape(both)); } catch { return run(shape(live)); }
 }
 
 // CLI only. check.ts imports profile()/verdictLine(); importing must not run a report.

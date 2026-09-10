@@ -675,6 +675,8 @@ export function tokenBody(
  */
 export interface CleanRow { mint: string; symbol: string | null; devPct: number; buyers: number; fillMs: number | null; poolSol: number | null; readAt: number | null; liquid: boolean }
 export interface OpRow { wallet: string; taken: number; spent: number; sold: number; bought: number }
+/** A cluster on the front page. Mirrors ClusterRow in operator.ts, which is where the arithmetic lives. */
+export interface HomeCluster { cluster: string; funded: number; used: number; curves: number; sol: number; last: number }
 export interface Home {
   now: number; builtAt: number | null;
   /** end of the 24h window: the archive's own build time, not the request clock. See `inDay` in serve.ts. */
@@ -686,7 +688,7 @@ export interface Home {
   clean24h: number;
   danger24h: number; onFile: number;
   windowDays: number; gradWindow: number; cleanBirthWindow: number; unchecked: number; unread: number; unchecked24h: number;
-  cleanRows: CleanRow[]; wallets: number; opRows: OpRow[];
+  cleanRows: CleanRow[]; wallets: number; opRows: OpRow[]; clusterRows: HomeCluster[];
   proof: null | { mint: string; symbol: string | null; devPct: number; gradMs: number | null;
     nowSol: number; nowAt: number; verdict: Verdict };
   maxDevPct: number; minBuyers: number; buyoutSol: number; minPoolSol: number; maxReadingAgeMs: number;
@@ -713,6 +715,11 @@ export function homeBody(h: Home): string {
   const ops = h.opRows.map((x) => `<tr><td class="mono"><a href="w/${esc(x.wallet)}.html">${esc(x.wallet.slice(0, 12))}…</a></td>
     <td class="num">${x.taken}</td><td class="num">${fmt(x.spent)} SOL</td>
     <td class="num">${fmt(x.sold)} SOL</td><td class="num">${fmt(x.bought)} SOL</td></tr>`).join("");
+  const clusters = h.clusterRows.map((c) => `<tr>
+    <td class="mono"><a href="o/${esc(c.cluster)}.html">${esc(c.cluster)}</a></td>
+    <td class="num">${fmt(c.funded)}</td><td class="num">${fmt(c.used)}</td>
+    <td class="num">${fmt(c.curves)}</td><td class="num">${fmt(c.sol)} SOL</td>
+    <td class="num mut">${ago(h.now - c.last)}</td></tr>`).join("");
   return `
   <div class="hero">
     <div class="col-a">
@@ -832,6 +839,17 @@ export function homeBody(h: Home): string {
   are the wallets doing it, what they spent, and what they did with the tokens afterwards. This is the part no
   contract scanner can produce, because it needs a wallet's history across many tokens rather than one token's state.</p>
   <table class="data"><tr><th>Wallet</th><th class="num">Curves taken</th><th class="num">Spent</th><th class="num">Sold after</th><th class="num">Bought back</th></tr>${ops}</table>
+
+  ${h.clusterRows.length ? `
+  <div class="sec"><h2>And they are not working alone</h2><span class="cnt">${fmt(h.clusterRows.length)} groups shown</span></div>
+  <p class="lede">Where we can trace who paid to open a buying wallet, that same address has often opened dozens
+  more. These are the groups that have taken the most curves. Each one has a page: every wallet, every purchase,
+  the wait between the launch and the buy, and the transaction behind each of them.</p>
+  <table class="data"><tr><th>Operator</th><th class="num">Wallets funded</th><th class="num">Wallets used</th>
+    <th class="num">Curves taken</th><th class="num">Spent</th><th class="num">Last seen</th></tr>${clusters}</table>
+  <p class="callout">A shared funder is a lead, not a finding. Trading terminals fund their users from one address
+  the same way a wallet farm funds its own, and we cannot tell those apart from the chain alone. What each page
+  shows is what the wallets did, with the transaction for every purchase.</p>` : ""}
 
   <div class="sec"><h2>Launched clean, last ${h.windowDays === 1 ? "24 hours" : `${h.windowDays} days`}</h2><span class="cnt">${fmt(h.cleanBirthWindow)} of ${fmt(h.gradWindow)} graduations${h.cleanRows.length < h.cleanBirthWindow ? ` · newest ${fmt(h.cleanRows.length)} shown` : ""}</span></div>
   <p class="lede">Creator kept under ${h.maxDevPct}% and has not sold, at least ${h.minBuyers} distinct buyers on the curve,
