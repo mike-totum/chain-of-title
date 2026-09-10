@@ -23,7 +23,7 @@ import { profile, verdictLine, walletVerdict } from "./operator.ts";
 import { poolReservesPooled } from "./outcomes.ts";
 import { rebuild, store, curveExists } from "./backfill.ts";
 import { page, tokenBody, walletBody, tokenPreview, SEARCH, when, fmt, homeBody, homeTitle, verdict, CANONICAL_HOST,
-  siblingsBody, relaunchStrip, type Priors, type SiblingRow, type SiblingStats, type StripMark,
+  siblingsBody, relaunchStrip, wallBody, type Priors, type SiblingRow, type SiblingStats, type StripMark,
   type Home, type Chrome, type Reading } from "./render.ts";
 import { r2Config, getWithType as r2Get } from "./r2.ts";
 import { tokenRecord, walletRecord, statusRecord, unknownRecord, errorRecord,
@@ -1073,6 +1073,36 @@ const server = createServer(async (req, res) => {
      * read and this service would build it on every request. Oldest first, so the sequence reads from the start —
      * the cadence is the finding, and a burst of launches minutes apart is invisible if the newest are shown.
      */
+    /**
+     * The live wall, and the feed behind it.
+     *
+     * `/api/live/recent` proxies the collector's in-memory ring over the private network. Proxied rather than
+     * exposed directly because the collector has no public address and should not get one: it is the ingesting
+     * process, and the only thing that must never be starved of attention is ingestion. The web service is already
+     * the public face and already polls the collector for the counter.
+     *
+     * `no-store`, and a short upstream timeout. A cached live feed is a contradiction, and a slow collector must
+     * degrade to "nothing new" on the page rather than hold a request open.
+     */
+    if (safe === "/api/live/recent") {
+      if (!HEALTH_URL) return send(200, JSON.stringify({ at: Date.now(), launches: [], unavailable: "no collector configured" }), TYPES[".json"], "none");
+      const since = Number(url.searchParams.get("since") ?? 0);
+      try {
+        const r = await fetch(HEALTH_URL.replace(/\/health$/, `/recent?since=${since}`), { signal: AbortSignal.timeout(4000) });
+        if (!r.ok) return send(200, JSON.stringify({ at: Date.now(), launches: [], unavailable: `collector http ${r.status}` }), TYPES[".json"], "none");
+        return send(200, await r.text(), TYPES[".json"], "none");
+      } catch (e) {
+        // A feed that cannot reach the collector says so. It never returns an empty list as though the chain were
+        // quiet, which would be a false statement about the market rather than about us.
+        return send(200, JSON.stringify({ at: Date.now(), launches: [], unavailable: `collector unreachable: ${(e as Error).name === "TimeoutError" ? "timeout" : (e as Error).message}` }), TYPES[".json"], "none");
+      }
+    }
+    if (safe === "/live.html") {
+      return send(200, page("Launches, as they happen", wallBody(), chrome, 0,
+        "Every pump.fun launch the moment its creation transaction is decoded, with the creator's share of supply.",
+        "/live.html"), "text/html; charset=utf-8", "none");
+    }
+
     const SIBLINGS_MAX = 300;
     const imgSibs = safe.match(/^\/i\/([0-9a-f]{64})\.html$/);
     const creatorSibs = safe.match(/^\/c\/([1-9A-HJ-NP-Za-km-z]{32,44})\.html$/);

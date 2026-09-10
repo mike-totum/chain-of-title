@@ -48,6 +48,18 @@ a:focus-visible,button:focus-visible,input:focus-visible,summary:focus-visible{o
 .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;word-break:break-all}
 .sub{color:var(--mut);font-size:13px;margin-bottom:24px}
 td.mut{color:var(--mut)}
+.wall{border:1px solid var(--line);background:var(--card);min-height:120px}
+.wrow{display:grid;grid-template-columns:auto 1fr auto auto;gap:12px;align-items:baseline;padding:8px 12px;
+ border-bottom:1px solid var(--line);font-size:14px;text-decoration:none;color:inherit;animation:win .45s ease-out}
+.wrow:last-child{border-bottom:0}
+.wrow:hover{background:var(--bg)}
+.wrow .sym{font-weight:600}
+.wrow .nm{color:var(--mut);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wrow .dv{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
+.wrow .dv.hi{color:var(--bad);font-weight:600}
+.wrow .ago{color:var(--mut);font-size:12px;font-variant-numeric:tabular-nums}
+@keyframes win{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+@media(prefers-reduced-motion:reduce){.wrow{animation:none}}
 .strip{border:1px solid var(--line);background:var(--card);padding:12px 14px 8px;margin:20px 0 4px}
 .strip svg{display:block;width:100%;height:66px}
 .striphead{font-size:12.5px;color:var(--mut);margin-bottom:6px;display:flex;gap:10px;flex-wrap:wrap;align-items:baseline}
@@ -1013,4 +1025,95 @@ export function relaunchStrip(marks: StripMark[], capped: number): string {
   <script>(function(){var s=document.currentScript.previousElementSibling,r=s.querySelector('#ro');
     s.addEventListener('mouseover',function(e){var g=e.target.closest('.mk');if(g)r.textContent=g.getAttribute('data-l');});
     s.addEventListener('mouseleave',function(){r.textContent='hover a mark';});})();</script>`;
+}
+
+/**
+ * The live wall: launches arriving as they happen.
+ *
+ * Everything else on this site is a record — something that already happened, looked up afterwards. This is the only
+ * page that shows the instrument working, and it is the clearest possible statement of what the archive is: not a
+ * database someone assembled, but a machine that was watching at the time. A visitor who sees a launch appear, and
+ * the creator's share appear beside it a second later, understands the whole product without reading a word of it.
+ *
+ * It is also the honest demonstration of the base rate. Nobody believes "most launches are manufactured" from a
+ * statistic; watching them scroll past with the creator holding 79% of supply is a different kind of argument.
+ *
+ * The page holds no state worth keeping and makes no claim beyond what each row says. Rows link to the record, which
+ * is where the evidence and the caveats live — the wall is a window, not a verdict.
+ */
+export function wallBody(): string {
+  return `
+  <div class="hero"><div class="col-a">
+    <h1 class="headline">Launches, as they happen</h1>
+    <p class="lede">Every pump.fun token, the moment our collector decodes its creation transaction. The creator's
+    share of supply is read from that same transaction, so it appears with the launch rather than after it.</p>
+    <p class="lede">This is the archive being written. Click any row for its record.</p>
+  </div>
+  <div class="col-b"><div class="stats" style="margin:4px 0 0">
+    <div class="stat"><span>seen on this page</span><b class="big" id="wc">0</b></div>
+    <div class="stat"><span>creator took 20%+</span><b class="big" id="wd">0</b></div>
+    <div class="stat"><span>per minute</span><b class="big" id="wr">&mdash;</b></div>
+  </div>
+  <p class="sub" style="margin:6px 0 0"><span id="wstat">connecting&hellip;</span></p></div></div>
+
+  <div class="sec"><h2>Live</h2><span class="cnt" id="wago">&mdash;</span></div>
+  <div class="wall" id="wall"><p class="callout" id="wempty">Waiting for the next launch. At this hour that is
+  usually a few seconds.</p></div>
+  <p class="callout">A launch appearing here is not a finding about it. The creator's share is the only figure known
+  at the instant of creation; buyer counts and everything else need time to happen. Open the record for the rest.</p>
+  <script>(function(){
+    var wall=document.getElementById('wall'),empty=document.getElementById('wempty');
+    var cN=document.getElementById('wc'),cD=document.getElementById('wd'),cR=document.getElementById('wr');
+    var st=document.getElementById('wstat'),ago=document.getElementById('wago');
+    var since=0,seen=0,heavy=0,t0=Date.now(),MAX=60,stop=false,fails=0;
+    function esc(x){var d=document.createElement('div');d.textContent=x==null?'':String(x);return d.innerHTML;}
+    function row(l){
+      var a=document.createElement('a');a.className='wrow';a.href='t/'+encodeURIComponent(l.mint)+'.html';
+      var pct=(typeof l.devPct==='number')?l.devPct:0;
+      a.innerHTML='<span class=\"sym\">'+esc(l.symbol||'?')+'</span>'+
+        '<span class=\"nm\">'+esc(l.name||'')+'</span>'+
+        '<span class=\"dv'+(pct>=20?' hi':'')+'\">'+pct.toFixed(1)+'%</span>'+
+        '<span class=\"ago\">just now</span>';
+      a.setAttribute('data-at',String(l.at));
+      return a;
+    }
+    function tick(){
+      var now=Date.now();
+      var rows=wall.querySelectorAll('.wrow');
+      for(var i=0;i<rows.length;i++){
+        var s=Math.round((now-Number(rows[i].getAttribute('data-at')))/1000);
+        var e=rows[i].querySelector('.ago');
+        if(e)e.textContent=s<2?'just now':(s<90?s+'s ago':Math.round(s/60)+'m ago');
+      }
+      var mins=(now-t0)/60000;
+      if(mins>0.15)cR.textContent=(seen/mins).toFixed(0);
+    }
+    function pull(){
+      if(stop)return;
+      fetch('api/live/recent?since='+since,{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){
+        fails=0;
+        if(d.unavailable){st.textContent=d.unavailable;return;}
+        st.textContent='live from the collector';
+        var ls=d.launches||[];
+        if(ls.length){
+          if(empty){empty.remove();empty=null;}
+          for(var i=0;i<ls.length;i++){
+            var l=ls[i];
+            if(l.at>since)since=l.at;
+            seen++;if(typeof l.devPct==='number'&&l.devPct>=20)heavy++;
+            wall.insertBefore(row(l),wall.firstChild);
+          }
+          while(wall.childElementCount>MAX)wall.removeChild(wall.lastElementChild);
+          cN.textContent=seen.toLocaleString();cD.textContent=heavy.toLocaleString();
+          ago.textContent=new Date(d.at).toISOString().slice(11,19)+' UTC';
+        }
+        tick();
+      }).catch(function(){
+        // Say it, never fake it: a wall that silently stops is indistinguishable from a market that stopped.
+        fails++;st.textContent='feed interrupted, retrying';
+        if(fails>20){stop=true;st.textContent='feed stopped. Reload to reconnect.';}
+      });
+    }
+    pull();setInterval(pull,2500);setInterval(tick,1000);
+  })();</script>`;
 }

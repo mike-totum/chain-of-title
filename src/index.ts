@@ -240,9 +240,27 @@ const realized = new Map<string, { n: number; pnl: number; wins: number }>();
 for (const s of strategies) realized.set(s.name, { n: 0, pnl: 0, wins: 0 });
 
 // ---------- launches ----------
+/**
+ * The last few minutes of launches, in memory, for the live wall.
+ *
+ * Deliberately a ring and not a query. "What launched in the last two minutes" is answerable from the database, but
+ * only by polling it on a timer from another service, and the answer would be as old as the poll. This is the same
+ * event the collector already handles to record the launch — the wall shows what the archive saw, at the moment it
+ * saw it, or it is not a live wall.
+ *
+ * Bounded and lossy on purpose: at ~25,000 launches a day this holds a couple of minutes and drops the rest. Nothing
+ * here is a record — every one of these is written to `tokens` by the line below, and the ring is a view of the last
+ * moments of that, thrown away on restart. A consumer that misses events has missed nothing it cannot look up.
+ */
+const RECENT_MAX = 400;
+const recent: { mint: string; symbol: string; name: string; creator: string; at: number; devPct: number; sig: string | null }[] = [];
+
 feed.on("create", (e, now) => {
   seen++;
   const t = tracker.onCreate(e, now);
+  recent.push({ mint: e.mint, symbol: e.symbol ?? "?", name: e.name ?? "", creator: e.traderPublicKey ?? "",
+    at: now, devPct: t.devPct, sig: e.signature ?? null });
+  if (recent.length > RECENT_MAX) recent.splice(0, recent.length - RECENT_MAX);
   feed.subscribeTrades(e.mint);
   broker.evaluateEntries(t, now);
   upsertToken(db, t);
@@ -1403,6 +1421,19 @@ if (process.env.RECORD_PORT) {
        * evidence it does not hold — missing a buyout it cannot see, and calling the launch uncovered because the
        * record's last run ended when the file was built. Same code from `provenance.ts`, run where the evidence is.
        */
+      /**
+       * The live wall's feed: launches since a cursor, newest last.
+       *
+       * Cursor is a timestamp rather than an offset, so a consumer that reconnects asks for "anything after what I
+       * already showed" and cannot double-count or skip when the ring rotates under it. An empty array is a real
+       * answer — a quiet few seconds — and is not the same as an error, which is why this never returns 204.
+       */
+      if (req.url?.startsWith("/recent")) {
+        const since = Number(new URL(req.url, "http://x").searchParams.get("since") ?? 0);
+        const out = recent.filter((r) => r.at > since).slice(-120);
+        res.writeHead(200, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ at: Date.now(), launches: out }));
+      }
       const lm = req.url?.match(/^\/launch\/([1-9A-HJ-NP-Za-km-z]{32,44})$/);
       if (lm) {
         try {
