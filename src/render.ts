@@ -353,7 +353,7 @@ ${head}<style>${CSS}</style></head>
 <main class="page shell">
 ${body}
 </main>
-<footer class="band-bot"><div class="shell"><div class="note"><a href="${root}live.html">Watch launches live</a> · <a href="${root}method.html">How this is decided</a> · <a href="${root}corrections.html">Tell us we are wrong</a> · <a href="${root}data.html">Take the data</a> · <a href="${root}api.html">API</a> · <a href="${root}pledge.html">Pledge</a> · <a href="${root}index.html">${BRAND}</a><br>
+<footer class="band-bot"><div class="shell"><div class="note"><a href="${root}live.html">Watch launches live</a> · <a href="${root}findings.html">What the record shows</a> · <a href="${root}method.html">How this is decided</a> · <a href="${root}corrections.html">Tell us we are wrong</a> · <a href="${root}data.html">Take the data</a> · <a href="${root}api.html">API</a> · <a href="${root}pledge.html">Pledge</a> · <a href="${root}index.html">${BRAND}</a><br>
 The documented history of a token from its first block. Coverage begins ${c.coverageFrom}${c.gapMin >= 1 ? `, with ${fmt(c.gapMin)} min of recorded downtime` : ", no recorded downtime"}.
 Everything here is read from the Solana chain. Where we recorded a launch's creation transaction, its page cites it and you can check every figure yourself; where we did not, the page says so. Where we say no markers were found, we checked the launch against every pattern we record and none was present. That is a statement about what we checked, not a prediction and not advice.
 Most tokens lose money regardless: of 19,412 bonding-curve positions measured, none reached 5x.

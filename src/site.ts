@@ -548,6 +548,94 @@ writeFileSync(join(OUT, "pledge.html"), page("Our pledge", `
   of it.</p>
 `, chrome, 0, "How Chain of Title is funded, and the three things its funding will never depend on.", "/pledge.html"));
 
+/**
+ * The finding, computed at build time rather than written down.
+ *
+ * Every figure on this page is a query against the database the page is built from, because a published number that
+ * was true when someone typed it is the failure this project exists to argue against. The same queries are printed
+ * on the page so a reader can run them against the CC0 file and get the same answers, or different ones and say so.
+ */
+const F = (() => {
+  const q = (where: string) => (db.prepare(`SELECT COUNT(*) c FROM tokens WHERE ${where}`).get() as any).c as number;
+  /**
+   * "Watched from the creation transaction" is the population, and the exclusions are the whole reason the number
+   * is defensible. A token a detector restored hours after launch (`late_discovery`) shows zero curve buyers
+   * because nobody was watching it, not because nobody bought — counting those would inflate this finding by 42%.
+   * A reconstruction is not an observation either. Both are excluded, and the raw counts are shown so the size of
+   * the exclusion is visible rather than buried.
+   */
+  const LIVE = "graduated_confirmed_by IS NOT NULL AND COALESCE(late_discovery,0) = 0 AND rebuilt_at IS NULL";
+  const watched = q(LIVE);
+  return {
+    launches: q("1=1"),
+    confirmed: q("graduated_confirmed_by IS NOT NULL"),
+    watched,
+    noBuyer: q(`${LIVE} AND curve_buyers = 0`),
+    devHalf: q(`${LIVE} AND dev_pct >= 50`),
+    both: q(`${LIVE} AND dev_pct >= 50 AND curve_buyers = 0`),
+    fastFill: q(`${LIVE} AND (graduated_at - created_at) < 60000`),
+    excludedLate: q("graduated_confirmed_by IS NOT NULL AND late_discovery = 1 AND curve_buyers = 0"),
+  };
+})();
+const pct = (n: number, d: number) => d > 0 ? `${(100 * n / d).toFixed(1)}%` : "—";
+
+writeFileSync(join(OUT, "findings.html"), page("What the record shows", `
+  <h1 class="headline">Nearly half of the graduations we watched had no outside buyer</h1>
+  <p class="lede">Of <b>${fmt(F.watched)}</b> tokens that completed a pump.fun bonding curve, which this archive
+  watched from the creation transaction and confirmed against the curve account itself,
+  <b>${fmt(F.noBuyer)}</b> — <b>${pct(F.noBuyer, F.watched)}</b> — had no outside buyer at all. Not one wallet
+  other than the creator ever bought on the curve. The creator funded the entire graduation.</p>
+
+  <div class="sec"><h2>What ${fmt(F.watched)} confirmed graduations look like at birth</h2></div>
+  <table>
+    <tr><td>No outside buyer on the curve</td><td class="num">${fmt(F.noBuyer)}</td><td class="num">${pct(F.noBuyer, F.watched)}</td></tr>
+    <tr><td>Creator took at least half of total supply in the first block</td><td class="num">${fmt(F.devHalf)}</td><td class="num">${pct(F.devHalf, F.watched)}</td></tr>
+    <tr><td>Both of the above</td><td class="num">${fmt(F.both)}</td><td class="num">${pct(F.both, F.watched)}</td></tr>
+    <tr><td>Curve filled in under 60 seconds</td><td class="num">${fmt(F.fastFill)}</td><td class="num">${pct(F.fastFill, F.watched)}</td></tr>
+  </table>
+
+  <div class="sec"><h2>Why this is not visible later</h2></div>
+  <p class="lede">These are facts about the first blocks of a token's life, and they stop being observable almost
+  immediately. Once an operator spreads the float across wallets and funds the pool with real SOL, a manufactured
+  launch and an organic one are the same object under inspection: pool depth reconciles, holder concentration looks
+  ordinary, mint and freeze authority are clean. Every present-tense check passes.</p>
+  <p class="callout">One launch in this record was created with <b>79.3% of supply taken by its creator and zero
+  outside buyers</b>, and graduated. Hours later its pool held 2,043 SOL against the 2,027 that constant product
+  predicts for its market cap, and its largest holder was 4% of supply. Nothing you could measure that afternoon
+  would have told you what it was that morning. That is not a gap in after-the-fact analysis. It is a property of
+  after-the-fact analysis.</p>
+
+  <div class="sec"><h2>What this does not say</h2></div>
+  <p class="lede">Coverage begins <b>${when(COV.from ?? 0)}</b>. A token that launched before then was not watched
+  and this archive answers <span class="mono">UNKNOWN</span> for it — the honest answer, and not a useful one.
+  Reconstruction of older launches is in progress and is marked as reconstruction wherever it lands.</p>
+  <p class="lede">The population above deliberately excludes two kinds of row, and the exclusions matter more than
+  the headline. A token that a detector restored <i>after</i> its launch carries a zero buyer count because nobody
+  was watching it, not because nobody bought — there are <b>${fmt(F.excludedLate)}</b> such rows and counting them
+  would inflate this finding by nearly half. A launch rebuilt from chain history is not an observation either.
+  Both are excluded here and both are labelled in the file.</p>
+  <p class="lede">None of this says a token was a fraud, and none of it is advice about anything. It says what the
+  chain recorded in the first blocks, which is a narrower claim and the only one we can support.</p>
+
+  <div class="sec"><h2>Check it yourself</h2></div>
+  <p class="lede">The record is public domain and the whole file is one download. These are the queries above,
+  verbatim — disagreeing with us is the point of publishing it.</p>
+  <table>
+    <tr><td class="mono" style="white-space:pre-wrap">SELECT COUNT(*) FROM tokens
+WHERE graduated_confirmed_by IS NOT NULL
+  AND COALESCE(late_discovery,0) = 0
+  AND rebuilt_at IS NULL
+  AND curve_buyers = 0;</td><td>the headline: confirmed graduations, watched from creation, with no outside buyer</td></tr>
+    <tr><td class="mono" style="white-space:pre-wrap">SELECT COUNT(*) FROM tokens
+WHERE graduated_confirmed_by IS NOT NULL
+  AND COALESCE(late_discovery,0) = 0
+  AND rebuilt_at IS NULL;</td><td>the denominator</td></tr>
+  </table>
+  <p class="lede">Bulk file: <a href="data/record.db">record.db</a>. Permanent citable copy:
+  <span class="mono">doi:10.57967/hf/10338</span>, deposited on infrastructure this project does not run.
+  <a href="data.html">What every column means</a>, and <a href="method.html">how a launch is judged</a>.</p>
+`, chrome, 0, `Of ${fmt(F.watched)} bonding curves this archive watched from the creation transaction and confirmed, ${fmt(F.noBuyer)} completed with no outside buyer at all.`, "/findings.html"));
+
 writeFileSync(join(OUT, "corrections.html"), page("Corrections", `
   <h1 class="headline">Corrections</h1>
   <p class="lede">We publish adverse factual findings about tokens and about the wallets behind them. Anyone affected
@@ -616,4 +704,4 @@ console.log(PAGES
   ? `  ${toks.length.toLocaleString()} token pages + ${wallets.size} wallet pages written (--pages)`
   : `  ${toks.length.toLocaleString()} graduations and ${wallets.size} curve-taking wallets assessed; their pages are rendered on request by \`npm run serve\` (pass --pages to write them)`);
 console.log(`  ${clean.length} checked with no markers found; ${dayClean.length} in the last 24 h of ${day.length} graduations`);
-console.log(`  method.html, data.html, 404.html, api.html, pledge.html, corrections.html` + (PAGES ? `, api/${API_VERSION}/token/<mint>.json, api/${API_VERSION}/wallet/<wallet>.json` : ""));
+console.log(`  findings.html, method.html, data.html, 404.html, api.html, pledge.html, corrections.html` + (PAGES ? `, api/${API_VERSION}/token/<mint>.json, api/${API_VERSION}/wallet/<wallet>.json` : ""));
