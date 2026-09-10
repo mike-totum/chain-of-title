@@ -770,13 +770,20 @@ export function homeBody(h: Home): string {
     <div class="col-a">
     <h1 class="headline">${h.windowEnd && h.now - h.windowEnd > 3600_000 ? `In the 24 hours to ${when(h.windowEnd)}` : "In the last 24 hours"} ${fmt(h.graduated24h)} tokens finished their bonding curve.
     ${/*
-        Three sentences that have to scan as three, which means the third has to be built like the second. It read
-        "On 50 we checked and found none" - a fronted preposition and a dangling "none" hanging off a clause two
-        sentences back, arrived at by swapping "launched clean" for something honest and not reading the result
-        aloud. "50 have none" says the same thing, parallel to the sentence above it, and takes its subject from
-        "findings on record" where the reader has just been left.
+        The third clause has now been wrong twice, both times in the same direction: it kept describing an absence
+        in our files rather than a search we ran. "50 have none" inherits "on record" from the clause before it and
+        lands as "we hold nothing about those fifty" - the exact opposite of the finding, and the third time this
+        page has managed to make a positive result sound like a gap.
+        
+        The cure is to make us the actor. "We recorded a finding against 646, and none at all against 50" can only
+        mean we looked, because recording is something we do. It is also how a register talks: an encumbrance is
+        recorded against a title, and its absence is a fact about the search rather than about the filing cabinet.
+        The two counts deliberately do not sum to the total - the rest were checked and settled neither way - so
+        neither number is presented as the remainder of the other.
       */ ""}
-    <b>${fmt(h.danger24h)}</b> have findings on record. ${h.cleanBirth24h === 0 ? `Not one came through without.` : `<b class="q">${fmt(h.cleanBirth24h)}</b> have none.`}</h1>
+    We recorded a finding against <b>${fmt(h.danger24h)}</b> of them${h.cleanBirth24h === 0
+      ? `, and not one came through with nothing against it.`
+      : `, and none at all against <b class="q">${fmt(h.cleanBirth24h)}</b>.`}</h1>
     <p class="lede">Behind most of those findings is a creator who took the supply, or a single wallet that bought
     the whole curve. That evidence exists for about thirty seconds and is unrecoverable afterwards, so we watch every
     launch on pump.fun and keep the record. What it means is yours to decide; keeping it is our job.</p>
