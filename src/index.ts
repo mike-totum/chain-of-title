@@ -1365,13 +1365,23 @@ if (process.env.RECORD_PORT) {
          * Failure returns null, never a stale or zero count. A frozen number presented as live is worse than no
          * number: the site would claim ingestion is healthy on the strength of a value that stopped moving.
          */
-        let observed: number | null = null, held: number | null = null;
+        let observed: number | null = null, held: number | null = null, operators: number | null = null;
         try {
           held = (db.prepare("SELECT COUNT(*) c FROM tokens").get() as any).c as number;
           observed = (db.prepare("SELECT COUNT(*) c FROM tokens WHERE COALESCE(late_discovery,0)=0").get() as any).c as number;
+          /**
+           * The size of the operator map, because it decides whether the archive can advance at all.
+           *
+           * `serve.ts` refuses a pulled record carrying under 90% of the operator_wallets it already serves, and on
+           * 2026-09-09 that froze publishing: the collector had 8,598 against 10,243 because `clusters` had only
+           * ever run on a laptop. The guard was right and the number it turned on was invisible from outside — no
+           * endpoint reported it, so "is the archive able to advance yet" could not be answered without a deploy.
+           * A figure that gates publishing has to be observable, or the next freeze is diagnosed the same slow way.
+           */
+          operators = (db.prepare("SELECT COUNT(*) c FROM operator_wallets").get() as any).c as number;
         } catch { /* null, and the consumer shows the published figure alone */ }
         res.writeHead(200, { "content-type": "application/json" });
-        return res.end(JSON.stringify({ record: RECORD_PATH, bytes: size, builtAt: mtime, building: buildingRecord, observed, held, at: Date.now() }));
+        return res.end(JSON.stringify({ record: RECORD_PATH, bytes: size, builtAt: mtime, building: buildingRecord, observed, held, operators, at: Date.now() }));
       }
       /**
        * One launch, answered by the machine that watched it.
