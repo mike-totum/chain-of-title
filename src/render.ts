@@ -770,23 +770,27 @@ export function homeBody(h: Home): string {
     <div class="col-a">
     <h1 class="headline">${h.windowEnd && h.now - h.windowEnd > 3600_000 ? `In the 24 hours to ${when(h.windowEnd)}` : "In the last 24 hours"} ${fmt(h.graduated24h)} tokens finished their bonding curve.
     ${/*
-        The third clause has now been wrong twice, both times in the same direction: it kept describing an absence
-        in our files rather than a search we ran. "50 have none" inherits "on record" from the clause before it and
-        lands as "we hold nothing about those fifty" - the exact opposite of the finding, and the third time this
-        page has managed to make a positive result sound like a gap.
+        A partition, because the alternative reads as missing data.
         
-        The cure is to make us the actor. "We recorded a finding against 646, and none at all against 50" can only
-        mean we looked, because recording is something we do. It is also how a register talks: an encumbrance is
-        recorded against a title, and its absence is a fact about the search rather than about the filing cabinet.
-        The two counts deliberately do not sum to the total - the rest were checked and settled neither way - so
-        neither number is presented as the remainder of the other.
+        This said "a finding against 646, and none at all against 50" out of 943, and a researcher's first question
+        is where the other 247 went. Two counts that do not sum to the total look like coverage holes, however
+        carefully the sentence is worded - and they are not holes. Measured over one window: the in-between group is
+        launches with nothing recorded against them that still fall short of one of our tests, most often because
+        the creator sold or fewer than MIN_BUYERS outside wallets bought the curve. Substantive, checked, and
+        neither of the two things the sentence was offering.
+        
+        So all three are stated and they add up, and "we checked every one" says the coverage is complete before the
+        numbers arrive rather than leaving a reader to work it out.
       */ ""}
-    We recorded a finding against <b>${fmt(h.danger24h)}</b> of them${h.cleanBirth24h === 0
-      ? `, and not one came through with nothing against it.`
-      : `, and none at all against <b class="q">${fmt(h.cleanBirth24h)}</b>.`}</h1>
+    We checked every one. <b>${fmt(h.danger24h)}</b> carry a finding, ${h.cleanBirth24h === 0
+      ? `not one carries none`
+      : `<b class="q">${fmt(h.cleanBirth24h)}</b> carry none`}, and ${fmt(Math.max(0, h.graduated24h - h.danger24h - h.cleanBirth24h))} fall between.</h1>
     <p class="lede">Behind most of those findings is a creator who took the supply, or a single wallet that bought
     the whole curve. That evidence exists for about thirty seconds and is unrecoverable afterwards, so we watch every
     launch on pump.fun and keep the record. What it means is yours to decide; keeping it is our job.</p>
+    <p class="lede">The ones in between have nothing recorded against them and still fall short of one of our tests
+    &mdash; most often the creator sold, or fewer than ${h.minBuyers} outside wallets bought the curve. They are
+    checked, not unexamined.</p>
     <p class="lede">Paste any mint. If we hold its launch, you get what happened. If we do not, we rebuild it from the
     chain, and if we cannot do that we say so rather than guess.</p>
     ${SEARCH}
@@ -831,8 +835,10 @@ export function homeBody(h: Home): string {
     <div class="col-b">
     <div class="stats" style="margin:4px 0 0">
       <div class="stat"><span>graduated, 24h to ${h.windowEnd ? when(h.windowEnd) : "now"}</span><b class="big">${fmt(h.graduated24h)}</b></div>
-      <div class="stat"><span>checked, no markers found</span><b class="big">${fmt(h.cleanBirth24h)}</b></div>
       <div class="stat"><span>with findings on record</span><b class="big">${fmt(h.danger24h)}</b></div>
+      <div class="stat"><span>checked, no markers found</span><b class="big">${fmt(h.cleanBirth24h)}</b></div>
+      ${/* Stated so the four figures above account for every graduation in the window and a reader can add them up. */ ""}
+      <div class="stat"><span>short of a test, nothing found</span><b class="big">${fmt(Math.max(0, h.graduated24h - h.danger24h - h.cleanBirth24h))}</b></div>
       <div class="stat"><span>launches recorded</span><b class="big" id="rec" data-n="${h.onFile}">${fmt(h.onFile)}</b></div>
     </div>
     <p class="sub" style="margin:6px 0 0"><span id="recnote">Launch counts as of ${h.builtAt ? `${when(h.builtAt)}, ${ago(h.now - h.builtAt)}` : "an unrecorded time"}, the age of the archive this reads.</span>
