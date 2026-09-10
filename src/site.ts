@@ -16,7 +16,7 @@ import { rpcStats } from "./rpc-http.ts";
 import { tokenRecord, walletRecord, API_VERSION, PER_IP_PER_HOUR, type Coverage } from "./api.ts";
 import { BRAND, CANONICAL_HOST, CONTACT, CSS, FAVICON, SEARCH, page, tokenBody, walletBody, tokenPreview, esc, fmt, when, dur, ago, type Chrome, type Reading } from "./render.ts";
 import {
-  assess, cleanAtBirth, readingCertifies, MAX_READING_AGE_MS, coverageWindows, TOKEN_COLUMNS,
+  assess, cleanAtBirth, readingCertifies, MAX_READING_AGE_MS, coverageWindows, TOKEN_COLUMNS, optionalColumns, graduationDisproved,
   BUYOUT_SOL, MAX_DEV_PCT, MIN_BUYERS, MIN_GRAD_MS, MIN_POOL_SOL,
   type Assessment, type Flag,
 } from "./provenance.ts";
@@ -73,7 +73,10 @@ if (PAGES) {
 
 // ---------- data ----------
 const since = now - DAYS * 86400_000;
-const toks = db.prepare(`SELECT ${TOKEN_COLUMNS} FROM tokens WHERE graduated = 1 AND created_at >= ?`).all(since) as any[];
+// Disproved graduations are excluded from every population this page counts. The feed's threshold event is kept
+// on the record; it is simply not counted as a graduation once we have read the curve and found otherwise.
+const toks = (db.prepare(`SELECT ${TOKEN_COLUMNS}${optionalColumns(db)} FROM tokens WHERE graduated = 1 AND created_at >= ?`).all(since) as any[])
+  .filter((t) => !graduationDisproved(t));
 
 const look = (t: any): Assessment => assess(db, t, covered);
 
@@ -197,7 +200,7 @@ writeFileSync(join(OUT, "404.html"), page("No record", `
 const labelled = (() => {
   try {
     const set = JSON.parse(readFileSync("data/labels.json", "utf8")) as { labels: any[]; families: any[]; method: string };
-    const q = db.prepare(`SELECT ${TOKEN_COLUMNS} FROM tokens WHERE mint = ?`);
+    const q = db.prepare(`SELECT ${TOKEN_COLUMNS}${optionalColumns(db)} FROM tokens WHERE mint = ?`);
     let checked = 0, flagged = 0, quiet = 0, falseClean = 0;
     for (const l of set.labels) {
       const t = q.get(l.mint) as any;
@@ -228,11 +231,11 @@ writeFileSync(join(OUT, "method.html"), page("How this is decided", `
   <p class="callout">Coverage begins ${chrome.coverageFrom}${chrome.gapMin >= 1 ? `, with ${fmt(chrome.gapMin)} minutes of recorded downtime` : ", with no recorded downtime"}. A launch that
   happened while the collector was down has no record, and is reported as unobserved rather than as anything else.</p>
 
-  <div class="sec"><h2>What "no markers on record" means</h2></div>
-  <p class="lede">It means the launch record carries none of the patterns below. It is a statement about what this
-  archive contains, not a judgement about the token: not a prediction, not a recommendation, and not a claim that it
-  will hold its value; most tokens lose money regardless. A record is described that way only when every one of these
-  is true of it:</p>
+  <div class="sec"><h2>What "checked, no markers found" means</h2></div>
+  <p class="lede">It means we watched the launch, checked it against every pattern below, and found none of them. It
+  is a statement about what we checked, not a judgement about the token: not a prediction, not a recommendation, and
+  not a claim that it will hold its value; most tokens lose money regardless. A record is described that way only
+  when every one of these is true of it:</p>
   <table>
     <tr><th>Test</th><th>Threshold</th><th>Why</th></tr>
     <tr><td>Creator's share in the first block</td><td class="num">under ${MAX_DEV_PCT}%</td><td>above this share, the creator holds more of the supply than everyone who buys on the curve combined</td></tr>
@@ -293,7 +296,7 @@ writeFileSync(join(OUT, "method.html"), page("How this is decided", `
     <tr><td>A trade is timestamped when we decode it, not by block time, so the interval between a launch and the buy that completed its curve is only as fine as the batch both arrived in. Where that interval reads as zero we say the events arrived together, rather than quoting a duration. The slot is published in <span class="mono">trades</span> for anyone who wants to settle it exactly.</td></tr>
     <tr><td>Coverage of pump.fun begins ${chrome.coverageFrom}. Other launchpads are not yet recorded at all.</td></tr>
   </table>`, chrome, 0,
-  `How Chain of Title decides what to say about a token launch: what is recorded live, how a record with no markers is defined, the labelled-set test behind it, and the four situations where we refuse to answer.`, "/method.html"));
+  `How Chain of Title decides what to say about a token launch: what is recorded live, what "checked, no markers found" means, the labelled-set test behind it, and the four situations where we refuse to answer.`, "/method.html"));
 
 // ---------- data ----------
 // A public good has to be downloadable, or the claim is rhetorical. The record database is the archive itself, not an
@@ -603,5 +606,5 @@ console.log(`\nwrote ${OUT}/`);
 console.log(PAGES
   ? `  ${toks.length.toLocaleString()} token pages + ${wallets.size} wallet pages written (--pages)`
   : `  ${toks.length.toLocaleString()} graduations and ${wallets.size} curve-taking wallets assessed; their pages are rendered on request by \`npm run serve\` (pass --pages to write them)`);
-console.log(`  ${clean.length} with no markers on record; ${dayClean.length} in the last 24 h of ${day.length} graduations`);
+console.log(`  ${clean.length} checked with no markers found; ${dayClean.length} in the last 24 h of ${day.length} graduations`);
 console.log(`  method.html, data.html, 404.html, api.html, pledge.html, corrections.html` + (PAGES ? `, api/${API_VERSION}/token/<mint>.json, api/${API_VERSION}/wallet/<wallet>.json` : ""));

@@ -131,6 +131,31 @@ export type Assessment = {
   completed: boolean;
 };
 
+/**
+ * Columns that exist on the record but not on the collector, selected only where they are present.
+ *
+ * `curve_checked_at` and `curve_complete` are written by the record build from the collector's `curve_checks`
+ * table, so the collector's own `tokens` has neither. Putting them in TOKEN_COLUMNS would throw on every query the
+ * collector answers - which is exactly how `meta_sha256` took the live lookup down for a day. Callers append
+ * `optionalColumns(db)` instead, and code that reads them must treat undefined as "not checked".
+ */
+/**
+ * A graduation our own on-chain check disproved: the feed recorded the threshold, we read the curve account, and it
+ * had not completed. Applied in JavaScript rather than SQL because the collector's schema has no such column, and a
+ * WHERE clause naming it would throw there. Undefined columns read as "not checked", which is the safe direction.
+ */
+export const graduationDisproved = (t: any) => t.curve_checked_at != null && !t.curve_complete;
+
+export const OPTIONAL_TOKEN_COLUMNS = ["curve_checked_at", "curve_complete"];
+
+export function optionalColumns(dbh: any): string {
+  try {
+    const have = new Set((dbh.prepare("PRAGMA table_info(tokens)").all() as any[]).map((c) => c.name));
+    const present = OPTIONAL_TOKEN_COLUMNS.filter((c) => have.has(c));
+    return present.length ? `, ${present.join(", ")}` : "";
+  } catch { return ""; }
+}
+
 export const TOKEN_COLUMNS = `mint, symbol, name, creator, created_at, late_discovery, dev_pct, dev_sold, unique_buyers,
   snap30_buyers, bundled_buyers, graduated, graduated_at, pool, vault_sol, vault_at, last_price, updated_at,
   rebuilt_at, rebuilt_complete, curve_buyers, venue, graduated_confirmed_by, create_sig, create_slot,
@@ -230,6 +255,15 @@ export function assess(db: DatabaseSync, t: any, covered: (ts: number) => boolea
     if (curveBuyers === 0) flags.push({ level: "DANGER", text: "It completed its bonding curve with zero outside buyers on record." });
     else if (curveBuyers !== null && curveBuyers < 10) flags.push({ level: "DANGER", text: `Only ${curveBuyers} outside buyer${curveBuyers === 1 ? "" : "s"} bought on the bonding curve before it graduated.` });
     if (gradS <= 60) flags.push({ level: "DANGER", text: `It left the curve ${Math.round(gradS)}s after launch.` });
+  } else if (gradS !== null && t.curve_checked_at != null && !t.curve_complete) {
+    /**
+     * Checked and disproved, which is not the same as unchecked and was being reported as if it were. Our feed
+     * recorded a threshold event; reading the curve account afterwards showed it was not complete. 3,195 rows in
+     * the published archive are in this state and every one of them was telling readers only that we "have not
+     * confirmed" it - understating what we actually know, about the one field this archive is most often wrong on.
+     */
+    flags.push({ level: "UNKNOWN", text: `Our feed recorded this curve reaching the graduation threshold, but when we read the curve account${
+      t.curve_checked_at ? ` on ${new Date(Number(t.curve_checked_at)).toISOString().slice(0, 10)}` : ""} it was not complete. We do not state that this curve graduated.` });
   } else if (gradS !== null) {
     // Recorded as graduating, not confirmed. Say exactly that and make no claim about how it filled.
     flags.push({ level: "UNKNOWN", text: "Our feed recorded this curve reaching the graduation threshold, but we have not confirmed that against the curve account or a PumpSwap pool, so we do not state that it completed or how it filled." });

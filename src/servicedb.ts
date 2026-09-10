@@ -602,6 +602,19 @@ try {
     + "and destroy the evidence that the error happened. The reading is published beside it as curve_checked_at and "
     + "curve_complete, and the graduations view carries the confirmed set. Count with graduated_confirmed_by IS NOT "
     + "NULL, or select from graduations.");
+  ins.run("graduated-not-asserted-when-disproved", at("2026-09-10"), "column", "graduated",
+    "The correction above published the on-chain check beside the flag and told readers to count differently. That "
+    + "left every consumer who did not read it - the API, the pages, and anyone branching on the field - still being "
+    + "told a curve graduated when we had read the curve account and found it had not. 3,195 records in the "
+    + "published archive were in that state.",
+    "api/v1 `launch.graduated` returned true for those 3,195, and the front page counted them as graduations: over "
+    + "one 24-hour window the headline figure was 1,273 where the disproved rows account for 455 of it. A field that "
+    + "is knowably wrong is worse than a missing one, because a reader cannot tell which rows to distrust.",
+    "`launch.graduated` is now our best knowledge rather than our first observation: false where the check "
+    + "disproved it. The raw feed event is published beside it as `launch.graduationObserved`, and the reading as "
+    + "`launch.graduationCheck`. The stored column is still left exactly as recorded, for the reason given above. "
+    + "Site counts exclude disproved graduations. Integrators reading `graduated` before 2026-09-10 were getting "
+    + "the observation; they are now getting the finding.");
   ins.run("uncheckable-figures", at("2026-09-09"), "record", null,
     "Every record page carried the sentence \"Everything here is read from the Solana chain and can be checked "
     + "against it\", and until 2026-09-09 the record withheld what was needed to check it. No launch row cited the "

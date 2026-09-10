@@ -17,7 +17,7 @@ import { readFileSync, existsSync, statSync } from "node:fs";
 import { join, normalize } from "node:path";
 import { config } from "./config.ts";
 import { openDb } from "./db.ts";
-import { type Assessment, assess, cleanAtBirth, coverageWindows, TOKEN_COLUMNS, MIN_POOL_SOL,
+import { type Assessment, assess, cleanAtBirth, coverageWindows, TOKEN_COLUMNS, optionalColumns, graduationDisproved, MIN_POOL_SOL,
   readingCertifies, readingIsFresh, MAX_READING_AGE_MS, MAX_DEV_PCT, MIN_BUYERS, BUYOUT_SOL } from "./provenance.ts";
 import { profile, verdictLine, walletVerdict, clusterProfile, clusterTable } from "./operator.ts";
 import { poolReservesPooled } from "./outcomes.ts";
@@ -395,7 +395,7 @@ function reloadRecord(): void {
     };
     recordBuiltAt = readBuiltAt();
     COV = { from: win.length ? win[0].a : null, downtimeMinutes: chrome.gapMin, builtAt: recordBuiltAt };
-    tokenQ = db.prepare(`SELECT ${TOKEN_COLUMNS} FROM tokens WHERE mint = ?`);
+    tokenQ = db.prepare(`SELECT ${TOKEN_COLUMNS}${optionalColumns(db)} FROM tokens WHERE mint = ?`);
     setReading = db.prepare("UPDATE tokens SET vault_sol = ?, vault_at = ? WHERE mint = ?");
     console.log(`[record] adopted in place: ${held.toLocaleString()} launches, built ${recordBuiltAt ? new Date(recordBuiltAt).toISOString() : "unknown"}`);
     setTimeout(() => { try { previous.close(); } catch { /* a request may still hold it; the process will outlive this */ } }, 30_000);
@@ -472,7 +472,7 @@ startWatchdog({
 /** The absence of this ping is the only alarm that survives the whole platform going down. See watchdog.ts. */
 startHeartbeat(process.env.HEARTBEAT_URL ?? "", 5 * 60_000, "web");
 
-let tokenQ = db.prepare(`SELECT ${TOKEN_COLUMNS} FROM tokens WHERE mint = ?`);
+let tokenQ = db.prepare(`SELECT ${TOKEN_COLUMNS}${optionalColumns(db)} FROM tokens WHERE mint = ?`);
 
 // ---------- job queue ----------
 type Job = { mint: string; state: "queued" | "running" | "done" | "failed"; at: number; error?: string };
@@ -590,7 +590,7 @@ const refresher = { cycles: 0, read: 0, failed: 0, lastCycleAt: 0, lastCycleMs: 
  */
 function refreshCandidates(now: number): any[] {
   const since = now - HOME_DAYS * 86400_000;
-  const toks = db.prepare(`SELECT ${TOKEN_COLUMNS} FROM tokens WHERE graduated = 1 AND created_at >= ? AND pool IS NOT NULL`)
+  const toks = db.prepare(`SELECT ${TOKEN_COLUMNS}${optionalColumns(db)} FROM tokens WHERE graduated = 1 AND created_at >= ? AND pool IS NOT NULL`)
     .all(since) as any[];
   return toks
     .filter((t) => cleanAtBirth(t, assess(db, t, covered)))
@@ -930,7 +930,10 @@ let homeCache: { at: number; h: Home; html: string } | null = null;
 
 function buildHome(now: number): Home {
   const since = now - HOME_DAYS * 86400_000;
-  const toks = db.prepare(`SELECT ${TOKEN_COLUMNS} FROM tokens WHERE graduated = 1 AND created_at >= ?`).all(since) as any[];
+  // Same rule as the record pages: a graduation we have disproved is not counted as one. This is the population
+  // behind the front page's headline figure, which was inflated by 3,195 rows across the archive.
+  const toks = (db.prepare(`SELECT ${TOKEN_COLUMNS}${optionalColumns(db)} FROM tokens WHERE graduated = 1 AND created_at >= ?`).all(since) as any[])
+    .filter((t) => !graduationDisproved(t));
   const assessed = toks.map((t) => ({ t, a: assess(db, t, covered) }));
 
   /**

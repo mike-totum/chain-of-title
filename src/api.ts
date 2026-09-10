@@ -97,7 +97,23 @@ export function tokenRecord(
       curveBuyers: a.curveBuyers,
       buyersFirst30s: origin === "observed" ? (t.snap30_buyers ?? null) : null,
       bundledBuyers: origin === "observed" ? (t.bundled_buyers ?? null) : null,
-      graduated: !!t.graduated,
+      /**
+       * Our best knowledge, not our first observation. This was `!!t.graduated` - the raw threshold event from the
+       * feed - and 3,195 records in the published archive carried `true` for curves we had since read on-chain and
+       * found incomplete. A field that is knowably wrong is worse than a missing one, because a reader cannot tell
+       * which rows to distrust. The raw observation is kept beside it rather than discarded.
+       */
+      graduated: !!t.graduated && !(t.curve_checked_at != null && !t.curve_complete),
+      /** What the feed saw at the time: the curve reached the graduation threshold in our decoded events. */
+      graduationObserved: !!t.graduated,
+      /**
+       * The on-chain check, where we have run one. `complete: false` is a disproof, not an absence: we read the
+       * curve account and it had not completed. Undefined where the database does not carry the check at all.
+       */
+      graduationCheck: t.curve_checked_at == null ? null : {
+        checkedAt: { ms: Number(t.curve_checked_at), iso: new Date(Number(t.curve_checked_at)).toISOString() },
+        complete: !!t.curve_complete,
+      },
       /**
        * How we know the curve completed: "pool", "curve_complete", or null. **Null does not mean it did not
        * graduate** — it means we inferred graduation from decoded trade events reaching the threshold and never

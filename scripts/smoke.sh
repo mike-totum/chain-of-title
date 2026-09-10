@@ -83,7 +83,7 @@ settle() {
 settle
 
 check "/"                    200 "Chain of Title"
-check "/method.html"         200 "no markers on record"
+check "/method.html"         200 "no markers found"
 check "/data.html"           200 "record.db"
 check "/favicon.svg"         200 ""
 check "/og.png"              200 ""
