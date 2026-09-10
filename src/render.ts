@@ -550,6 +550,19 @@ export interface Priors {
   creatorFlagged: number;
 }
 
+/**
+ * What each entry on a record is called.
+ *
+ * The page printed the severity word itself - DANGER, CAUTION, UNKNOWN - beside every line, which is a rating
+ * agency's vocabulary on a register's page. The colour still carries urgency, because a reader scanning a page is
+ * entitled to that; the word now says what kind of entry it is. A finding is something we recorded that counts
+ * against the launch, a note is a weaker one, and "not established" is the honest name for what we could not
+ * settle - it is not a lesser warning, it is an absence.
+ */
+export const ENTRY_WORD: Record<string, string> = {
+  DANGER: "finding", CAUTION: "note", UNKNOWN: "not established", OK: "observation",
+};
+
 export function tokenBody(
   t: any, a: Assessment, r: Reading | null, origin: "observed" | "rebuilt", clean: boolean, now: number,
   priors?: Priors,
@@ -682,7 +695,7 @@ export function tokenBody(
     <script>function cp(){navigator.clipboard&&navigator.clipboard.writeText(document.getElementById('mint').textContent).then(function(){
       var b=document.getElementById('cpb'),o=b.textContent;b.textContent='Copied';setTimeout(function(){b.textContent=o},1200)})}</script>
     ${provenance}
-    ${a.flags.map((f) => `<div class="flag ${f.level}"><span class="tag ${f.level}">${f.level}</span>${esc(f.text)}</div>`).join("")}
+    ${a.flags.map((f) => `<div class="flag ${f.level}"><span class="tag ${f.level}">${ENTRY_WORD[f.level] ?? "entry"}</span>${esc(f.text)}</div>`).join("")}
     <h2>At launch</h2><table>${rows}</table>${priorsBlock}${boBlock}${nowBlock}${claimed}
     <div class="sec"><h2>Check another</h2></div>${SEARCH}`;
 }
@@ -1042,7 +1055,7 @@ export function siblingsBody(
     <td class="num">${r.devPct === null ? "?" : `${r.devPct.toFixed(1)}%`}</td>
     <td class="num">${r.curveBuyers === null ? "?" : fmt(r.curveBuyers)}</td>
     <td class="num">${r.graduated ? "yes" : "no"}</td>
-    <td>${r.danger ? `<span class="tag DANGER">danger</span>` : ""}</td></tr>`).join("");
+    <td>${r.danger ? `<span class="tag DANGER">${ENTRY_WORD.DANGER}</span>` : ""}</td></tr>`).join("");
 
   return `
   <div class="hero"><div class="col-a">

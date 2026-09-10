@@ -187,7 +187,7 @@ writeFileSync(join(OUT, "404.html"), page("No record", `
   <h1>We have no record of this launch</h1>
   <div class="sub">Either it launched outside our coverage, or it is not a pump.fun token.
   Coverage begins ${chrome.coverageFrom}.</div>
-  <div class="flag UNKNOWN"><span class="tag UNKNOWN">unknown</span>An absence from this archive is <b>not</b> a
+  <div class="flag UNKNOWN"><span class="tag UNKNOWN">not established</span>An absence from this archive is <b>not</b> a
   finding about the token. Once a float has been spread across wallets, a launch that was assembled and one that was
   not look the same to present-tense inspection, which is why the record has to be kept at the time, and why we do
   not guess afterwards.</div>
@@ -443,15 +443,24 @@ writeFileSync(join(OUT, "api.html"), page("The API", `
   <div class="sec"><h2>Absence of a record is not a clean record</h2></div>
   <p class="lede">The field to branch on is <span class="mono">verdict.level</span>, which is one of
   <span class="mono">OK</span>, <span class="mono">DANGER</span>, <span class="mono">CAUTION</span> or
-  <span class="mono">UNKNOWN</span>. <span class="mono">cleanAtBirth</span> is a convenience and it has three states,
-  not two:</p>
+  <span class="mono">UNKNOWN</span>. <b>These name classes of entry on a record, not grades of risk and not
+  advice.</b> We record what a launch was; what that is worth is yours to decide. Read them as:</p>
   <table>
-    <tr><td class="k mono">true</td><td>we watched this launch (or rebuilt its complete history) and it shows no sign of manufacture</td></tr>
-    <tr><td class="k mono">false</td><td>we watched it and it failed at least one test: see <span class="mono">verdict</span> and <span class="mono">flags</span> for which. Not necessarily an accusation: a token whose pool we could not read just now is <span class="mono">false</span> and <span class="mono">UNKNOWN</span>, not <span class="mono">DANGER</span>.</td></tr>
+    <tr><td class="k mono">DANGER</td><td>a <b>finding</b>: something we recorded that counts against the launch, such as the creator holding most of the supply, or no outside wallet buying its curve</td></tr>
+    <tr><td class="k mono">CAUTION</td><td>a <b>note</b>: recorded, weaker, and often about the present rather than the launch</td></tr>
+    <tr><td class="k mono">UNKNOWN</td><td><b>not established.</b> Not a mild warning: an absence. We could not settle the question</td></tr>
+    <tr><td class="k mono">OK</td><td>we checked this launch against every marker we record and <b>found none</b>. A statement about what we checked, not an endorsement of the token</td></tr>
+  </table>
+  <p class="lede">These names are older than the vocabulary the rest of this archive now uses, and they are kept
+  because they are a published interface that consumers branch on. Stability is worth more than a tidier word.</p>
+  <p class="lede"><span class="mono">cleanAtBirth</span> is a convenience and it has three states, not two:</p>
+  <table>
+    <tr><td class="k mono">true</td><td>we watched this launch (or rebuilt its complete history) and checked it against every marker we record; none is present</td></tr>
+    <tr><td class="k mono">false</td><td>we watched it and at least one marker is present, or one criterion is unmet: see <span class="mono">verdict</span> and <span class="mono">flags</span> for which. Not an accusation: a token whose pool we could not read just now is <span class="mono">false</span> and <span class="mono">UNKNOWN</span>, not <span class="mono">DANGER</span>.</td></tr>
     <tr><td class="k mono">null</td><td><b>we do not know.</b> We did not observe the launch and have not rebuilt it. <b>Do not render this as clean, safe, or "no issues found."</b></td></tr>
   </table>
-  <p class="callout">Once a token's float has been spread across wallets, a manufactured launch is indistinguishable
-  from a real one by present-tense inspection, and that is the entire reason this archive exists. A null means the
+  <p class="callout">Once a token's float has been spread across wallets, a launch that was assembled and one that
+  was not look the same to present-tense inspection, and that is the entire reason this archive exists. A null means the
   evidence is gone, which is the opposite of reassuring. Every refusal and every error we return also carries
   <span class="mono">verdict.level = "UNKNOWN"</span>, so code that reads only that field is safe even when it ignores
   the HTTP status.</p>
