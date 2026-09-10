@@ -83,9 +83,10 @@ export async function offloadTrades(db: any, o: OffloadOptions = {}): Promise<Of
    * problem this exists to solve. Four keeps a day and a half of margin past the last thing that needs a trade row.
    */
   const retainDays = o.retainDays ?? Number(process.env.TRADES_RETAIN_DAYS ?? 4);
-  // 250,000 rows held ~66 MB of CSV and ~32 MB of gzip in memory at once, measured. 150,000 keeps the peak
-  // under 60 MB, which matters on a container that is also decoding the chain.
-  const partRows = o.partRows ?? Number(process.env.TRADES_PART_ROWS ?? 150_000);
+  // Measured against the event loop rather than against memory. 150,000 rows put the worst loop delay at 653 ms
+  // because a single `.all()` cannot yield partway; 40,000 brings it to 149 ms, and the process has two websockets
+  // that drop when it stops answering. ~11 MB of CSV per part.
+  const partRows = o.partRows ?? Number(process.env.TRADES_PART_ROWS ?? 40_000);
   const maxParts = o.maxParts ?? Number(process.env.TRADES_MAX_PARTS ?? 4);
   const cutoff = Date.now() - retainDays * 86400_000;
   const empty: OffloadResult = { parts: 0, rows: 0, bytes: 0, deleted: 0, skipped: "", cutoff };
@@ -102,8 +103,17 @@ export async function offloadTrades(db: any, o: OffloadOptions = {}): Promise<Of
    * key and rises with ingestion, so ranging on it seeks. The time filter stays in the WHERE for correctness - a
    * row written out of order by a backfill must be judged on its timestamp, not on where it landed in the table.
    */
-  const oldest = db.prepare("SELECT MIN(id) a, MAX(id) b FROM trades").get() as any;
-  if (oldest?.a == null) return { ...empty, skipped: "no trades on disk" };
+  /**
+   * Two queries, not one. `SELECT MIN(id), MAX(id) FROM trades` scans the whole table - SQLite optimises a single
+   * MIN or MAX into an index lookup and gives up when both appear together, so one convenient line cost 993 ms on
+   * a 21 M row table and about two seconds on the collector. That was the whole reason the first passes dropped
+   * both websockets: it happens before any row is read, which is why a pass that moved a single row did it too.
+   * Asked separately, each is an index seek and returns in under a millisecond.
+   */
+  const lowest = (db.prepare("SELECT MIN(id) a FROM trades").get() as any)?.a;
+  const highest = (db.prepare("SELECT MAX(id) b FROM trades").get() as any)?.b;
+  if (lowest == null) return { ...empty, skipped: "no trades on disk" };
+  const oldest = { a: lowest, b: highest };
 
   const rowsIn = db.prepare(
     `SELECT ${COLUMNS.join(", ")} FROM trades WHERE id >= ? AND id < ? AND ts IS NOT NULL AND ts < ? ORDER BY id LIMIT ?`);
