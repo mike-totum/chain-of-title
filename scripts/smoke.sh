@@ -63,6 +63,9 @@ check "/corrections.html"    200 "corrections@chainoftitle.org"
 check "/api/summary.json"    200 "clean"
 check "/t/$MINT.html"        200 "At launch"
 check "/live.html"           200 "Live"
+# The worked example, and the only page that proves the cluster route, the swimlane and the operator map are all
+# still wired together. FC9BqG is a real cluster in the published record: six wallets, twenty-seven curves.
+check "/o/FC9BqG.html"       200 "Operator cluster"
 
 # The JSON surface. `verdict` is the field integrators branch on, so its absence is a broken deploy even when the
 # route answers 200 — and `not_an_address` proves the error bodies are records rather than bare strings.

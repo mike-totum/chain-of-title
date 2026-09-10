@@ -147,6 +147,95 @@ export function verdictLine(p: Profile): string | null {
 }
 
 
+/** One curve a cluster wallet bought outright: the dot on the swimlane, and one row of the table under it. */
+export interface ClusterEvent {
+  wallet: string; mint: string; symbol: string | null; name: string | null;
+  ts: number; sol: number; sig: string | null;
+  /** When the token was created, so the wait between launch and buyout can be drawn rather than described. */
+  createdAt: number | null;
+  danger: boolean;
+}
+
+export interface ClusterProfile {
+  cluster: string; funder: string | null; policy: string | null;
+  /** Every wallet on file for the cluster, including those seeded and never used: the size of the machine. */
+  wallets: { wallet: string; role: string | null; curves: number; sol: number }[];
+  events: ClusterEvent[];
+  curves: number; sol: number;
+}
+
+/**
+ * A whole operator cluster, rather than one of its wallets.
+ *
+ * `profile()` answers "who is this wallet"; nothing answered "what is this group doing", even though the group is
+ * the unit that actually operates. A farm rotates wallets precisely so that no single address carries the pattern:
+ * FC9BqG took 27 curves in a week and no wallet in it took more than eleven, so a reader on any one wallet page
+ * sees a fraction of the machine and has no way to reach the rest of it.
+ *
+ * One event per wallet per mint, not one per trade row. A buyout recorded live and again by chain reconstruction is
+ * one purchase, and `hist_trades` stores its timestamp to the second where `trades` has milliseconds, so the two
+ * copies cannot be matched on time. They are matched on (wallet, mint) and the live row wins, which is the rule
+ * `profile()` already uses. Counting rows instead plotted six of FC9BqG's curves twice.
+ */
+export function clusterProfile(dbh: any, cluster: string): ClusterProfile {
+  const wallets = dbh.prepare(
+    `SELECT wallet, role, funder FROM operator_wallets WHERE cluster = ? ORDER BY wallet`
+  ).all(cluster) as any[];
+  if (!wallets.length) return { cluster, funder: null, policy: null, wallets: [], events: [], curves: 0, sol: 0 };
+
+  const list = wallets.map((w) => w.wallet);
+  const holes = list.map(() => "?").join(",");
+  const ev = new Map<string, ClusterEvent>();
+  const add = (r: any) => {
+    const key = `${r.wallet} ${r.mint}`;
+    if (ev.has(key)) return;
+    ev.set(key, {
+      wallet: r.wallet, mint: r.mint, symbol: r.symbol ?? null, name: r.name ?? null,
+      ts: Number(r.ts), sol: Number(r.sol), sig: r.sig ?? null,
+      createdAt: r.created_at == null ? null : Number(r.created_at),
+      // The same flag the token pages and the relaunch strip use, so a dot here means what a mark there means.
+      danger: (r.dev_pct ?? 0) >= 50 || (r.graduated_confirmed_by != null && r.curve_buyers === 0),
+    });
+  };
+
+  // `sig` bare beside MAX(sol) for the reason spelled out in stmts() above: it comes from the row that supplied the
+  // maximum, so it is the signature of the buy being reported.
+  const cols = `tk.symbol, tk.name, tk.created_at, tk.dev_pct, tk.curve_buyers, tk.graduated_confirmed_by`;
+  for (const r of dbh.prepare(
+    `SELECT t.wallet, t.mint, MIN(t.ts) ts, MAX(t.sol) sol, t.sig, ${cols}
+     FROM trades t LEFT JOIN tokens tk ON tk.mint = t.mint
+     WHERE t.wallet IN (${holes}) AND t.venue='curve' AND t.side='buy' AND t.sol >= ?
+     GROUP BY t.wallet, t.mint`).all(...list, BUYOUT_SOL) as any[]) add(r);
+  // Reconstructed curves count too, exactly as they do on a wallet page. A collector database has no `hist_trades`
+  // at all, so its absence is normal and not a fault.
+  try {
+    for (const r of dbh.prepare(
+      `SELECT h.wallet, h.mint, MIN(h.ts) ts, MAX(h.sol) sol, h.sig, ${cols}
+       FROM hist_trades h LEFT JOIN tokens tk ON tk.mint = h.mint
+       WHERE h.wallet IN (${holes}) AND h.side='buy' AND h.sol >= ?
+       GROUP BY h.wallet, h.mint`).all(...list, BUYOUT_SOL) as any[]) add(r);
+  } catch {}
+
+  const events = [...ev.values()].sort((a, b) => a.ts - b.ts);
+  const per = new Map<string, { curves: number; sol: number }>();
+  for (const e of events) {
+    const p = per.get(e.wallet) ?? { curves: 0, sol: 0 };
+    p.curves++; p.sol += e.sol; per.set(e.wallet, p);
+  }
+  return {
+    cluster,
+    funder: wallets.find((w) => w.funder)?.funder ?? null,
+    policy: (dbh.prepare("SELECT policy FROM operator_policy WHERE cluster = ?").get(cluster) as any)?.policy ?? null,
+    wallets: wallets.map((w) => ({
+      wallet: w.wallet, role: w.role ?? null,
+      curves: per.get(w.wallet)?.curves ?? 0, sol: per.get(w.wallet)?.sol ?? 0,
+    })).sort((a, b) => b.curves - a.curves || b.sol - a.sol || a.wallet.localeCompare(b.wallet)),
+    events,
+    curves: new Set(events.map((e) => e.mint)).size,
+    sol: events.reduce((s, e) => s + e.sol, 0),
+  };
+}
+
 // CLI only. check.ts imports profile()/verdictLine(); importing must not run a report.
 const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop() ?? "\u0000");
 if (isMain) {

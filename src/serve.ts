@@ -19,11 +19,11 @@ import { config } from "./config.ts";
 import { openDb } from "./db.ts";
 import { type Assessment, assess, cleanAtBirth, coverageWindows, TOKEN_COLUMNS, MIN_POOL_SOL,
   readingCertifies, readingIsFresh, MAX_READING_AGE_MS, MAX_DEV_PCT, MIN_BUYERS, BUYOUT_SOL } from "./provenance.ts";
-import { profile, verdictLine, walletVerdict } from "./operator.ts";
+import { profile, verdictLine, walletVerdict, clusterProfile } from "./operator.ts";
 import { poolReservesPooled } from "./outcomes.ts";
 import { rebuild, store, curveExists } from "./backfill.ts";
 import { page, tokenBody, walletBody, tokenPreview, SEARCH, when, fmt, homeBody, homeTitle, verdict, CANONICAL_HOST,
-  siblingsBody, relaunchStrip, wallBody, type Priors, type SiblingRow, type SiblingStats, type StripMark,
+  siblingsBody, relaunchStrip, wallBody, clusterBody, type Priors, type SiblingRow, type SiblingStats, type StripMark,
   type Home, type Chrome, type Reading } from "./render.ts";
 import { r2Config, getWithType as r2Get } from "./r2.ts";
 import { tokenRecord, walletRecord, statusRecord, unknownRecord, errorRecord,
@@ -1438,6 +1438,27 @@ const server = createServer(async (req, res) => {
     }
 
     // a wallet's record, rendered from its trades across the whole archive
+    /**
+     * An operator cluster. Cluster names are the first six characters of the funder's address, which is what
+     * `operator_wallets.cluster` holds, so the pattern is base58 and short rather than a full address.
+     */
+    const cm = safe.match(/^\/o\/([1-9A-HJ-NP-Za-km-z]{4,12})\.html$/);
+    if (cm) {
+      const c = clusterProfile(db, cm[1]);
+      if (!c.wallets.length)
+        return send(404, page("No cluster", `<h1 class="headline">No cluster on file</h1>
+          <p class="lede">We hold no wallets funded from that address. That is a statement about our records and
+          not about anyone.</p>${SEARCH}`, chrome, 1, undefined, safe));
+      // The signature belongs to the (wallet, mint) purchase, and the render layer takes it as a lookup rather than
+      // a field so that the chart's own input stays the shape the chart needs.
+      const sigs = new Map(c.events.map((e) => [`${e.wallet} ${e.mint}`, e.sig]));
+      return send(200, page(`Operator cluster ${cm[1]}`, clusterBody({ ...c, sigs }), chrome, 1,
+        c.curves
+          ? `${c.wallets.length} wallets funded from one address, which together bought ${c.curves} bonding curves outright.`
+          : `${c.wallets.length} wallets funded from one address.`,
+        `/o/${cm[1]}.html`), "text/html; charset=utf-8", "short");
+    }
+
     const wm = safe.match(/^\/w\/([1-9A-HJ-NP-Za-km-z]{32,44})\.html$/);
     if (wm) {
       const p = profile(db, wm[1]);

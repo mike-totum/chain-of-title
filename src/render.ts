@@ -75,6 +75,22 @@ td.mut{color:var(--mut)}
 .mk:hover rect,.mk:focus rect{opacity:1;fill:var(--bad)}
 .strip .ax{stroke:var(--line);stroke-width:1}
 .strip .tk{stroke:var(--mut);stroke-width:1;opacity:.5}
+/* The swimlane. Unlike the strip it must not be distorted - it draws circles, and preserveAspectRatio:none would
+   render every one of them as an ellipse whose eccentricity depends on the reader's window width. So it scales
+   proportionally and the height follows the number of lanes. */
+.lane{border:1px solid var(--line);background:var(--card);padding:12px 14px 8px;margin:20px 0 4px}
+.lane svg{display:block;width:100%;height:auto}
+.lane .ln{stroke:var(--line);stroke-width:1}
+.lane .gd{stroke:var(--line);stroke-width:1}
+.lane .gl{fill:var(--mut);font-size:10px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.lane .lw{fill:var(--fg);font-size:11px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.lane .lc{fill:var(--mut);font-size:10px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+/* The wait between a launch and the buy. Deliberately fainter than the dot: it is context for the event, not the
+   event, and at 27 overlapping tails a stronger line reads as a grid. */
+.lane .wt{stroke:var(--mut);stroke-width:1.5;opacity:.4}
+.dot circle{fill:var(--fg);opacity:.6}
+.dot.d circle{fill:var(--bad);opacity:.85}
+.dot:hover circle,.dot:focus circle{opacity:1;fill:var(--bad)}
 .shot{margin:14px 0;max-width:220px;border:1px solid var(--line);background:var(--card);padding:6px}
 .shot img{display:block;width:100%;height:auto;image-rendering:auto}
 td.thin{color:var(--bad)}
@@ -153,7 +169,8 @@ main.page{flex:1;display:grid;align-content:start;column-gap:60px;padding:38px 2
   grid-template-columns:[wide-start] minmax(0,700px) [text-end] minmax(0,1fr) [wide-end]}
 main.page > *{grid-column:wide-start/text-end;min-width:0}
 main.page > .hero,main.page > .sec,main.page > .proof,main.page > .verdict,
-main.page > .verdictline,main.page > table,main.page > .stats{grid-column:wide-start/wide-end}
+main.page > .verdictline,main.page > table,main.page > .stats,
+main.page > .lane{grid-column:wide-start/wide-end}
 
 /* The hero is the one block that earns two columns: the argument on the left, the figures on the right. */
 .hero{display:grid;column-gap:60px;align-items:start;padding-top:2px;
@@ -867,11 +884,12 @@ export function walletBody(w: string, p: any, v: { label: string; why: string } 
    * absent rather than hedged, on the same rule as every other silence here.
    */
   const cluster = p.cluster && p.clusterWallets > 1 ? `
-    <div class="sec"><h2>Operator cluster</h2><span class="cnt">${esc(p.cluster)}</span></div>
+    <div class="sec"><h2>Operator cluster</h2><span class="cnt"><a href="../o/${esc(p.cluster)}.html">${esc(p.cluster)}</a></span></div>
     <table>
       ${p.funder ? `<tr><td class="k">Funded by</td><td class="mono">${esc(p.funder)}</td></tr>` : ""}
       <tr><td class="k">Group</td><td>One of <b>${fmt(p.clusterWallets)}</b> wallets seeded from that funder, which
-        together took <b>${fmt(p.clusterCurves)}</b> bonding curve${p.clusterCurves === 1 ? "" : "s"}.</td></tr>
+        together took <b>${fmt(p.clusterCurves)}</b> bonding curve${p.clusterCurves === 1 ? "" : "s"}.
+        <a href="../o/${esc(p.cluster)}.html">See the whole cluster</a>, wallet by wallet and curve by curve.</td></tr>
       ${p.policy ? `<tr><td class="k">Cluster behaviour</td><td>${esc(p.policy)}</td></tr>` : ""}
     </table>
     <p class="callout">A shared funder is a lead, not a finding. Trading terminals fund their users from one address
@@ -1039,6 +1057,206 @@ export function relaunchStrip(marks: StripMark[], capped: number): string {
   <script>(function(){var s=document.currentScript.previousElementSibling,r=s.querySelector('#ro');
     s.addEventListener('mouseover',function(e){var g=e.target.closest('.mk');if(g)r.textContent=g.getAttribute('data-l');});
     s.addEventListener('mouseleave',function(){r.textContent='hover a mark';});})();</script>`;
+}
+
+/** One curve buyout on the swimlane: which wallet, which token, when, how big, and how long it waited. */
+export interface LaneEvent {
+  wallet: string; mint: string; symbol: string | null;
+  ts: number; sol: number; createdAt: number | null; danger: boolean;
+}
+
+/** How many wallets the swimlane will draw before it starts leaving some out and saying so. */
+export const LANES_MAX = 30;
+
+/**
+ * The farm swimlane: one lane per wallet, time across, every buyout a dot.
+ *
+ * The relaunch strip answers "how often does this repeat"; this answers "who did it, and in what order". A farm
+ * rotates addresses so that no one of them looks busy, and the rotation is the fingerprint: on a swimlane it reads
+ * as a staircase, each lane going quiet as the next one starts, which is a thing no table of 27 rows will ever
+ * show and no single wallet page can contain.
+ *
+ * Three encodings, each carrying a habit the operators cannot help having:
+ *   - horizontal position is when, so cadence and the gaps between working days are visible as gaps;
+ *   - the dot's area is the size of the buy, so a machine that spends exactly 85 SOL every time draws a line of
+ *     identical dots, and the one 50 SOL buy is visibly the odd one;
+ *   - the tail behind each dot is the wait between the launch and the purchase, so buying at the moment of launch
+ *     (no tail) is distinguishable at a glance from taking a curve that had sat dormant for a day and a half.
+ *
+ * Same rules as the strip: inline SVG, no dependency, `<a>` and `<title>` so it works with JavaScript off, and
+ * overlapping events are left overlapping. Where two buys are a minute apart the dots merge, and that is what a
+ * minute apart looks like.
+ */
+export function swimlane(events: LaneEvent[], walletCurves: Map<string, number>): string {
+  if (events.length < 2) return "";
+
+  /**
+   * Lanes are ordered by first appearance, so the reader's eye goes down the page in the order the operator brought
+   * wallets into service. Sorting by volume would put the busiest lane on top and destroy the staircase, which is
+   * the one thing this chart exists to show.
+   */
+  const firstSeen = new Map<string, number>();
+  for (const e of events) if (!firstSeen.has(e.wallet)) firstSeen.set(e.wallet, e.ts);
+  let lanes = [...firstSeen.keys()];
+  const dropped = Math.max(0, lanes.length - LANES_MAX);
+  if (dropped) {
+    // When there are too many lanes to draw, keep the busiest ones — but restore first-seen order afterwards, so
+    // the chart is still read the same way. The head says how many were left out; it never silently plots a subset.
+    const busiest = new Set([...lanes].sort((a, b) => (walletCurves.get(b) ?? 0) - (walletCurves.get(a) ?? 0)).slice(0, LANES_MAX));
+    lanes = lanes.filter((w) => busiest.has(w));
+  }
+  const lane = new Map(lanes.map((w, i) => [w, i]));
+  const shown = events.filter((e) => lane.has(e.wallet));
+
+  const t0 = shown[0].ts, t1 = shown[shown.length - 1].ts;
+  const span = Math.max(60_000, t1 - t0);
+  const W = 1000, LEFT = 96, RIGHT = 12, ROW = 20, TOP = 22, FOOT = 18;
+  const H = TOP + lanes.length * ROW + FOOT;
+  const plot = W - LEFT - RIGHT;
+  const x = (t: number) => LEFT + ((Math.min(Math.max(t, t0), t1) - t0) / span) * plot;
+  const y = (w: string) => TOP + (lane.get(w) ?? 0) * ROW + ROW / 2;
+  const maxSol = Math.max(...shown.map((e) => e.sol));
+
+  /**
+   * Ticks are chosen so their labels can be read, which a fixed unit cannot promise: one day per tick drew a
+   * thirty-three day cluster as "08-0408-0508-06" running the width of the chart, and drew an afternoon with no
+   * tick at all. The smallest step from the ladder that keeps the count under a dozen wins, so the axis is as fine
+   * as it can be without the labels touching.
+   */
+  const dayMs = 86400_000, hourMs = 3600_000;
+  const ladder = [hourMs, 2 * hourMs, 3 * hourMs, 6 * hourMs, 12 * hourMs, dayMs, 2 * dayMs, 7 * dayMs, 14 * dayMs, 28 * dayMs];
+  const step = ladder.find((ms) => span / ms <= 12) ?? span / 6;
+  const ticks: string[] = [];
+  for (let t = Math.ceil(t0 / step) * step; t <= t1; t += step) {
+    const px = x(t).toFixed(1);
+    const label = step >= dayMs
+      ? new Date(t).toISOString().slice(5, 10)
+      : new Date(t).toISOString().slice(11, 16);
+    ticks.push(`<line x1="${px}" x2="${px}" y1="${TOP - 6}" y2="${H - FOOT}" class="gd"/>` +
+      `<text x="${px}" y="${TOP - 10}" class="gl" text-anchor="middle">${label}</text>`);
+  }
+
+  const rows = lanes.map((w, i) => {
+    const ly = TOP + i * ROW + ROW / 2;
+    const n = walletCurves.get(w) ?? 0;
+    return `<line x1="${LEFT}" x2="${W - RIGHT}" y1="${ly}" y2="${ly}" class="ln"/>` +
+      `<a href="../w/${esc(w)}.html"><title>${esc(w)}</title>` +
+      `<text x="0" y="${ly + 3.5}" class="lw">${esc(w.slice(0, 6))}</text>` +
+      `<text x="${LEFT - 12}" y="${ly + 3.5}" class="lc" text-anchor="end">${n}</text></a>`;
+  }).join("");
+
+  const dots = shown.map((e) => {
+    const cx = x(e.ts), cy = y(e.wallet);
+    // Area with the size of the buy, floored so the smallest is still a target worth clicking.
+    const r = Math.max(2.6, 6.5 * Math.sqrt(e.sol / maxSol));
+    const wait = e.createdAt === null ? "" : ` · bought ${curveAge(e.ts - e.createdAt)}`;
+    const label = `${esc(e.symbol ?? "?")} · ${when(e.ts)} · ${e.sol.toFixed(0)} SOL · ${esc(e.wallet.slice(0, 6))}${wait}`;
+    // The tail is drawn only when we hold the launch time. Where we do not, there is no tail rather than a tail of
+    // length zero, which would read as "bought at launch" — the archive's oldest rule: absence is not a finding.
+    const tail = e.createdAt !== null && e.createdAt < e.ts
+      ? `<line x1="${x(e.createdAt).toFixed(1)}" x2="${cx.toFixed(1)}" y1="${cy}" y2="${cy}" class="wt"/>` : "";
+    return `${tail}<a href="../t/${esc(e.mint)}.html" class="dot${e.danger ? " d" : ""}" data-l="${label}">` +
+      `<title>${label}</title><circle cx="${cx.toFixed(1)}" cy="${cy}" r="${r.toFixed(1)}"/></a>`;
+  }).join("");
+
+  return `
+  <div class="lane">
+    <div class="striphead"><b>${fmt(shown.length)}</b> curve buyouts by <b>${fmt(lanes.length)}</b> wallets${
+      dropped ? ` · busiest ${LANES_MAX} of ${fmt(lanes.length + dropped)} wallets drawn` : ""}
+      <span class="readout" id="ro">hover a dot</span></div>
+    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="One row per wallet, time left to right. Each dot is one bonding curve bought outright; the dot's size is what it cost and the line behind it is the wait between the token's launch and the purchase.">
+      ${ticks.join("")}${rows}${dots}
+    </svg>
+    <div class="stripfoot"><span>${when(t0)}</span><span>${dur(span)} wide · dot area is the size of the buy, the tail behind it is the wait since launch</span><span>${when(t1)}</span></div>
+  </div>
+  <script>(function(){var s=document.currentScript.previousElementSibling,r=s.querySelector('#ro');
+    s.addEventListener('mouseover',function(e){var g=e.target.closest('.dot');if(g)r.textContent=g.getAttribute('data-l');});
+    s.addEventListener('mouseleave',function(){r.textContent='hover a dot';});})();</script>`;
+}
+
+/**
+ * An operator cluster: the group, not the wallet.
+ *
+ * Wallet pages have named the cluster since they were written and there was nowhere to go from it. That is the
+ * failure this repo keeps repeating in a different costume — the attribution was computed, stored, published in the
+ * record, printed on the page as a bare six-character string, and left as a dead end. The reader who most needs
+ * this page is the one who has just been told "one of 66 wallets seeded from one funder" and reasonably asks to
+ * see the other sixty-five.
+ *
+ * What the page will not do is call it fraud. A shared funder is a funder; trading terminals seed their customers
+ * from one address exactly as a farm seeds its own wallets, and that caveat sits above the evidence rather than
+ * under it, because a reader who stops halfway must not leave with the stronger claim.
+ */
+export function clusterBody(p: {
+  cluster: string; funder: string | null; policy: string | null;
+  wallets: { wallet: string; role: string | null; curves: number; sol: number }[];
+  events: LaneEvent[]; curves: number; sol: number;
+  sigs: Map<string, string | null>;
+}): string {
+  const used = p.wallets.filter((w) => w.curves > 0);
+  const span = p.events.length > 1 ? p.events[p.events.length - 1].ts - p.events[0].ts : 0;
+  const walletCurves = new Map(p.wallets.map((w) => [w.wallet, w.curves]));
+
+  /**
+   * The repeated figure, if there is one. A farm that spends the same amount every time is the clearest single
+   * sentence this page can offer, and it is arithmetic rather than judgement: the most common rounded buy size,
+   * and how much of the group's activity it accounts for.
+   */
+  const sizes = new Map<number, number>();
+  for (const e of p.events) sizes.set(Math.round(e.sol), (sizes.get(Math.round(e.sol)) ?? 0) + 1);
+  const [modeSol, modeN] = [...sizes.entries()].sort((a, b) => b[1] - a[1])[0] ?? [0, 0];
+  const habit = modeN >= 3 && modeN / p.events.length >= 0.5
+    ? `<p class="vscope">Of ${fmt(p.events.length)} purchases, <b>${fmt(modeN)}</b> were the same size to the nearest
+       SOL: <b>${fmt(modeSol)} SOL</b>. Repetition at that precision is a configured amount, not a decision taken
+       ${modeN} separate times.</p>`
+    : "";
+
+  const atLaunch = p.events.filter((e) => e.createdAt !== null && e.ts - e.createdAt < 15 * 60_000).length;
+  const timed = p.events.filter((e) => e.createdAt !== null).length;
+
+  const rows = p.events.slice().reverse().map((e) => {
+    const sig = p.sigs.get(`${e.wallet} ${e.mint}`);
+    return `<tr><td>${when(e.ts)}</td>
+      <td><a href="../t/${esc(e.mint)}.html">${esc(e.symbol ?? "?")}</a></td>
+      <td class="mono"><a href="../w/${esc(e.wallet)}.html">${esc(e.wallet.slice(0, 6))}</a></td>
+      <td class="num">${e.sol.toFixed(0)} SOL</td>
+      <td class="mut">${e.createdAt === null ? "launch time not on record" : curveAge(e.ts - e.createdAt)}</td>
+      <td>${sig ? txLink(sig) : `<span class="mut">no signature on record</span>`}</td></tr>`;
+  }).join("");
+
+  const walletRows = p.wallets.map((w) => `<tr>
+    <td class="mono"><a href="../w/${esc(w.wallet)}.html">${esc(w.wallet)}</a></td>
+    <td class="mut">${esc(w.role ?? "unknown")}</td>
+    <td class="num">${w.curves || ""}</td>
+    <td class="num">${w.curves ? `${fmt(w.sol)} SOL` : ""}</td></tr>`).join("");
+
+  return `
+    <h1>Operator cluster <span class="mono">${esc(p.cluster)}</span></h1>
+    <p class="lede">${fmt(p.wallets.length)} wallet${p.wallets.length === 1 ? "" : "s"} funded from one address.
+      ${used.length ? `<b>${fmt(used.length)}</b> of them bought <b>${fmt(p.curves)}</b> bonding curve${p.curves === 1 ? "" : "s"}
+      outright for <b>${fmt(p.sol)} SOL</b>${span ? `, over ${dur(span)}` : ""}.` : `None of them has bought a bonding curve outright in this archive.`}</p>
+    <p class="callout">A shared funder is a lead, not a finding. Trading terminals fund their users from one address
+      the same way a wallet farm funds its own, and we cannot tell those apart from the chain alone. What is on this
+      page is what the wallets did, with the transaction for each one; who controls them is not something we claim
+      to know.</p>
+    ${habit}
+    <div class="stats" style="margin:20px 0">
+      <div class="stat"><span>wallets funded</span><b class="big">${fmt(p.wallets.length)}</b></div>
+      <div class="stat"><span>wallets used</span><b class="big">${fmt(used.length)}</b></div>
+      <div class="stat"><span>curves taken</span><b class="big">${fmt(p.curves)}</b></div>
+      <div class="stat"><span>spent on curves</span><b class="big">${fmt(p.sol)}</b> SOL</div>
+    </div>
+    ${p.funder ? `<table><tr><td class="k">Funded by</td><td class="mono">${esc(p.funder)}</td></tr>
+      ${p.policy ? `<tr><td class="k">Cluster behaviour</td><td>${esc(p.policy)}</td></tr>` : ""}
+      ${timed ? `<tr><td class="k">Bought at launch</td><td><b>${fmt(atLaunch)}</b> of ${fmt(timed)} purchases came
+        within fifteen minutes of the token being created${timed < p.events.length
+          ? `. The remaining ${fmt(p.events.length - timed)} are of tokens launched before this archive began, so their launch time is not on our record` : ""}.</td></tr>` : ""}</table>` : ""}
+    ${swimlane(p.events, walletCurves)}
+    ${p.events.length ? `<div class="sec"><h2>Every curve this cluster took</h2><span class="cnt">${fmt(p.events.length)} on file</span></div>
+    <table class="data"><tr><th>When</th><th>Token</th><th>Wallet</th><th class="num">Size</th><th>Timing</th><th>Transaction</th></tr>${rows}</table>` : ""}
+    <div class="sec"><h2>Wallets in the cluster</h2><span class="cnt">${fmt(p.wallets.length)} funded</span></div>
+    <table class="data"><tr><th>Wallet</th><th>How it was found</th><th class="num">Curves</th><th class="num">Spent</th></tr>${walletRows}</table>
+    <div class="sec"><h2>Check a token</h2></div>${SEARCH}`;
 }
 
 /**
