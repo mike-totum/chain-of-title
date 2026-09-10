@@ -48,6 +48,10 @@ a:focus-visible,button:focus-visible,input:focus-visible,summary:focus-visible{o
 .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;word-break:break-all}
 .sub{color:var(--mut);font-size:13px;margin-bottom:24px}
 td.mut{color:var(--mut)}
+.watch{margin:-8px 0 26px;font-size:14px}
+.watch a{font-weight:600;text-underline-offset:3px}
+.watch span{color:var(--mut);font-size:13px;margin-left:8px}
+@media(max-width:640px){.watch span{display:block;margin:2px 0 0}}
 .wall{border:1px solid var(--line);background:var(--card);min-height:120px}
 .wrow{display:grid;grid-template-columns:auto 1fr auto auto;gap:12px;align-items:baseline;padding:8px 12px;
  border-bottom:1px solid var(--line);font-size:14px;text-decoration:none;color:inherit;animation:win .45s ease-out}
@@ -319,7 +323,7 @@ ${head}<style>${CSS}</style></head>
 <main class="page shell">
 ${body}
 </main>
-<footer class="band-bot"><div class="shell"><div class="note"><a href="${root}method.html">How this is decided</a> · <a href="${root}corrections.html">Tell us we are wrong</a> · <a href="${root}data.html">Take the data</a> · <a href="${root}api.html">API</a> · <a href="${root}pledge.html">Pledge</a> · <a href="${root}index.html">${BRAND}</a><br>
+<footer class="band-bot"><div class="shell"><div class="note"><a href="${root}live.html">Watch launches live</a> · <a href="${root}method.html">How this is decided</a> · <a href="${root}corrections.html">Tell us we are wrong</a> · <a href="${root}data.html">Take the data</a> · <a href="${root}api.html">API</a> · <a href="${root}pledge.html">Pledge</a> · <a href="${root}index.html">${BRAND}</a><br>
 The documented history of a token from its first block. Coverage begins ${c.coverageFrom}${c.gapMin >= 1 ? `, with ${fmt(c.gapMin)} min of recorded downtime` : ", no recorded downtime"}.
 Everything here is read from the Solana chain. Where we recorded a launch's creation transaction, its page cites it and you can check every figure yourself; where we did not, the page says so. A clean record means a launch was <b>not manufactured</b>. It is not a prediction and not advice.
 Most tokens lose money regardless: of 19,412 bonding-curve positions measured, none reached 5x.
@@ -703,6 +707,16 @@ export function homeBody(h: Home): string {
     <p class="lede">Paste any mint. If we hold its launch, you get what happened. If we do not, we rebuild it from the
     chain, and if we cannot do that we say so rather than guess.</p>
     ${SEARCH}
+    ${/*
+        The live wall, linked where a visitor is already looking.
+        
+        It was built and then reachable only by typing its URL — the most persuasive page on the site, orphaned. It
+        belongs beside the search box because the two are the same offer at different scales: check one launch, or
+        watch every launch. A statistic about how many launches are manufactured convinces nobody; the same claim
+        scrolling past at three a minute is a different kind of argument, and it costs a visitor nothing to look.
+      */ ""}
+    <p class="watch"><a href="live.html">Or watch them arrive &rarr;</a>
+      <span>Every launch, the moment we decode its creation transaction.</span></p>
     ${/*
         A visitor who has never seen a record has no idea what pasting a mint gets them, and the page used to
         describe the output at length without once showing it. This is a real verdict on a real launch, rendered by
