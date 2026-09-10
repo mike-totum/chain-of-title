@@ -51,6 +51,37 @@ check() {
 }
 
 echo "smoke test against $U"
+
+# Wait for the service to settle before judging it.
+#
+# This is what the two lost failures of 2026-09-09 turn out to have been, and a third was caught in the act on
+# 09-10: run immediately after `railway up`, the checks land in the middle of a container changeover. The edge
+# answers 502 from a container that is going away, or the connection is accepted by one that is still booting and
+# nothing comes back before the deadline - one timeout with zero bytes, one 502, three different routes across the
+# three occurrences, and the site perfectly healthy a minute later every time. A gate that fails on the changeover
+# is not measuring the deploy.
+#
+# Two consecutive successes, because during a swap the edge alternates between the old container and the new one,
+# so a single 200 proves only that one of them answered. Never giving up quietly: a service that will not settle
+# inside the deadline is a failure, and is reported as one.
+settle() {
+  i=0
+  ok=0
+  while [ $i -lt 30 ]; do
+    if [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$U/api/v1/status")" = "200" ]; then
+      ok=$((ok + 1))
+      [ $ok -ge 2 ] && { [ $i -gt 0 ] && echo "  ..   settled after ${i}s"; return 0; }
+    else
+      ok=0
+    fi
+    i=$((i + 2))
+    sleep 2
+  done
+  lose "readiness" "the service did not answer twice in a row within 60s; the checks below ran against a service still coming up"
+  return 1
+}
+settle
+
 check "/"                    200 "Chain of Title"
 check "/method.html"         200 "launched clean"
 check "/data.html"           200 "record.db"
