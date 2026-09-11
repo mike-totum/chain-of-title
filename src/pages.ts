@@ -23,6 +23,7 @@ import { API_VERSION, PER_IP_PER_HOUR, type Coverage } from "./api.ts";
 import { renderSchema, renderSamples } from "./schema-doc.ts";
 import { reportDate } from "./reports.ts";
 import { venuePhrase, aLaunchHere } from "./venues.ts";
+import { KNOWN_PROGRAMS, launchPrograms, nonLaunchPrograms } from "./venuelist.ts";
 import { CANONICAL_HOST, CONTACT, SEARCH, esc, fmt, when, type Chrome } from "./render.ts";
 
 /** The site's own origin, for the copy-and-paste examples on the API page. */
@@ -238,6 +239,32 @@ export function methodBody(f: PageFacts, chrome: Chrome): string {
   <b>rebuilt</b>. The figures are the same events read afterwards, and are judged the same way, but a rebuild cannot
   tell you what a token <i>claimed</i> to be at launch, because the name, image and links live off-chain behind a URI
   the operator can repoint. That, and only that, is genuinely unrecoverable.</p>
+
+  <div class="sec"><h2>What we count as a launch</h2></div>
+  <p class="lede">Most tokens created on Solana are not launches. Liquidity pools mint pool tokens, concentrated
+  liquidity mints a position NFT for every position, prediction markets mint an outcome token per outcome, and at
+  least one program mints tokens with no supply at all. Over one measured window, <b>155.7</b> token creations a
+  minute contained about <b>30.8</b> that were launches. So a count of creations and a count of launches are
+  different numbers and we publish them as different numbers.</p>
+  <p class="lede">Deciding which is which is a judgement, and it is ours rather than the chain's. When a launch is
+  recorded through a venue's own events, the venue declares what it is. When it is found by reading blocks, nothing
+  declares anything and we apply a test. This is that test, stated so it can be disagreed with:</p>
+  <table>
+    <tr><th>A mint is recorded as looking like a launch when</th><th class="num">threshold</th></tr>
+    <tr><td>tokens were actually minted in the creation transaction</td><td class="num">supply &gt; 0</td></tr>
+    <tr><td>it is divisible like a currency rather than counted like an NFT</td><td class="num">at least 6 decimals</td></tr>
+  </table>
+  <p class="callout"><b>How well it does, measured rather than asserted.</b> Over 392 blocks and 433 token
+  creations, labelled by the program that made them, the test keeps <b>97 of 109</b> known launches and admits
+  <b>6 of 317</b> known non-launches. The dozen it misses are mostly mints whose tokens are created in a later
+  transaction, which is a real pattern and not a non-launch. It is therefore stored as a column and never used as a
+  filter: every token creation is recorded either way, so a reader who disagrees with the threshold can recompute
+  from the same file rather than asking us what we discarded. A mint failing this test is one that does not look
+  like a launch to us. It is not a statement that it is not one.</p>
+  <p class="lede">Where we have identified the program that created a mint, that is a stronger answer than the test
+  and does not depend on our judgement at all. Those programs are listed on the
+  <a href="venues.html">launch programs</a> page with the source for each, and the list grows as programs are
+  identified.</p>
 
   <div class="sec"><h2>Known limits</h2></div>
   <p class="lede">Stated because a method page that lists no weaknesses is marketing.</p>
@@ -588,4 +615,48 @@ export function correctionsBody(f: PageFacts): string {
   mirror of the file carries the corrections with it. Amending one means adding a row that names it; nothing here is
   ever silently reworded.</p>
 `;
+}
+
+export function venuesBody(): string {
+  const row = (p: typeof KNOWN_PROGRAMS[number]) => `
+    <tr>
+      <td><b>${esc(p.name)}</b><div class="mono" style="font-size:12px">${esc(p.program)}</div></td>
+      <td>${esc(p.note)}${p.source ? ` <a href="${esc(p.source)}" rel="noopener">source</a>` : ""}</td>
+      <td class="num">${esc(p.confirmed)}</td>
+    </tr>`;
+  return `
+  <h1 class="headline">Which programs launch tokens, and which only look like it</h1>
+  <p class="lede">Reading every block on Solana finds every token creation, and most of them are not launches. This
+  is the list of programs we have identified, with the evidence for each, so that a reader can check the label
+  rather than take it. It is incomplete by construction and grows as programs are identified.</p>
+  <p class="lede">A program absent from this list is one we have not identified. That is not a statement that it
+  launches nothing, and a mint from such a program is judged by the
+  <a href="method.html">published test</a> instead.</p>
+
+  <div class="sec"><h2>Programs that create launches</h2><span class="cnt">${launchPrograms().length} identified</span></div>
+  <p class="lede">Two of these are engines rather than launchpads: shared bonding-curve programs that many
+  front-ends build on, so one entry covers many brands. The brand names those front-ends register are
+  permissionless and self-asserted - some claim to be pump.fun, which does not run on either - so they are recorded
+  as behaviour and never published as identity.</p>
+  <table>
+    <tr><th>Program</th><th>How we know</th><th class="num">Confirmed</th></tr>
+    ${launchPrograms().map(row).join("")}
+  </table>
+
+  <div class="sec"><h2>Programs that create token mints that are not launches</h2><span class="cnt">${nonLaunchPrograms().length} identified</span></div>
+  <p class="lede">Listed because naming them is what stops them being re-investigated every time an unfamiliar
+  address appears at the top of a ranking. One of these led a 596-block sample at 49.3% of all token creations and
+  launches nothing whatsoever.</p>
+  <table>
+    <tr><th>Program</th><th>How we know</th><th class="num">Confirmed</th></tr>
+    ${nonLaunchPrograms().map(row).join("")}
+  </table>
+
+  <div class="sec"><h2>Why the label is never an identity claim</h2></div>
+  <p class="lede">A mint is attributed to the outermost program in its creation transaction that is not
+  infrastructure. That is a useful label and a bad identity: trading terminals and routers wrap other programs and
+  appear outermost, and this archive has been wrong that way twice - once on a terminal's vanity address in the
+  funder tracer, and once on a router mistaken for a launchpad's own instruction set. So the program is recorded as
+  a fact about the transaction, this page records what we have since identified, and neither is presented as a
+  claim about who operated a launch.</p>`;
 }

@@ -554,6 +554,7 @@ export const NAV: { href: string; label: string }[] = [
   { href: "findings.html", label: "Findings" },
   { href: "reports.html", label: "Reports" },
   { href: "method.html", label: "Method" },
+  { href: "venues.html", label: "Programs" },
   { href: "data.html", label: "Data" },
   { href: "api.html", label: "API" },
 ];

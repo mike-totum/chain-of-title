@@ -65,6 +65,9 @@ test("every venue names a program, and no two venues share one", () => {
  * Adding to ALLOWED is allowed. Doing it without reading the sentence first is the thing this prevents.
  */
 const ALLOWED: [string, string][] = [
+  ["some claim to be pump.fun, which does not run on either",
+    "the launch-programs page warning that LaunchLab and DBC front-ends self-assert their names, and some assert " +
+    "one that is false. It is a statement about pump.fun specifically and generalising it would destroy the point."],
   ["which pump.fun does to every token it creates",
     "a fact about pump.fun's own behaviour, in a worked example about a pump.fun token"],
   ["no pump.fun bonding curve exists for this address. A finding, not a failure.",

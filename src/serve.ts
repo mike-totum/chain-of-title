@@ -33,7 +33,7 @@ import { page, tokenBody, walletBody, tokenPreview, SEARCH, when, fmt, homeBody,
   type Home, type Chrome, type Reading } from "./render.ts";
 import { loadReports, reportDate } from "./reports.ts";
 import { buildFacts, notFoundBody, methodBody, dataBody, apiBody, pledgeBody, findingsBody, correctionsBody,
-  type PageFacts } from "./pages.ts";
+  type PageFacts, venuesBody } from "./pages.ts";
 import { r2Config, getWithType as r2Get } from "./r2.ts";
 import { tokenRecord, walletRecord, statusRecord, unknownRecord, errorRecord,
   API_VERSION, PER_IP_PER_HOUR, GLOBAL_PER_HOUR, GLOBAL_PER_DAY, type Coverage } from "./api.ts";
@@ -1545,6 +1545,11 @@ const server = createServer(async (req, res) => {
     if (safe === "/api.html") {
       return send(200, page("The API", apiBody(chrome), chrome, 0,
         "The Chain of Title launch record as JSON: free, keyless and unmetered, CC0.",
+        safe), "text/html; charset=utf-8", "short");
+    }
+    if (safe === "/venues.html") {
+      return send(200, page("Launch programs", venuesBody(), chrome, 0,
+        "Which Solana programs create token launches, which only create pool tokens and position NFTs, and the source for each.",
         safe), "text/html; charset=utf-8", "short");
     }
     if (safe === "/pledge.html") {
