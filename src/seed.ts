@@ -77,6 +77,18 @@ w.exec(`CREATE TABLE IF NOT EXISTS hist_trades (mint TEXT NOT NULL, sig TEXT NOT
   ts INTEGER, slot INTEGER, wallet TEXT, side TEXT, sol REAL, tokens REAL, vsol REAL, vtok REAL, is_dev INTEGER,
   PRIMARY KEY (mint, sig, idx))`);
 w.exec("CREATE INDEX IF NOT EXISTS hist_trades_mint ON hist_trades(mint, ts)");
+/**
+ * And `hist_tokens`, for the same reason and one more: it is the qualifier on the rows above. Listing the table for
+ * export without creating it here exports nothing — the copy carries only columns present in BOTH databases, so an
+ * absent destination table means an empty intersection and a silent skip. Which is exactly what happened on the
+ * first attempt: "hist_tokens -" in the summary, zero rows, no error.
+ */
+w.exec(`CREATE TABLE IF NOT EXISTS hist_tokens (
+  mint TEXT PRIMARY KEY, name TEXT, symbol TEXT, creator TEXT, curve TEXT, created_at INTEGER, complete INTEGER,
+  mcap_sol REAL, mcap_usd REAL, ath_usd REAL, ath_at INTEGER, sol_usd REAL, source TEXT, status TEXT DEFAULT 'new',
+  sigs INTEGER, sigs_failed INTEGER, sigs_capped INTEGER DEFAULT 0, txs_fetched INTEGER, trades INTEGER,
+  buyers INTEGER, dev_pct REAL, first_ts INTEGER, last_ts INTEGER, grad_ts INTEGER, graduated_min REAL,
+  peak_x REAL, error TEXT, updated_at INTEGER, dev_buy_pct REAL)`);
 
 const CHUNK = 5_000;
 for (const t of tables) {

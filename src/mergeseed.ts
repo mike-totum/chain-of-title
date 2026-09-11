@@ -161,6 +161,15 @@ const TOKEN_POLICY: Record<string, string> = {
   p_60m: `CASE WHEN COALESCE(excluded.last_seen_at,0) > COALESCE(tokens.last_seen_at,0) THEN excluded.p_60m ELSE tokens.p_60m END`,
   peak_price: `MAX(COALESCE(excluded.peak_price,0), COALESCE(tokens.peak_price,0))`,
   peak_at: `CASE WHEN COALESCE(excluded.peak_price,0) > COALESCE(tokens.peak_price,0) THEN excluded.peak_at ELSE tokens.peak_at END`,
+  /**
+   * The third member of the peak, gated on exactly the same condition as the second.
+   *
+   * peak_price, peak_at and peak_source are one observation: a price, when it happened, and whether anything
+   * witnessed it. Keeping the source while taking the other side's peak would file a witnessed 'curve' against a
+   * price we did not decode — the failure the column was added to prevent, committed by the merge instead of by the
+   * write path. Recomputed peaks carry 'recomputed' and travel the same way.
+   */
+  peak_source: `CASE WHEN COALESCE(excluded.peak_price,0) > COALESCE(tokens.peak_price,0) THEN excluded.peak_source ELSE tokens.peak_source END`,
   kol_signals: `MAX(COALESCE(excluded.kol_signals,0), COALESCE(tokens.kol_signals,0))`,
   finalized: `MAX(COALESCE(excluded.finalized,0), COALESCE(tokens.finalized,0))`,
   last_seen_at: `MAX(COALESCE(excluded.last_seen_at,0), COALESCE(tokens.last_seen_at,0))`,
@@ -376,8 +385,16 @@ export async function mergeSeed(
       const seedHas = (t: string) =>
         ((db.prepare("SELECT COUNT(*) c FROM seed.sqlite_master WHERE type='table' AND name = ?").get(t) as any).c as number) > 0;
       if (seedHas("trades"))
-        db.exec(`INSERT INTO main.trades (mint, wallet, side, sol, tokens, price, ts, slot, sig, age_ms, buyer_rank, is_dev, venue)
-                 SELECT s.mint, s.wallet, s.side, s.sol, s.tokens, s.price, s.ts, s.slot, s.sig, s.age_ms, s.buyer_rank, s.is_dev, s.venue
+        /**
+         * `market`, not `venue`. The column was renamed in db.ts so that `venue` means the launchpad and nothing
+         * else — a necessary rename with a second launchpad coming — and seed.ts was updated with it while this
+         * statement was not. The exporter was fixed and the importer left behind, so every merge from that moment
+         * would have died on "table main.trades has no column named venue", losing the tokens and operator rows
+         * that would otherwise have landed. It is only reachable by running a merge, which is rare enough that it
+         * would have waited for whoever next seeded a collector.
+         */
+        db.exec(`INSERT INTO main.trades (mint, wallet, side, sol, tokens, price, ts, slot, sig, age_ms, buyer_rank, is_dev, market)
+                 SELECT s.mint, s.wallet, s.side, s.sol, s.tokens, s.price, s.ts, s.slot, s.sig, s.age_ms, s.buyer_rank, s.is_dev, s.market
                  FROM seed.trades s
                  WHERE NOT EXISTS (SELECT 1 FROM main.trades m
                    WHERE m.sig = s.sig AND m.mint = s.mint AND m.wallet = s.wallet)`);
