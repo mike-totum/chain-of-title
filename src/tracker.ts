@@ -458,11 +458,43 @@ export class Tracker extends EventEmitter {
    * Reject a price that jumps >10x against the last accepted price unless the next sample agrees with it.
    * Catches decimals mismatches and one-off feed glitches; a genuine 10x move is accepted on its second print.
    */
+  /**
+   * Is this price a reading of the market, or a bad decode?
+   *
+   * The confirmation rule is the point: a tick ten times away from the last one is refused and remembered, and a
+   * second tick agreeing with it lets both through, because a price that really moved says so twice. That is right,
+   * and it had a hole. Confirmation only asked whether the second reading resembled the FIRST BAD ONE, so two
+   * consecutive bad decodes vouched for each other and `lastPrice` walked up to the garbage. Nothing capped the walk
+   * either, so four separate ninefold jumps each passed on their own and compounded to 6,561x.
+   *
+   * `peakPrice` is where that would land and never leave, because a peak only ratchets: one accepted bad tick is
+   * permanent.
+   *
+   * **This closes a logical hole, not an observed defect, and the distinction is worth keeping.** The extreme peaks
+   * in the archive were checked before this was written and they are real. The largest, an implied market cap of
+   * 1,549,248 SOL, is backed by 8,091 trade rows whose highest price matches it exactly; a 481x cluster near
+   * 190,000 SOL is backed by 1,746 trades apiece. Anchoring plausibility on the ~411 SOL at which a curve completes
+   * and calling everything far above it an artefact was an assumption about the market, not a reading of it, and it
+   * was wrong. Post-graduation runs of a thousandfold happen.
+   *
+   * The hole is still worth closing, because two bad decodes confirming each other is a real path and a ratcheting
+   * field is where it would become permanent. A genuine run still gets through: it arrives as a sequence of
+   * believable steps over many fills, which is what the corroborated ones above actually look like.
+   *
+   * MAX_CONFIRMED_JUMP is 100. Refusing a jump outright would pin a token to a stale price through a real run;
+   * allowing any confirmed jump lets two bad decodes walk it anywhere. A hundredfold step between consecutive
+   * observed trades is already beyond anything a curve or a PumpSwap pool produces in one fill.
+   */
   private acceptPrice(t: TokenState, px: number): boolean {
     if (!(t.lastPrice > 0)) return true;
     const ratio = px / t.lastPrice;
     if (ratio < 10 && ratio > 0.1) { t.suspectPrice = null; return true; }
-    if (t.suspectPrice !== null && px / t.suspectPrice < 2 && px / t.suspectPrice > 0.5) { t.suspectPrice = null; return true; }
+    if (t.suspectPrice !== null
+        && px / t.suspectPrice < 2 && px / t.suspectPrice > 0.5
+        && ratio < MAX_CONFIRMED_JUMP && ratio > 1 / MAX_CONFIRMED_JUMP) {
+      t.suspectPrice = null;
+      return true;
+    }
     t.suspectPrice = px;
     return false;
   }
@@ -513,6 +545,7 @@ export class Tracker extends EventEmitter {
 }
 
 /** Bigger than this is not a metadata document. Recorded as seen but not stored; see `raw` in TokenMeta. */
+const MAX_CONFIRMED_JUMP = 100;
 const MAX_META_BYTES = 16 * 1024;
 
 /**
