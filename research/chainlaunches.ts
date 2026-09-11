@@ -52,9 +52,35 @@ const BORING = new Set([
   "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s",
 ]);
 
+/**
+ * Does this mint look like a token launch, as opposed to an LP token, a position NFT, a prediction-market outcome
+ * or an ephemeral mint that holds nothing?
+ *
+ * MEASURED, NOT ASSUMED. Over 392 blocks and 433 mints, labelled by the program that created them - pump.fun,
+ * LaunchLab and Meteora DBC as launches; Raydium CLMM, Orca, Meteora CP-AMM, PumpSwap, a prediction market and the
+ * supply-zero BopTVfs issuer as not:
+ *
+ *   supply > 0                     keeps 105/109 launches, admits  29/317 non-launches
+ *   decimals >= 6                  keeps 101/109 launches, admits 294/317 non-launches
+ *   supply > 0 && decimals >= 6    keeps  97/109 launches, admits   6/317 non-launches
+ *
+ * A CLASSIFIER, NOT A FILTER, and that distinction is the point. It would be easy to drop everything this returns
+ * false for at ingest, and it would repeat the mistake `graduated` already cost a correction for: an observation
+ * overwritten by a judgement, with no way to tell later that the judgement was wrong. The 12 launches this misses
+ * are mostly mints whose tokens are minted in a LATER transaction, which is a real pattern and not a non-launch.
+ * So every mint is recorded with the attributes the predicate reads, the predicate is published beside them, and a
+ * reader who disagrees with the threshold can recompute from the same file.
+ *
+ * `false` here means "this does not look like a launch", never "this is not one".
+ */
+export const looksLikeLaunch = (l: Pick<ChainLaunch, "supply" | "decimals">): boolean =>
+  l.supply > 0 && l.decimals >= 6;
+
 export interface ChainLaunch {
   mint: string;
   creator: string;
+  /** From the initializeMint instruction. Read rather than assumed: it scales every amount for this mint. */
+  decimals: number;
   slot: number;
   blockTime: number | null;
   supply: number;
@@ -78,7 +104,8 @@ export function launchesInBlock(b: any, slot: number): ChainLaunch[] {
       ...(tx.transaction?.message?.instructions ?? []),
       ...(tx.meta?.innerInstructions ?? []).flatMap((g: any) => g.instructions ?? []),
     ];
-    const minted = ixs.filter(isMintInit).map((ix: any) => ix.parsed.info.mint as string);
+    const minted = ixs.filter(isMintInit).map((ix: any) => ({
+      mint: ix.parsed.info.mint as string, decimals: Number(ix.parsed.info.decimals ?? -1) }));
     if (!minted.length) continue;
     const keys = tx.transaction?.message?.accountKeys ?? [];
     const payer = typeof keys[0] === "string" ? keys[0] : keys[0]?.pubkey;
@@ -86,14 +113,14 @@ export function launchesInBlock(b: any, slot: number): ChainLaunch[] {
     // Label only. See the header: outermost-program attribution catches routers, not venues.
     const program = ixs.map((ix: any) => ix.programId).find((p: string) => p && !BORING.has(p)) ?? null;
 
-    for (const mint of minted) {
+    for (const { mint, decimals } of minted) {
       const post = (tx.meta?.postTokenBalances ?? []).filter((x: any) => x.mint === mint);
       const supply = post.reduce((s: number, x: any) => s + Number(x.uiTokenAmount.amount ?? 0), 0);
       const held = post.filter((x: any) => x.owner === payer)
         .reduce((s: number, x: any) => s + Number(x.uiTokenAmount.amount ?? 0), 0);
       const owners = new Set(post.filter((x: any) => Number(x.uiTokenAmount.amount ?? 0) > 0).map((x: any) => x.owner));
       out.push({
-        mint, creator: payer, slot, blockTime: b.blockTime ?? null, supply,
+        mint, creator: payer, decimals, slot, blockTime: b.blockTime ?? null, supply,
         // Null, not zero. A transaction that minted nothing measurable has no share to report, and a zero here
         // would read as "the creator kept none of it" - a finding rather than a gap.
         creatorShare: supply > 0 ? held / supply : null,
@@ -140,13 +167,16 @@ export function launchesInBlock(b: any, slot: number): ChainLaunch[] {
   for (const [p, c] of [...byProgram.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10))
     console.log(`  ${String(c).padStart(4)}  ${p}`);
 
-  const withShare = all.filter((l) => l.creatorShare !== null);
+  const launches = all.filter(looksLikeLaunch);
+  console.log(`\n${launches.length} of ${all.length} mints look like launches (supply > 0 and at least 6 decimals);`);
+  console.log(`the rest are recorded too - the predicate is published beside them, not applied as a filter.`);
+  const withShare = launches.filter((l) => l.creatorShare !== null);
   const heavy = withShare.filter((l) => l.creatorShare! >= 0.2).length;
-  console.log(`\ncreator share was computable for ${withShare.length} of ${all.length} launches`);
+  console.log(`\ncreator share was computable for ${withShare.length} of ${launches.length} launches`);
   if (withShare.length)
     console.log(`  ${heavy} of ${withShare.length} (${(100 * heavy / withShare.length).toFixed(1)}%) kept 20% or more of supply in the first block`);
   console.log(`  median distinct holders at end of first block: ${
-    all.length ? all.map((l) => l.holders).sort((a, b) => a - b)[Math.floor(all.length / 2)] : 0}`);
+    launches.length ? launches.map((l) => l.holders).sort((a, b) => a - b)[Math.floor(launches.length / 2)] : 0}`);
 
   /**
    * The decision this script exists to inform. Solana produces roughly 2.5 blocks a second, so keeping up means
