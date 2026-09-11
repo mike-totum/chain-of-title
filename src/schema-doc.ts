@@ -131,6 +131,7 @@ const DOCS: Record<string, Record<string, Doc>> = {
     vsol: { kind: "chain", desc: "Virtual SOL reserve after the trade: how full the curve was." },
     vtok: { kind: "chain", desc: "Virtual token reserve after the trade." },
     is_dev: { kind: "chain", desc: "1 when the trading wallet is the token's creator." },
+    rebuild_complete: { kind: "ours", desc: "Whether the rebuild this row came from read the WHOLE curve. 1 complete, 0 truncated, NULL not knowable in this file. These rows are reconstructions, and a rebuild that read a fortieth of a curve produces real trades and a false total: measured on the collector, 188 of 2,729 rebuilds were truncated, averaging 38.7% of their own history, and the undercount lands squarely on buyer counts and creator share. NULL is not a quiet 'probably fine' - it means this file was built from a source carrying no completeness metadata at all, which is how 1,072 buyout rows came to be published unqualified. meta.hist_trades_qualified says which of those two a given file is, and correction reconstructions-published-unqualified records the episode." },
   },
   runs: {
     id: { kind: "ours", desc: "Collector run." },
