@@ -2,12 +2,12 @@
  * Published reports: what one is, where they live, and how a page gets hold of them.
  *
  * A report is the only thing this project publishes that is meant to stay still. Every other figure on the site is a
- * window that moves — the front page says so beside each one, and that is right for a front page. A report is the
+ * window that moves - the front page says so beside each one, and that is right for a front page. A report is the
  * opposite: it is the artifact somebody cites, and a citation to a number that has since changed is worse than no
  * citation, because the reader cannot tell which of you is wrong.
  *
  * It was not staying still. `site.ts` re-ran the report's query and re-stamped its date from the record's build time
- * on every build, and `scripts/daily.sh` runs that build once a day — under a lede telling the reader, in the
+ * on every build, and `scripts/daily.sh` runs that build once a day - under a lede telling the reader, in the
  * report's own first sentence, that "the figures below were computed from the record on that date and are not
  * updated afterwards". The sentence was false every day after the first.
  *
@@ -17,14 +17,14 @@
  *
  * WHY `reports/` AND NOT `data/reports/`. The obvious home is taken, and worse than taken: `data/reports/` holds
  * `scripts/daily.sh`'s run logs and is excluded by .gitignore, .railwayignore AND .dockerignore. A manifest there
- * would be uncommitted, unuploaded and absent from the image — healthy locally and simply gone in production, which
+ * would be uncommitted, unuploaded and absent from the image - healthy locally and simply gone in production, which
  * is the failure those three files' own comments were written about. `reports/` at the repository root is source,
  * versioned and shipped, and nothing excludes it.
  */
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
-/** Where published manifests live. Source, committed, shipped — see the note above on why not `data/reports`. */
+/** Where published manifests live. Source, committed, shipped - see the note above on why not `data/reports`. */
 export const REPORTS_DIR = "reports";
 
 /**
@@ -53,7 +53,7 @@ export interface Report {
   query: string;
   /**
    * Set only when a published report has been revised, and says what changed and when. A report that is corrected
-   * silently is not a correction, it is a second version wearing the first one's date — see corrections.html.
+   * silently is not a correction, it is a second version wearing the first one's date - see corrections.html.
    */
   revisions?: { at: string; what: string }[];
 }
@@ -62,7 +62,7 @@ export interface Report {
  * Every published report, newest first.
  *
  * Never throws and never guesses. A missing directory means nothing has been published yet, which is a real state
- * with a real answer ("no reports yet"), not an error — and a malformed manifest is skipped loudly rather than
+ * with a real answer ("no reports yet"), not an error - and a malformed manifest is skipped loudly rather than
  * rendered as a report with holes in it. An unreadable report must not take down the page it appears on.
  */
 export function loadReports(dir = REPORTS_DIR): Report[] {
@@ -74,7 +74,7 @@ export function loadReports(dir = REPORTS_DIR): Report[] {
       // The four fields every consumer dereferences. A manifest without them would render a report with an empty
       // title or an undefined date, which is a worse artifact than no report at all.
       if (!r.slug || !r.title || !r.published || !r.summary) {
-        console.error(`[reports] ${f} is missing slug, title, published or summary — skipped`);
+        console.error(`[reports] ${f} is missing slug, title, published or summary, skipped`);
         continue;
       }
       /**
@@ -91,7 +91,7 @@ export function loadReports(dir = REPORTS_DIR): Report[] {
         coverageFrom: r.coverageFrom ?? "", recordBuiltAt: r.recordBuiltAt ?? "",
       });
     } catch (e) {
-      console.error(`[reports] ${f} could not be read: ${(e as Error).message} — skipped`);
+      console.error(`[reports] ${f} could not be read: ${(e as Error).message}, skipped`);
     }
   }
   return out.sort((a, b) => b.published.localeCompare(a.published) || a.slug.localeCompare(b.slug));

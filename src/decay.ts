@@ -5,17 +5,17 @@
  * anyone willing to pay for archival RPC. The metadata document cannot: it is what the launch *claimed to be*, it
  * lives behind a URI the creator controls, and when they repoint it or the pin lapses it is gone at any price. That
  * makes the rate it vanishes the single most important number about this project, because it is the rate at which
- * being the holder of a copy becomes worth something — and nobody had measured it.
+ * being the holder of a copy becomes worth something - and nobody had measured it.
  *
  * It could not be measured. `fetchMeta` discarded the reason a fetch failed and `backfillmeta` wrote the word
  * "unreachable" for all of them: 121,832 rows, one distinct value between them, while the image path beside it
- * recorded twenty. A gateway refusing us and a pin that is gone are opposite facts — one is our rate limiter, the
- * other is permanent loss — and they were filed identically.
+ * recorded twenty. A gateway refusing us and a pin that is gone are opposite facts - one is our rate limiter, the
+ * other is permanent loss - and they were filed identically.
  *
  * TWO ARMS, because they answer different questions and only one of them is a decay rate:
  *
  *   SURVIVAL  Sample documents we already hold. We know these were alive at `meta_at` because we have the bytes.
- *             Re-fetch each one now. The share that still answers, against age, IS the decay curve — the denominator
+ *             Re-fetch each one now. The share that still answers, against age, IS the decay curve - the denominator
  *             is known-alive, which is what makes it a rate rather than a guess.
  *
  *   RECOVERY  Sample the rows that failed. Fetch them. What comes back was never lost, only refused, and it sizes
@@ -23,13 +23,13 @@
  *             the permanent loss, and counting it is the first honest estimate of how much is already gone.
  *
  * BOTH ARMS REPORT BY HOST, because the first run (2026-09-10) showed that is the axis that matters and age is not.
- * Over an eight-day window IPFS lost nothing — 50 of 50 held documents re-served — and `meta.uxento.io` lost nothing.
+ * Over an eight-day window IPFS lost nothing - 50 of 50 held documents re-served - and `meta.uxento.io` lost nothing.
  * `metadata.j7tracker.io` had deleted 22 of 50 documents we had already fetched, while still answering every request
  * with a polite 404. Aggregate the two and you get a gentle "93% survival" that describes no host in the archive and
  * hides the only one that is actually losing. A per-day curve reads as ageing when what it is really showing is
  * which days happened to carry more launches from the host that deletes.
  *
- * Read-only by design. It writes nothing to `tokens` — a measurement that mutates the thing it measures cannot be
+ * Read-only by design. It writes nothing to `tokens` - a measurement that mutates the thing it measures cannot be
  * re-run and compared, and the documents it touches are re-fetched and kept minutes later by `npm run backfillmeta`
  * anyway. Sampling is random within each cohort, not newest-first, because newest-first is exactly the bias that
  * would flatter the answer.
@@ -56,7 +56,7 @@ const say = (...a: unknown[]) => { if (!JSON_OUT) console.log(...a); };
  * What happened when we asked, in classes that mean different things for the archive.
  *
  * The distinction that matters is `gone` versus `refused`. A gateway that answered and said 404 is telling us the
- * content address resolves to nothing — under content addressing that is a property of the CID, not of the host, so
+ * content address resolves to nothing - under content addressing that is a property of the CID, not of the host, so
  * no other gateway and no later pass will do better. A 429 or a timeout is our own throughput problem and the
  * document is still there. Filing the second as the first is how a fixable backlog gets written off as a loss.
  */
@@ -74,7 +74,7 @@ function classify(error: string | undefined, hasMeta: boolean): Verdict {
 }
 
 /**
- * Whether the URI is genuinely content-addressed, decided by `ipfsPath` — the same reading the fetcher uses.
+ * Whether the URI is genuinely content-addressed, decided by `ipfsPath` - the same reading the fetcher uses.
  *
  * Not a substring test. `https://ipfs.launchblitz.ai/async/<mint>.json` contains "ipfs" in its HOSTNAME and is an
  * ordinary private server with a marketing domain: no CID, no second copy anywhere, and it fails the way j7tracker
@@ -128,7 +128,7 @@ const results: Record<string, unknown> = { at: Date.now(), sample: SAMPLE };
 
 // ── SURVIVAL ────────────────────────────────────────────────────────────────────────────────────────────────────
 if (ARM === "both" || ARM === "survival") {
-  say("\nSURVIVAL — documents we hold, re-asked for now. Denominator is known-alive.\n");
+  say("\nSURVIVAL - documents we hold, re-asked for now. Denominator is known-alive.\n");
   const rows = db.prepare(`SELECT mint, uri, created_at, meta_at FROM tokens
     WHERE meta_at IS NOT NULL AND uri IS NOT NULL AND uri != ''
     ORDER BY RANDOM() LIMIT ?`).all(SAMPLE) as unknown as Row[];
@@ -159,7 +159,7 @@ if (ARM === "both" || ARM === "survival") {
    */
   const losing = hosts.filter((h: any) => (h.by.gone ?? 0) > 0) as any[];
   if (losing.length) {
-    say("\n  Losing right now — documents we hold that the host no longer serves:");
+    say("\n  Losing right now - documents we hold that the host no longer serves:");
     for (const h of losing) say(`    ${h.host}: ${h.by.gone}/${h.answered} of what we re-asked for is already 404.`);
     say("  For those, this archive is the copy. That is not a projection; it is true today.");
   } else say("\n  No host in the sample has deleted a document we hold.");
@@ -168,7 +168,7 @@ if (ARM === "both" || ARM === "survival") {
 
 // ── RECOVERY ────────────────────────────────────────────────────────────────────────────────────────────────────
 if (ARM === "both" || ARM === "recovery") {
-  say("\nRECOVERY — rows that failed before. How much was never lost, only refused.\n");
+  say("\nRECOVERY - rows that failed before. How much was never lost, only refused.\n");
   const pool = (db.prepare(`SELECT COUNT(*) c FROM tokens WHERE meta_at IS NULL AND meta_error IS NOT NULL`).get() as any).c;
   const rows = db.prepare(`SELECT mint, uri, created_at, meta_at FROM tokens
     WHERE meta_at IS NULL AND meta_error IS NOT NULL AND uri IS NOT NULL AND uri != ''
@@ -184,7 +184,7 @@ if (ARM === "both" || ARM === "recovery") {
   const recoverable = Math.round((t.held / t.n) * pool);
   say(`\n  ${((t.held / t.n) * 100).toFixed(1)}% came back on the first ask.`);
   say(`  Projected over ${pool.toLocaleString()} failed rows: about ${recoverable.toLocaleString()} documents are still there today.`);
-  if (t.by.gone) say(`  ${(((t.by.gone ?? 0) / t.n) * 100).toFixed(1)}% answered 404 — about ${Math.round(((t.by.gone ?? 0) / t.n) * pool).toLocaleString()} are already gone for good.`);
+  if (t.by.gone) say(`  ${(((t.by.gone ?? 0) / t.n) * 100).toFixed(1)}% answered 404 - about ${Math.round(((t.by.gone ?? 0) / t.n) * pool).toLocaleString()} are already gone for good.`);
 
   // Where the risk is concentrated. A private host is one lapsed registration from taking every launch behind it.
   const byHost = new Map<string, { n: number; alive: number }>();

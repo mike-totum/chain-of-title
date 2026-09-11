@@ -1,0 +1,47 @@
+{
+  "slug": "graduation-events",
+  "title": "A graduation event is not a graduation",
+  "published": "2026-09-11",
+  "summary": "Of 12,524 graduation events on the feed, 5,489 have no pool behind them, and of those we read on chain 96.4% had no completed curve either.",
+  "coverageFrom": "2026-09-02T12:29:32.581Z",
+  "recordBuiltAt": "2026-09-11T17:12:59.309Z",
+  "totals": {
+    "events": 12524,
+    "poolEvents": 6092,
+    "poolRead": 1774,
+    "poolIncomplete": 31,
+    "noneEvents": 5489,
+    "noneRead": 5378,
+    "noneIncomplete": 5187,
+    "noneComplete": 0,
+    "noneGone": 191,
+    "circular": 943
+  },
+  "rows": [
+    {
+      "confirmed_by": "pool",
+      "feed_events": 6092,
+      "read_on_chain": 1774,
+      "read_complete": 1743,
+      "read_incomplete": 31,
+      "account_gone": 0
+    },
+    {
+      "confirmed_by": "(none)",
+      "feed_events": 5489,
+      "read_on_chain": 5378,
+      "read_complete": 0,
+      "read_incomplete": 5187,
+      "account_gone": 191
+    },
+    {
+      "confirmed_by": "curve_complete",
+      "feed_events": 943,
+      "read_on_chain": 943,
+      "read_complete": 943,
+      "read_incomplete": 0,
+      "account_gone": 0
+    }
+  ],
+  "query": "SELECT COALESCE(graduated_confirmed_by, '(none)') AS confirmed_by,\n       COUNT(*) AS feed_events,\n       SUM(curve_checked_at IS NOT NULL) AS read_on_chain,\n       SUM(curve_complete = 1) AS read_complete,\n       SUM(curve_complete = 0) AS read_incomplete,\n       SUM(curve_checked_at IS NOT NULL AND curve_complete IS NULL) AS account_gone\nFROM tokens\nWHERE graduated = 1\nGROUP BY confirmed_by\nORDER BY feed_events DESC;"
+}

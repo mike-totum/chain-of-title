@@ -42,17 +42,17 @@ const DOCS: Record<string, Record<string, Doc>> = {
   tokens: {
     mint: { kind: "chain", desc: "The token's mint address. Primary key." },
     name: { kind: "ours", desc: "Name the launch declared off-chain. The operator can change it after launch; this is what it said when we read it." },
-    symbol: { kind: "ours", desc: "Ticker the launch declared. Tickers collide constantly and are not an identifier — use the mint." },
+    symbol: { kind: "ours", desc: "Ticker the launch declared. Tickers collide constantly and are not an identifier; use the mint." },
     creator: { kind: "live", desc: "Wallet that sent the creation transaction." },
     created_at: { kind: "live", desc: "Creation time, epoch ms." },
     late_discovery: { kind: "ours", desc: "1 when we found the token after it was already trading, so its first block was never observed. A launch with this set is never certified clean." },
     dev_pct: { kind: "live", desc: "Percent of total supply the creator held after the first block. The single most load-bearing number in the file." },
     dev_sold: { kind: "ours", desc: "1 if we saw the creator sell while watching. 0 means we did not see it, which is not the same as it not happening." },
-    unique_buyers: { kind: "ours", desc: "Distinct buyers across the token's whole life, INCLUDING post-graduation market buyers. This is NOT the outside-buyer count that judges a launch — use curve_buyers." },
+    unique_buyers: { kind: "ours", desc: "Distinct buyers across the token's whole life, INCLUDING post-graduation market buyers. This is NOT the outside-buyer count that judges a launch; use curve_buyers." },
     curve_buyers: { kind: "live", desc: "Distinct wallets that bought on the bonding curve before it graduated. NULL means unknown, which never certifies as clean." },
     snap30_buyers: { kind: "live", desc: "Distinct buyers within the first 30 seconds. Meaningful only for an observed launch." },
-    bundled_buyers: { kind: "live", desc: "Buyers landing in the creation block itself — bought before anyone outside could have seen the token exist." },
-    graduated: { kind: "ours", desc: "1 if the curve is recorded as having completed — an inference from decoded trade volume, not a reading of the curve. Measured 2026-09-09: of rows where graduated_confirmed_by IS NULL, the curve account was read directly and returned complete=0 on 5,187 of them. Count graduations with graduated_confirmed_by IS NOT NULL; this column alone overstates them by about three quarters." },
+    bundled_buyers: { kind: "live", desc: "Buyers landing in the creation block itself, bought before anyone outside could have seen the token exist." },
+    graduated: { kind: "ours", desc: "1 if the curve is recorded as having completed: an inference from decoded trade volume, not a reading of the curve. Measured 2026-09-09: of rows where graduated_confirmed_by IS NULL, the curve account was read directly and returned complete=0 on 5,187 of them. Count graduations with graduated_confirmed_by IS NOT NULL; this column alone overstates them by about three quarters." },
     graduated_at: { kind: "ours", desc: "When the curve is recorded as completing, epoch ms. Subject to the same caveat as graduated." },
     pool: { kind: "chain", desc: "The PumpSwap pool address, once discovered. NULL is not evidence a curve did not complete: pool discovery has its own coverage gaps." },
     vault_sol: { kind: "reading", desc: "SOL in the pool at the last successful read. One value, not a history. Always read it with vault_at." },
@@ -62,36 +62,36 @@ const DOCS: Record<string, Record<string, Doc>> = {
     rebuilt_complete: { kind: "ours", desc: "1 when a rebuild read the curve's entire transaction history. 0 or NULL means signature paging hit its cap or transactions could not be fetched, so the rebuild is partial and its counts are floors." },
     updated_at: { kind: "ours", desc: "Last time any field on this row changed, epoch ms." },
     venue: { kind: "chain", desc: "Which launchpad the token came from." },
-    peak_price: { kind: "live", desc: "The highest price we ever observed for this launch, in SOL per token. A peak only ratchets, so unlike a pool balance it is permanent once true — which is why it is published and last_price, which carries no timestamp, is not. Read it as a floor rather than a measurement: it is what we SAW, so a spike between observations is not here, and a launch we stopped following has a peak that stops with us. Multiply by 1e9 for an implied market cap in SOL, against the roughly 411 SOL at which a pump.fun curve completes." },
-    peak_source: { kind: "ours", desc: "Where the peak came from. 'curve' or 'amm' mean we decoded an on-chain transaction that executed at that price. 'external' means a third-party price feed reported it and no trade was witnessed, which is a materially weaker claim and the one that produces peaks this archive cannot corroborate: of the four largest peaks on file, two hold a pool with zero decoded AMM trades and an implied cap over 2.9M SOL, while the two beside them are backed by 122 and 211 trades and reconcile exactly. NULL means we did not record the source, which is every row written before 2026-09-10, and never that the peak was unsourced. Deliberately not backfilled — the source is knowable only when the price arrives, and inferring it later from whichever trade rows survived retention would be manufacturing provenance." },
+    peak_price: { kind: "live", desc: "The highest price we ever observed for this launch, in SOL per token. A peak only ratchets, so unlike a pool balance it is permanent once true, which is why it is published and last_price, which carries no timestamp, is not. Read it as a floor rather than a measurement: it is what we SAW, so a spike between observations is not here, and a launch we stopped following has a peak that stops with us. Multiply by 1e9 for an implied market cap in SOL, against the roughly 411 SOL at which a pump.fun curve completes." },
+    peak_source: { kind: "ours", desc: "Where the peak came from. 'curve' or 'amm' mean we decoded an on-chain transaction that executed at that price. 'external' means a third-party price feed reported it and no trade was witnessed, which is a materially weaker claim and the one that produces peaks this archive cannot corroborate: of the four largest peaks on file, two hold a pool with zero decoded AMM trades and an implied cap over 2.9M SOL, while the two beside them are backed by 122 and 211 trades and reconcile exactly. NULL means we did not record the source, which is every row written before 2026-09-10, and never that the peak was unsourced. Deliberately not backfilled: the source is knowable only when the price arrives, and inferring it later from whichever trade rows survived retention would be manufacturing provenance." },
     peak_at: { kind: "live", desc: "When that highest price was observed, epoch ms. The peak is only a fact with the moment attached, exactly as vault_sol is only a fact with vault_at; the record refuses to publish either half alone." },
-    meta_lag_ms: { kind: "ours", desc: "How long after the launch we read its document: meta_at minus created_at, in milliseconds. Derived from the two columns beside it on this row, never copied, so it cannot disagree with them. This is what separates a document captured as the launch happened from one recovered days later — the URI belongs to the creator and what it served on the 10th is not necessarily what it served on the 2nd. The distribution is sharply bimodal and deliberately not thresholded here: 80,448 rows under a minute, 2,174 in the whole span from one minute to a day, and 69,597 over a day. Any cut a reader picks between ten minutes and a day selects the same population, which is why we publish the measurement instead of a boolean built on a threshold we chose." },
-    curve_checked_at: { kind: "reading", desc: "When we last read this token's bonding curve account directly, epoch ms. NULL means we have never read it — not that anything was found. Read this column before curve_complete: together they distinguish four states, and only two of them say anything about the token." },
+    meta_lag_ms: { kind: "ours", desc: "How long after the launch we read its document: meta_at minus created_at, in milliseconds. Derived from the two columns beside it on this row, never copied, so it cannot disagree with them. This is what separates a document captured as the launch happened from one recovered days later. The URI belongs to the creator and what it served on the 10th is not necessarily what it served on the 2nd. The distribution is sharply bimodal and deliberately not thresholded here: 80,448 rows under a minute, 2,174 in the whole span from one minute to a day, and 69,597 over a day. Any cut a reader picks between ten minutes and a day selects the same population, which is why we publish the measurement instead of a boolean built on a threshold we chose." },
+    curve_checked_at: { kind: "reading", desc: "When we last read this token's bonding curve account directly, epoch ms. NULL means we have never read it, not that anything was found. Read this column before curve_complete: together they distinguish four states, and only two of them say anything about the token." },
     curve_complete: { kind: "reading", desc: "The curve account's own `complete` bit at curve_checked_at. 1 = we read the account and the curve had completed. 0 = we read it and it had not. NULL WITH a curve_checked_at = the account no longer existed when we looked, which tells you nothing about whether the curve filled. NULL WITH NO curve_checked_at = we never looked. A 0 here is a direct observation and is the basis for the correction against `graduated`; the two NULL cases are our coverage and are never evidence about a launch." },
-    create_sig: { kind: "live", desc: "Signature of the transaction this launch was decoded from — the one carrying the creator's initial buy, and therefore the transaction dev_pct is computed from. Fetch it and you can check every launch figure in this row against the chain rather than trusting us. NULL means we did not record one: the launch predates the column (2026-09-09), or we found the token late and never saw its creation, or its trade rows were pruned before the backfill reached them. NULL is never a claim that no creation transaction exists." },
+    create_sig: { kind: "live", desc: "Signature of the transaction this launch was decoded from: the one carrying the creator's initial buy, and therefore the transaction dev_pct is computed from. Fetch it and you can check every launch figure in this row against the chain rather than trusting us. NULL means we did not record one: the launch predates the column (2026-09-09), or we found the token late and never saw its creation, or its trade rows were pruned before the backfill reached them. NULL is never a claim that no creation transaction exists." },
     create_slot: { kind: "live", desc: "The slot create_sig landed in. Present exactly when create_sig is." },
-    graduated_confirmed_by: { kind: "ours", desc: "How graduation was confirmed: 'pool' (a PumpSwap pool was found), 'curve_complete' (the curve account's own complete bit), or NULL for an inference from decoded trade volume that nobody ever confirmed. NULL means we say less, never that we say the opposite — but it is not neutral: where the curve account has since been read, the great majority of NULL rows returned complete=0. This column, not graduated, is the graduation flag." },
+    graduated_confirmed_by: { kind: "ours", desc: "How graduation was confirmed: 'pool' (a PumpSwap pool was found), 'curve_complete' (the curve account's own complete bit), or NULL for an inference from decoded trade volume that nobody ever confirmed. NULL means we say less, never that we say the opposite, but it is not neutral: where the curve account has since been read, the great majority of NULL rows returned complete=0. This column, not graduated, is the graduation flag." },
     uri: { kind: "ours", desc: "Metadata URI the launch declared." },
-    image: { kind: "ours", desc: "Image URL from that metadata. A NULL here with meta_at set means the launch declared no picture — a different statement from us not fetching one." },
+    image: { kind: "ours", desc: "Image URL from that metadata. A NULL here with meta_at set means the launch declared no picture, a different statement from us not fetching one." },
     description: { kind: "ours", desc: "Description the launch declared off-chain, at the time we read it." },
     meta_at: { kind: "ours", desc: "When we read the off-chain metadata, epoch ms. Set with a NULL image means the launch genuinely declared none." },
-    image_sha256: { kind: "ours", desc: "sha256 of the image bytes, when we hold them — the proof rather than the picture. NULL means we did not fetch it, which is a disk-budget decision and not a finding about the launch." },
+    image_sha256: { kind: "ours", desc: "sha256 of the image bytes, when we hold them: the proof rather than the picture. NULL means we did not fetch it, which is a disk-budget decision and not a finding about the launch." },
     image_bytes: { kind: "ours", desc: "Size of the fetched image in bytes." },
     image_at: { kind: "ours", desc: "When the image bytes were fetched, epoch ms." },
     image_error: { kind: "ours", desc: "Always NULL here. It records why one of our image fetches failed, which describes us rather than the launch, so the published record does not carry it. The column exists because our own tooling migrates any database it opens to the collector's schema." },
-    meta_json: { kind: "ours", desc: "Always NULL here. The collector keeps the metadata document — it is retrievable exactly once, since the URI is the creator's to repoint — but publishing it would add roughly a kilobyte per launch to a file whose whole value is that one person can mirror it. The column exists because our own tooling migrates any database it opens; read meta_bytes to tell 'never fetched' from 'fetched and it exists'." },
-    meta_sha256: { kind: "live", desc: "sha256 of the metadata document as we received it at launch — the commitment, not the document. The document itself stays in the collector because publishing it would add tens of megabytes a day to a file whose value is that one person can mirror it. This lets anyone who later obtains that document prove it is the one we read, before the creator could repoint the URI. NULL means we hold no document to commit to." },
+    meta_json: { kind: "ours", desc: "Always NULL here. The collector keeps the metadata document, which is retrievable exactly once, since the URI is the creator's to repoint, but publishing it would add roughly a kilobyte per launch to a file whose whole value is that one person can mirror it. The column exists because our own tooling migrates any database it opens; read meta_bytes to tell 'never fetched' from 'fetched and it exists'." },
+    meta_sha256: { kind: "live", desc: "sha256 of the metadata document as we received it at launch: the commitment, not the document. The document itself stays in the collector because publishing it would add tens of megabytes a day to a file whose value is that one person can mirror it. This lets anyone who later obtains that document prove it is the one we read, before the creator could repoint the URI. NULL means we hold no document to commit to." },
     meta_bytes: { kind: "ours", desc: "Size of the metadata document as served, in bytes. The document itself is kept by the collector but is not published here: at roughly a kilobyte a launch it would add tens of megabytes a day to a file whose whole point is that one person can mirror it. This column is what lets you tell 'we never fetched it' from 'we fetched it and it exists'." },
   },
   wallet_flow: {
     wallet: { kind: "chain", desc: "A wallet that has bought at least one bonding curve outright. One row each." },
     curve_sol: { kind: "chain", desc: "SOL this wallet spent buying bonding curves." },
     amm_buy: { kind: "ours", desc: "SOL this wallet spent buying back on the open market, on the curves it took. Sum the venue='amm', side='buy' rows in trades for this wallet and you will get this number." },
-    amm_sell: { kind: "ours", desc: "SOL this wallet received selling on the open market, on the curves it took — the tokens it bought the float of, not everything it ever traded. Sum the venue='amm', side='sell' rows in trades for this wallet and you will get this number. It used to count every token the wallet touched while the pages around it said 'sold after taking the curve'." },
+    amm_sell: { kind: "ours", desc: "SOL this wallet received selling on the open market, on the curves it took: the tokens it bought the float of, not everything it ever traded. Sum the venue='amm', side='sell' rows in trades for this wallet and you will get this number. It used to count every token the wallet touched while the pages around it said 'sold after taking the curve'." },
     tokens: { kind: "ours", desc: "Number of curves this wallet took. Count the distinct mints in trades for this wallet and you will get this number." },
   },
   trades: {
-    sig: { kind: "chain", desc: "Signature of the transaction this trade was decoded from. Fetch it and you can verify the buyout for yourself — the single fact this record states most seriously about a launch, and the one it should least ask you to take on trust. NULL where retention removed the row before this column existed (2026-09-09); never a claim that no transaction exists." },
+    sig: { kind: "chain", desc: "Signature of the transaction this trade was decoded from. Fetch it and you can verify the buyout for yourself: the single fact this record states most seriously about a launch, and the one it should least ask you to take on trust. NULL where retention removed the row before this column existed (2026-09-09); never a claim that no transaction exists." },
     mint: { kind: "chain", desc: "Token traded." },
     wallet: { kind: "chain", desc: "Wallet that traded." },
     side: { kind: "chain", desc: "'buy' or 'sell'." },
@@ -103,7 +103,7 @@ const DOCS: Record<string, Record<string, Doc>> = {
   },
   hist_trades: {
     mint: { kind: "chain", desc: "Token traded." },
-    sig: { kind: "chain", desc: "Transaction signature — take this to any explorer and check the row yourself." },
+    sig: { kind: "chain", desc: "Transaction signature. Take this to any explorer and check the row yourself." },
     idx: { kind: "chain", desc: "Instruction index within the transaction." },
     ts: { kind: "chain", desc: "Block time, epoch ms. Read from chain history, so unlike trades.ts this is the real block time." },
     slot: { kind: "chain", desc: "Solana slot." },
@@ -111,20 +111,20 @@ const DOCS: Record<string, Record<string, Doc>> = {
     side: { kind: "chain", desc: "'buy' or 'sell'." },
     sol: { kind: "chain", desc: "Size in SOL." },
     tokens: { kind: "chain", desc: "Token amount moved." },
-    vsol: { kind: "chain", desc: "Virtual SOL reserve after the trade — how full the curve was." },
+    vsol: { kind: "chain", desc: "Virtual SOL reserve after the trade: how full the curve was." },
     vtok: { kind: "chain", desc: "Virtual token reserve after the trade." },
     is_dev: { kind: "chain", desc: "1 when the trading wallet is the token's creator." },
   },
   runs: {
     id: { kind: "ours", desc: "Collector run." },
     started_at: { kind: "ours", desc: "When the collector started watching, epoch ms." },
-    stopped_at: { kind: "ours", desc: "When it stopped, epoch ms. NULL means still running. Launches outside these windows were not observed — this table is how you check what we were awake for." },
+    stopped_at: { kind: "ours", desc: "When it stopped, epoch ms. NULL means still running. Launches outside these windows were not observed; this table is how you check what we were awake for." },
     note: { kind: "ours", desc: "Why the run started or ended, when we recorded it." },
   },
   pool_map: {
     pool: { kind: "chain", desc: "PumpSwap pool address. Primary key." },
     mint: { kind: "chain", desc: "Token that pool trades." },
-    created_at: { kind: "ours", desc: "When we first mapped the pool, epoch ms — not when the pool was created." },
+    created_at: { kind: "ours", desc: "When we first mapped the pool, epoch ms, not when the pool was created." },
   },
   operator_wallets: {
     wallet: { kind: "chain", desc: "A wallet we associate with an operator cluster." },
@@ -136,14 +136,14 @@ const DOCS: Record<string, Record<string, Doc>> = {
     added_at: { kind: "ours", desc: "When we added the row, epoch ms." },
   },
   operator_funders: {
-    funder: { kind: "chain", desc: "An address that has funded wallets we associate with a cluster. The cluster label used across this site is the first six characters of this address — it is a name of ours, not an identity." },
+    funder: { kind: "chain", desc: "An address that has funded wallets we associate with a cluster. The cluster label used across this site is the first six characters of this address: it is a name of ours, not an identity." },
     first_seen: { kind: "chain", desc: "The earliest funding transaction we observed from it, epoch ms." },
     last_seen: { kind: "chain", desc: "The most recent, epoch ms. Not an assertion that it has stopped." },
     txs: { kind: "chain", desc: "Funding transactions observed from this address, within our coverage only." },
     wallets: { kind: "chain", desc: "Distinct wallets it has sent SOL to. A large number is equally consistent with a wallet farm and with a trading terminal serving many customers; see note." },
     seeds: { kind: "chain", desc: "Fundings that opened a wallet with no prior balance, as distinct from topping one up." },
     sampled_at: { kind: "ours", desc: "When we last walked this funder's history, epoch ms. The counts above describe what we had seen at that moment and are floors, never totals." },
-    note: { kind: "ours", desc: "Where a funder has been identified as something other than a wallet farm — a trading terminal funding its users, most often — this says so. Read it before drawing anything from the counts: it is the column that withdraws the inference the others invite." },
+    note: { kind: "ours", desc: "Where a funder has been identified as something other than a wallet farm (a trading terminal funding its users, most often), this says so. Read it before drawing anything from the counts: it is the column that withdraws the inference the others invite." },
     parent: { kind: "chain", desc: "The address that funded this funder, where we traced one. NULL means we did not trace one, never that none exists." },
     hops: { kind: "ours", desc: "How many funding steps from the cluster's wallets we walked to reach this address. 0 is the direct funder." },
   },
@@ -158,7 +158,7 @@ const DOCS: Record<string, Record<string, Doc>> = {
     supersedes: { kind: "ours", desc: "The id of a correction this one replaces. The table is append-only: corrections are superseded, never edited or deleted." },
   },
   meta: {
-    k: { kind: "ours", desc: "Key. The published record carries built_at (when this file was assembled), built_by (which machine and script — 'local' or the cloud service name, never a personal hostname), built_pid, and watermark (how far the incremental copy had reached)." },
+    k: { kind: "ours", desc: "Key. The published record carries built_at (when this file was assembled), built_by (which machine and script: 'local' or the cloud service name, never a personal hostname), built_pid, and watermark (how far the incremental copy had reached)." },
     v: { kind: "ours", desc: "Value, as text. Timestamps are epoch ms." },
   },
   operator_policy: {
@@ -196,7 +196,7 @@ const columnsOf = (db: DatabaseSync, table: string): { name: string; type: strin
 };
 
 /**
- * The schema section. Throws rather than publishing an incomplete one — see the note at the top of this file.
+ * The schema section. Throws rather than publishing an incomplete one: see the note at the top of this file.
  */
 export function renderSchema(db: DatabaseSync): string {
   const missing: string[] = [];
@@ -206,8 +206,8 @@ export function renderSchema(db: DatabaseSync): string {
    * Undocumented TABLES fail the build too, not only undocumented columns.
    *
    * This was one-sided and the asymmetry hid a real omission: a table absent from DOCS was quietly left off the
-   * page, so the file could hold something the schema never mentioned. `meta` — the table saying what built the
-   * record and when — sat undocumented for exactly that reason, on a page whose whole subject is provenance.
+   * page, so the file could hold something the schema never mentioned. `meta`, the table saying what built the
+   * record and when, sat undocumented for exactly that reason, on a page whose whole subject is provenance.
    *
    * The same gap had a larger version. Before openDb stopped migrating the record, the published file had
    * accumulated ten of the collector's own tables, all empty; this page would have said nothing about any of them
@@ -244,7 +244,7 @@ export function renderSchema(db: DatabaseSync): string {
   if (missing.length) {
     throw new Error(
       `schema-doc: ${missing.length} column(s) in the record have no description: ${missing.join(", ")}.\n` +
-      `Add them to DOCS in src/schema-doc.ts. The build fails rather than publishing a schema with holes in it — ` +
+      `Add them to DOCS in src/schema-doc.ts. The build fails rather than publishing a schema with holes in it. ` +
       `site.ts leaves the previous pages up, so nothing is served wrong in the meantime.`);
   }
 
@@ -288,7 +288,7 @@ export function renderSamples(db: DatabaseSync): string {
   if (!cases.length) return "";
 
   const F: [string, (r: any) => string][] = [
-    ["symbol", (r) => r.symbol ?? "—"],
+    ["symbol", (r) => r.symbol ?? "(none)"],
     ["dev_pct", (r) => r.dev_pct == null ? "NULL" : `${r.dev_pct.toFixed(1)}`],
     ["curve_buyers", (r) => r.curve_buyers == null ? "NULL" : String(r.curve_buyers)],
     ["graduated", (r) => String(r.graduated ?? "NULL")],

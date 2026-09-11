@@ -5,7 +5,7 @@
  * people who were fooled by a launch rather than running it. record.db is CC0 under a DOI that cannot be withdrawn,
  * so anything that reaches it is published permanently with no way to take it back for anyone who asks.
  *
- * servicedb.ts publishes an explicit allowlist and drops everything else, which is the right shape — this asserts
+ * servicedb.ts publishes an explicit allowlist and drops everything else, which is the right shape - this asserts
  * the promotion tables are not on it, so adding them becomes a deliberate edit that fails a test rather than a
  * change nobody notices.
  */

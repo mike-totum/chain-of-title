@@ -292,7 +292,7 @@ if (isMain) {
   const db = openDb(config.dbPath);
   if (dryRun) db.exec("PRAGMA query_only = 1");
   const r = await offloadTrades(db, { dryRun, log: (s) => console.log(s) });
-  console.log(`\n${dryRun ? "DRY RUN — nothing uploaded, nothing deleted" : "offload complete"}`);
+  console.log(`\n${dryRun ? "DRY RUN - nothing uploaded, nothing deleted" : "offload complete"}`);
   console.log(`  parts   ${r.parts}`);
   console.log(`  rows    ${r.rows.toLocaleString()}`);
   console.log(`  bytes   ${(r.bytes / 1048576).toFixed(1)} MB compressed`);

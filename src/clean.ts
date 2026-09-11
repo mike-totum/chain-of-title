@@ -41,14 +41,14 @@ const all = db.prepare(`SELECT mint, symbol, creator, created_at, dev_pct, uniqu
 const inCov = all.filter((t) => covered(t.created_at));
 // Inclusion requires positive verification, not merely the absence of a flag. An unread pool disqualifies: we cannot
 // vouch for liquidity we have not measured. A first pass without these produced a list where most entries held 1-6 SOL
-// or the creator had already sold — a clean token nobody can exit is not a useful thing to hand someone.
+// or the creator had already sold - a clean token nobody can exit is not a useful thing to hand someone.
 const MIN_POOL_SOL = 40;
 const clean = inCov.filter((t) =>
   t.dev_pct < MAX_DEV_PCT && (t.unique_buyers ?? 0) >= MIN_BUYERS &&
   t.graduated_at && (t.graduated_at - t.created_at) > MIN_GRAD_MS &&
   !t.dev_sold && t.vault_sol != null && t.vault_sol >= MIN_POOL_SOL);
 
-// Operator wallets trade widely, so mere presence is guilt by association — the same standard `verdict` uses. A farm
+// Operator wallets trade widely, so mere presence is guilt by association - the same standard `verdict` uses. A farm
 // only disqualifies when it is a material share of the buying, i.e. the demand is substantially the farm itself.
 // Applying presence alone cut 11 of 15 candidates and would have made the list arbitrary.
 const FARM_MATERIAL = 0.25;
@@ -56,7 +56,7 @@ const avoid = new Set((db.prepare("SELECT cluster FROM operator_policy WHERE pol
 const farmOn = db.prepare(`SELECT DISTINCT w.cluster FROM trades t JOIN operator_wallets w ON w.wallet = t.wallet
   WHERE t.mint = ? AND w.cluster IS NOT NULL`);
 // A clean LAUNCH is not a clean token. PSHROOM and PONST both launched with 0 % creator supply, then sat dormant for
-// ~9.5 h until one 85 SOL buy took the whole curve — the operator buyout pattern. "Took 9.5h to fill" reads as healthy
+// ~9.5 h until one 85 SOL buy took the whole curve - the operator buyout pattern. "Took 9.5h to fill" reads as healthy
 // slow growth in a table and is the opposite. A curve completed by a single large buy was bought, not filled.
 const BUYOUT_SOL = 40;
 const buyout = db.prepare(`SELECT wallet, sol FROM trades WHERE mint=? AND venue='curve' AND side='buy' AND sol>=?
@@ -82,7 +82,7 @@ console.log(`          the curve, it took over a minute to fill and was not comp
 console.log(`          at least ${MIN_POOL_SOL} SOL of measured liquidity,`);
 console.log(`          and no farm we have watched distribute traded it.`);
 console.log(`\n  This says the launch was NOT MANUFACTURED. It does not say the token will go up, and it is not a`);
-console.log(`  recommendation. A clean token still loses money on average — of 19,412 bonding-curve positions we`);
+console.log(`  recommendation. A clean token still loses money on average - of 19,412 bonding-curve positions we`);
 console.log(`  measured, none ever reached 5x, and the post-graduation tail is shrinking week over week.\n`);
 
 // be explicit about what our own limits removed, so the count is not read as a market fact when it is partly a coverage fact
@@ -92,11 +92,11 @@ const exUnmeasured = cand.filter((t) => !t.dev_sold && t.vault_sol == null).leng
 const exThin = cand.filter((t) => !t.dev_sold && t.vault_sol != null && t.vault_sol < MIN_POOL_SOL).length;
 console.log(`  ${cand.length} passed the launch tests; ${exDev} then had the creator sell, ${exThin} had under ${MIN_POOL_SOL} SOL of liquidity,`);
 const exBuyout = cand.filter((t) => findBuyout(db, t.mint, BUYOUT_SOL)).length;
-console.log(`  and ${exUnmeasured} we could not measure (our gap, not theirs) — those are excluded but may be fine.`);
-console.log(`  ${exBuyout} had their curve completed by a single ${BUYOUT_SOL}+ SOL buy — bought out, not filled.\n`);
+console.log(`  and ${exUnmeasured} we could not measure (our gap, not theirs) - those are excluded but may be fine.`);
+console.log(`  ${exBuyout} had their curve completed by a single ${BUYOUT_SOL}+ SOL buy - bought out, not filled.\n`);
 
 console.log("symbol        mint      creator kept  curve buyers  took     pool SOL  farm share");
 for (const t of final.sort((a, b) => b.created_at - a.created_at).slice(0, LIMIT))
   console.log(`${(t.symbol ?? "?").slice(0, 12).padEnd(12)}  ${t.mint.slice(0, 6)}  ${(t.dev_pct?.toFixed(1) + "%").padStart(12)}  ${String(t.unique_buyers).padStart(12)}  ${hrs(t.graduated_at - t.created_at).padStart(6)}  ${(t.vault_sol != null ? t.vault_sol.toFixed(0) : "?").padStart(8)}  ${(t.farmShare > 0 ? (100 * t.farmShare).toFixed(0) + "%" : "-").padStart(10)}`);
-if (!final.length) console.log("  (none — every graduation in this window carried at least one manufacturing marker)");
+if (!final.length) console.log("  (none - every graduation in this window carried at least one manufacturing marker)");
 console.log("");

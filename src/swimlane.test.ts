@@ -4,7 +4,7 @@
  * Two of these cases cannot be reached from the published record today and are exactly the ones that will be wrong
  * when they arrive: no cluster on file yet has more than seventeen wallets that bought a curve, so the lane cap has
  * never fired in production, and a chart that silently plots a subset is this project's oldest failure shape wearing
- * a new hat. The third is the one that matters most — a token whose launch time we do not hold must not be drawn as
+ * a new hat. The third is the one that matters most - a token whose launch time we do not hold must not be drawn as
  * though it were bought at the moment of launch.
  */
 import { test } from "node:test";
@@ -22,7 +22,7 @@ test("a wait is drawn only where the launch time is on record", () => {
     ev({ wallet: "BBBBBB", ts: T0 + 7200_000 }),
   ], new Map([["AAAAAA", 1], ["BBBBBB", 1]]));
   // One tail, for the one event whose launch we hold. The other gets none rather than one of length zero, which
-  // would read as "bought at the moment of launch" — a finding made out of a gap in the record.
+  // would read as "bought at the moment of launch" - a finding made out of a gap in the record.
   assert.equal((known.match(/class="wt"/g) ?? []).length, 1);
   assert.equal((known.match(/class="dot/g) ?? []).length, 2);
 });

@@ -12,7 +12,7 @@ export const REAL_MIN_MCAP_SOL = Number(process.env.REAL_MIN_MCAP_SOL ?? 2 * GRA
 /** minimum age since graduation before a token is judged, so "held" means something */
 export const REAL_MIN_AGE_MS = Number(process.env.REAL_MIN_AGE_MIN ?? 60) * 60_000;
 
-/** minimum SOL actually in the PumpSwap pool for a "runner" to count — a wash-printed price over a 1 SOL pool is not a runner */
+/** minimum SOL actually in the PumpSwap pool for a "runner" to count - a wash-printed price over a 1 SOL pool is not a runner */
 export const REAL_MIN_POOL_SOL = Number(process.env.REAL_MIN_POOL_SOL ?? 40);
 export function isRealOutcome(o: { mcapSol: number | null; mcapUsd: number | null; poolSol?: number | null; verified?: boolean }): boolean {
   if (o.verified) return (o.mcapSol ?? 0) >= REAL_MIN_MCAP_SOL && (o.poolSol ?? 0) >= REAL_MIN_POOL_SOL;

@@ -209,7 +209,7 @@ const nGrad = tokens.filter((t) => t.graduated === 1).length;
 const baseReal = nReal / Math.max(1, nTok), baseGrad = nGrad / Math.max(1, nTok);
 const pct = (a: number, b: number) => (b ? `${((100 * a) / b).toFixed(1)}%` : "-");
 const f = (n: number, d = 2) => (Number.isFinite(n) ? n.toFixed(d) : "-");
-console.log(`\n=== backtest over ${nTok} finalized tokens with trade data (last ${hours}h) — ${nFull} full histories, ${nTrunc} truncated ===`);
+console.log(`\n=== backtest over ${nTok} finalized tokens with trade data (last ${hours}h) - ${nFull} full histories, ${nTrunc} truncated ===`);
 console.log(`base rates: graduated ${pct(nGrad, nTok)}   real runner (graduated >= ${REAL_MIN_AGE_MS / 60000} min ago and still >= ${REAL_MIN_MCAP_SOL} SOL mcap = ${(REAL_MIN_MCAP_SOL / 411).toFixed(1)}x graduation) ${pct(nReal, nTok)}`);
 console.log(`exit model: TP ${TP}x, SL ${SL}x, trail ${TRAIL_DROP * 100}% after ${TRAIL_ARM}x, time-stop ${HOLD_S}s, fee+slippage ${(FEE * 100).toFixed(2)}% each way, ${LATENCY_MS}ms latency, ${SIZE} SOL per entry\n`);
 
@@ -250,7 +250,7 @@ for (const r of rows.slice(0, topN)) {
   );
 }
 if (EXIT_SWEEP) {
-  console.log("\nEXIT SWEEP — best exit parameters per rule (mean net multiple over full-history entries; n >= 8)");
+  console.log("\nEXIT SWEEP - best exit parameters per rule (mean net multiple over full-history entries; n >= 8)");
   console.log("  rule".padEnd(58) + "n".padStart(4) + "  default".padStart(10) + "  best".padStart(8) + "   TP    SL  trail  hold");
   for (const r of rows) {
     const es = results.get(r.name)!.filter((e) => e.path && e.path.length && Number.isFinite(e.entryPrice) && e.entryPrice > 0);

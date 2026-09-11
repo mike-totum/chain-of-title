@@ -173,4 +173,4 @@ for (const { a, early, precision, score } of ranked) {
   );
 }
 console.log(`\nAdd the accounts you trust to ${config.kolFile}; the live kol-signal strategy will then paper-trade their calls.`);
-console.log("Note: this is descriptive, not causal — an account that is 'early' may be the one paying for the pump.");
+console.log("Note: this is descriptive, not causal - an account that is 'early' may be the one paying for the pump.");

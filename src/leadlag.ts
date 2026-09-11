@@ -55,7 +55,7 @@ for (const tw of tweets) {
     }
   for (const m of hit) pairs.push({ tw, tok: byMint.get(m), hasCa: mints.includes(m) });
 }
-console.log(`\n=== lead/lag — ${pairs.length} tweet→token matches from ${tweets.length} tweets over ${hours}h ===\n`);
+console.log(`\n=== lead/lag - ${pairs.length} tweet→token matches from ${tweets.length} tweets over ${hours}h ===\n`);
 
 // price lookup from stored trades (curve + amm): last trade price at or before a time
 const priceCache = new Map<string, { ts: number; price: number }[]>();

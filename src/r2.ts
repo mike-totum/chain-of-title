@@ -3,12 +3,12 @@
  *
  * Images are the fastest-decaying thing this archive holds. Measured 2026-09-09: a launch's off-chain assets are
  * ~99% retrievable for two days and ~12% after a week, because the creator owns the URI and the pin. They are also
- * the bulkiest — every launch, after content-address dedup, is about 1 GB a day, against a 20 GB collector volume
+ * the bulkiest - every launch, after content-address dedup, is about 1 GB a day, against a 20 GB collector volume
  * that must never fill, because a full volume drops launches.
  *
  * So the bytes go somewhere that grows without bound and the record does not follow them. `record.db` carries only
  * `image_sha256`, which is what lets a reader verify that a copy they obtained is the copy we saw. That keeps the
- * published file at ~490 bytes per launch — mirrorable, depositable, and independent of whether this bucket, or
+ * published file at ~490 bytes per launch - mirrorable, depositable, and independent of whether this bucket, or
  * this project, still exists. The store is a convenience; the hash is the evidence.
  *
  * **Written against the S3 API directly rather than pulling in an SDK.** This repo has one runtime dependency and
@@ -17,8 +17,8 @@
  * have to trust it.
  *
  * Keys are `img/<first two hex>/<sha256>`, so the store is content-addressed: identical pictures collide onto one
- * object, which matters because 47% of launches reuse another launch's image. Uploads are idempotent — the same
- * bytes written twice are the same object — and `head()` lets a caller skip the transfer entirely.
+ * object, which matters because 47% of launches reuse another launch's image. Uploads are idempotent - the same
+ * bytes written twice are the same object - and `head()` lets a caller skip the transfer entirely.
  */
 import { createHash, createHmac } from "node:crypto";
 
@@ -47,7 +47,7 @@ const hmac = (key: Buffer | string, s: string) => createHmac("sha256", key).upda
  *
  * The payload hash is required in the canonical request AND sent as `x-amz-content-sha256`; for a content-addressed
  * store we already have it, so a PUT costs no extra hashing. Every header named in `signedHeaders` must be sent
- * exactly as signed — a mismatch fails with SignatureDoesNotMatch and no indication which header was wrong.
+ * exactly as signed - a mismatch fails with SignatureDoesNotMatch and no indication which header was wrong.
  */
 function sign(cfg: R2Config, method: string, key: string, payloadHash: string, extraHeaders: Record<string, string> = {}, query = "") {
   const host = `${cfg.accountId}.r2.cloudflarestorage.com`;
@@ -64,7 +64,7 @@ function sign(cfg: R2Config, method: string, key: string, payloadHash: string, e
   const signedHeaders = names.join(";");
 
   // The canonical query string is part of what gets signed. Omitting it is invisible for PUT/HEAD/GET, which carry
-  // none, and fails only on the one call that does — with SignatureDoesNotMatch and no indication which part differed.
+  // none, and fails only on the one call that does - with SignatureDoesNotMatch and no indication which part differed.
   const canonicalRequest = [method, path, query, canonicalHeaders, signedHeaders, payloadHash].join("\n");
   const scope = `${dateStamp}/${REGION}/${SERVICE}/aws4_request`;
   const stringToSign = ["AWS4-HMAC-SHA256", amzDate, scope, sha(canonicalRequest)].join("\n");
@@ -145,14 +145,14 @@ export async function put(cfg: R2Config, sha256: string, body: Buffer, contentTy
 /**
  * How many objects the store holds, and a page of their keys.
  *
- * Operational rather than part of the record: the archive never asks the store what it contains — it asks for a
+ * Operational rather than part of the record: the archive never asks the store what it contains - it asks for a
  * specific hash the record already commits to. This exists so a human can answer "is capture actually landing
  * here", which turned out to be a question the logs could not settle.
  */
 export async function list(cfg: R2Config, prefix = "img/", max = 1000, token?: string): Promise<{ keys: string[]; next?: string }> {
   const params: Record<string, string> = { "list-type": "2", prefix, "max-keys": String(max) };
   if (token) params["continuation-token"] = token;
-  // Sorted by name, each name and value percent-encoded — SigV4's canonical form, which is not what URLSearchParams
+  // Sorted by name, each name and value percent-encoded - SigV4's canonical form, which is not what URLSearchParams
   // produces (it encodes spaces as '+' and does not sort).
   const enc = (v: string) => encodeURIComponent(v).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
   const query = Object.keys(params).sort().map((k) => `${enc(k)}=${enc(params[k])}`).join("&");

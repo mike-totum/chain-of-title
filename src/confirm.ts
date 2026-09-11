@@ -1,12 +1,12 @@
 /**
  * Confirm a recorded graduation against the bonding curve account's own `complete` bit.
  *
- * `graduated_confirmed_by` has always had three documented values — 'pool', 'curve_complete', and NULL — and until
+ * `graduated_confirmed_by` has always had three documented values - 'pool', 'curve_complete', and NULL - and until
  * now nothing in the codebase ever wrote the second one. Every confirmation in the archive came from pool discovery,
  * so confirmation inherited pool discovery's coverage: it plateaued near 46% of graduations and stayed there. The
  * cost is not cosmetic. `assess()` refuses to state how a curve filled until `completed` is true, so on more than
- * half of all graduations the strongest facts the record holds — zero outside buyers, a sub-minute fill, a creator
- * who bought its own curve — were computed and then withheld.
+ * half of all graduations the strongest facts the record holds - zero outside buyers, a sub-minute fill, a creator
+ * who bought its own curve - were computed and then withheld.
  *
  * The curve account is the authority pool discovery was standing in for, and it survives graduation: a completed
  * curve reads `complete = 1` with its reserves drained to zero, for as long as the account exists. So a graduation
@@ -19,7 +19,7 @@
  * the alternative is this project's recurring failure with the sign flipped: a missing answer promoted into a
  * finding. Unconfirmed already means we say less. It must never come to mean we say the opposite.
  *
- * `complete = 0` is nonetheless worth knowing about, and it is common — the tracker infers graduation from a decoded
+ * `complete = 0` is nonetheless worth knowing about, and it is common - the tracker infers graduation from a decoded
  * trade reaching ~115 vSOL, and curves cross that mark and fall back without ever completing. Those observations go
  * to `curve_checks`, which exists so the sweep does not re-read the same accounts forever. That table is scheduling
  * state and nothing else reads it. A row in it saying `complete = 0` means "we looked at this account at this time",
@@ -43,7 +43,7 @@ export interface ConfirmOpts {
   limit?: number;
   /** addresses per getMultipleAccounts call; halved automatically when an endpoint refuses the size */
   batch?: number;
-  /** read and report, write nothing — to `tokens` or to `curve_checks` */
+  /** read and report, write nothing - to `tokens` or to `curve_checks` */
   dryRun?: boolean;
   /** ignore the re-check cooldown and read every unconfirmed graduation in the limit */
   all?: boolean;
@@ -51,7 +51,7 @@ export interface ConfirmOpts {
    * Which end of the backlog to read.
    *
    * These are two different populations and conflating them wastes the whole budget on the wrong one. At the new end
-   * an unconfirmed graduation is usually the tracker's vSOL inference firing on a curve that never completed —
+   * an unconfirmed graduation is usually the tracker's vSOL inference firing on a curve that never completed -
    * measured over the newest 2,000, nine read complete. At the old end it is a curve that really did graduate during
    * the days when pool discovery was nearly blind (8% of 09-02 graduations were ever confirmed), and the answer is
    * still sitting in the account. `oldest` is the backfill; `newest` is what the collector runs continuously.
@@ -69,7 +69,7 @@ export interface ConfirmStats {
   confirmed: number;
   /** curve said not complete: recorded as a check, never as a finding about the launch */
   notComplete: number;
-  /** the account no longer exists. Not a finding either — nothing here distinguishes a closed account from one that
+  /** the account no longer exists. Not a finding either - nothing here distinguishes a closed account from one that
    *  was never created, and neither tells us whether the curve filled. */
   missing: number;
   /** decode failed, or the whole call failed after every endpoint. Costs nothing but a later retry. */
@@ -79,8 +79,8 @@ export interface ConfirmStats {
 /**
  * When to look again at a curve that was not complete when we last read it.
  *
- * A curve can complete long after launch — most of the reconstructed million-dollar runners in this archive filled
- * over hours to days, not minutes — so a single `complete = 0` never settles the question. It does not stay open
+ * A curve can complete long after launch - most of the reconstructed million-dollar runners in this archive filled
+ * over hours to days, not minutes - so a single `complete = 0` never settles the question. It does not stay open
  * forever either: after three reads on a launch older than a week, the account is not going to change, and asking
  * daily until the heat death of the universe is a cost with no answer at the end of it.
  */
@@ -104,12 +104,12 @@ export function ensureCurveChecks(db: DatabaseSync): void {
  *
  * `curvepoll` has been reading bonding curve accounts directly for 24 hours per launch since long before this sweep
  * existed, and it stores the account's own `complete` bit on every reading. That is the identical evidence this
- * module goes to the network for, already on disk for roughly 3,500 recorded graduations — and it is *better*
+ * module goes to the network for, already on disk for roughly 3,500 recorded graduations - and it is *better*
  * evidence, because it is repeated. A read today cannot separate "never completed" from "completed and the account
  * has since been closed"; twenty readings across the day a curve was live can.
  *
  * The cross-check those readings support is also the control this whole change needed. Restricted to graduations we
- * had already confirmed by pool discovery, 1,743 of 1,774 carry a complete reading — 98.3%. Pool discovery and the
+ * had already confirmed by pool discovery, 1,743 of 1,774 carry a complete reading - 98.3%. Pool discovery and the
  * curve's own bit are measuring the same thing, so writing 'curve_complete' beside 'pool' is not introducing a
  * second, looser standard. On the unconfirmed side the same query gives 75 of 1,725, at an average of twenty
  * readings each.
@@ -136,7 +136,7 @@ export function seedFromSnapshots(db: DatabaseSync): { confirmed: number; checks
         -- A complete reading is permanent, so 1 always wins. Otherwise take the newer reading and fall back to the
         -- older, and NEVER let COALESCE turn a NULL into a 0: NULL here means the account was gone when we looked,
         -- and 0 means we read the account and it was not complete. Coercing the first into the second publishes
-        -- "we could not read this" as "we read this and it had not graduated" — this project's whole failure mode,
+        -- "we could not read this" as "we read this and it had not graduated" - this project's whole failure mode,
         -- in the one table an outside reader is about to be invited to treat as evidence.
         complete = CASE WHEN curve_checks.complete = 1 OR excluded.complete = 1 THEN 1
                         ELSE COALESCE(excluded.complete, curve_checks.complete) END`).run();
@@ -185,14 +185,14 @@ export async function confirmGraduations(db: DatabaseSync, opts: ConfirmOpts = {
   /**
    * `updated_at` moves with the confirmation, and it has to.
    *
-   * `servicedb` copies incrementally on `WHERE COALESCE(updated_at, 0) >= watermark` — a row is carried into the
+   * `servicedb` copies incrementally on `WHERE COALESCE(updated_at, 0) >= watermark` - a row is carried into the
    * published record when the collector last touched it. Writing `graduated_confirmed_by` without bumping that
    * timestamp means the collector holds the confirmation and the public record never receives it: the first sweep
    * confirmed 943 graduations and exactly 3 of them reached `record.db`, because the other 940 sat behind the
    * watermark on rows nothing had otherwise modified.
    *
-   * This is the failure this codebase has now produced for the fourth time — a value written where an incremental
-   * reader will never look for it — and it is invisible from the collector, which is correct, and from the record,
+   * This is the failure this codebase has now produced for the fourth time - a value written where an incremental
+   * reader will never look for it - and it is invisible from the collector, which is correct, and from the record,
    * which is silently a week out of date on the column. Touch the row, or do not consider the write done.
    */
   const setConfirmed = db.prepare(
@@ -269,7 +269,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const arg = (k: string, d: string) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : d; };
   // Left alone unless CONFIRM_RPC_URLS says otherwise, so this inherits SOLANA_RPC_URLS. That ordering matters:
   // `getMultipleAccounts` at a hundred addresses is the whole reason the backlog is cheap, and the public endpoints
-  // cap it far below that — publicnode refused 100, 50, 25 and 12 in turn, and mainnet-beta 429'd its way down to
+  // cap it far below that - publicnode refused 100, 50, 25 and 12 in turn, and mainnet-beta 429'd its way down to
   // six addresses a call. A keyed endpoint takes the full batch and turns the sweep from hours into a minute.
   const urls = (process.env.CONFIRM_RPC_URLS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   if (urls.length) configureEndpoints(urls);

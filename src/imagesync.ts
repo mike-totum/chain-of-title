@@ -6,7 +6,7 @@
  * moves that to the store the collector will use, so the laptop stops being where the only copy lives.
  *
  * Content-addressed on both sides, so this is idempotent and safe to re-run: an object already present is skipped
- * after a HEAD, never re-uploaded. Nothing is deleted from local disk — freeing it is a separate decision, taken
+ * after a HEAD, never re-uploaded. Nothing is deleted from local disk - freeing it is a separate decision, taken
  * after the store has been confirmed to hold what the record claims, and `--verify` is what confirms that.
  *
  *   npm run imagesync                # upload everything not already in R2
@@ -79,13 +79,13 @@ await Promise.all(Array.from({ length: CONCURRENCY }, async () => {
         uploaded++; bytes += buf.length;
       }
     } catch (e) { failed++; if (failed <= 5) console.log(`  ${f.sha.slice(0, 12)}…: ${(e as Error).message}`); }
-    if (++done % 2000 === 0) console.log(`  ${done.toLocaleString()}/${files.length.toLocaleString()} — ${uploaded.toLocaleString()} up, ${already.toLocaleString()} already, ${failed} failed`);
+    if (++done % 2000 === 0) console.log(`  ${done.toLocaleString()}/${files.length.toLocaleString()} - ${uploaded.toLocaleString()} up, ${already.toLocaleString()} already, ${failed} failed`);
   }
 }));
 
 if (VERIFY) {
   console.log(`\nverified ${verified.toLocaleString()} objects re-read and hashing to their own key`);
-  if (corrupt) console.log(`${corrupt} MISSING OR CORRUPT — do not delete local copies`);
+  if (corrupt) console.log(`${corrupt} MISSING OR CORRUPT - do not delete local copies`);
   else console.log("every local picture is in the store and intact. Local copies are now redundant, not primary.");
   process.exit(corrupt ? 1 : 0);
 }

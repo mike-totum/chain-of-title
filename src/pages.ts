@@ -97,7 +97,7 @@ export function buildFacts(db: any, covered: (ts: number) => boolean, COV: Cover
     /**
      * "Watched from the creation transaction" is the population, and the exclusions are the whole reason the number
      * is defensible. A token a detector restored hours after launch (`late_discovery`) shows zero curve buyers
-     * because nobody was watching it, not because nobody bought — counting those would inflate this finding by 42%.
+     * because nobody was watching it, not because nobody bought - counting those would inflate this finding by 42%.
      * A reconstruction is not an observation either. Both are excluded, and the raw counts are shown so the size of
      * the exclusion is visible rather than buried.
      */
@@ -118,11 +118,11 @@ export function buildFacts(db: any, covered: (ts: number) => boolean, COV: Cover
        * The feed emits a threshold event; that event is not the curve. Where we have gone and read the bonding
        * curve account ourselves, a large share of those events turn out to have fired on a curve that had not
        * finished. Counted here because a register that corrects itself and does not publish the correction rate
-       * is asking to be taken on trust — and because the size of the correction is the best available evidence
+       * is asking to be taken on trust - and because the size of the correction is the best available evidence
        * that the checking is real.
        */
       /**
-       * The curve readings, split by whether the graduation was independently confirmed — because the checking is
+       * The curve readings, split by whether the graduation was independently confirmed - because the checking is
        * targeted and an unsplit rate is an artefact of that targeting.
        *
        * The sweep reads unconfirmed graduations almost exhaustively (98%) and only a third of confirmed ones, so
@@ -132,7 +132,7 @@ export function buildFacts(db: any, covered: (ts: number) => boolean, COV: Cover
        * read and a set that overwhelmingly does not.
        *
        * An explicit 0 throughout. COALESCE(curve_complete,0) would fold in the rows read after the account had
-       * gone, which is "we looked and learned nothing" — see the column's schema note in servicedb.
+       * gone, which is "we looked and learned nothing" - see the column's schema note in servicedb.
        */
       confChecked: q("graduated = 1 AND graduated_confirmed_by IS NOT NULL AND curve_checked_at IS NOT NULL"),
       confIncomplete: q("graduated = 1 AND graduated_confirmed_by IS NOT NULL AND curve_complete = 0"),
@@ -198,7 +198,7 @@ export function methodBody(f: PageFacts, chrome: Chrome): string {
   <p class="callout"><b>Liquidity is not one of these tests, and until 2026-09-09 it was.</b> Every test above is a
   fact about the first blocks of a token's life: once true, always true, and unrecoverable once the float has been
   spread. A pool balance is a reading taken at one moment and it decays. Requiring both before calling a launch clean
-  meant an hour of unanswered RPC calls silently withdrew findings about the past — over seven days, 423 launches
+  meant an hour of unanswered RPC calls silently withdrew findings about the past: over seven days, 423 launches
   matched every line above and ten were published. We still read the pool, still refuse to quote a balance we could
   not confirm, and now show it beside the launch record with the age of the reading instead of gating the record on
   it. A row reading <i>not read</i> is a gap in our pool coverage, never a finding about the token.</p>
@@ -258,7 +258,7 @@ export function dataBody(f: PageFacts, db: any, chrome: Chrome): string {
   <div class="sec"><h2>The record database</h2>${f.recStat ? `<span class="cnt">${(f.recStat.size / 1048576).toFixed(1)} MB</span>` : ""}</div>
   <table>
     <tr><td class="k">Download</td><td><a href="data/record.db"><b>record.db</b></a>: SQLite, ${f.recStat ? `${(f.recStat.size / 1048576).toFixed(1)} MB` : "~40 MB"}, one row per launch</td></tr>
-    <tr><td class="k">Launches</td><td>${f.recCounts ? `${fmt(f.recCounts.observed)} observed from the creation transaction, in ${fmt(f.recCounts.held)} records. The difference is launches a detector restored after the fact or rebuilt from chain history: real records, but not first-block observations.` : "unavailable — record.db was not present at build time"}</td></tr>
+    <tr><td class="k">Launches</td><td>${f.recCounts ? `${fmt(f.recCounts.observed)} observed from the creation transaction, in ${fmt(f.recCounts.held)} records. The difference is launches a detector restored after the fact or rebuilt from chain history: real records, but not first-block observations.` : "unavailable: record.db was not present at build time"}</td></tr>
     <tr><td class="k">Coverage</td><td>from ${chrome.coverageFrom}${chrome.gapMin >= 1 ? `, ${fmt(chrome.gapMin)} min of recorded downtime` : ", no recorded downtime"}</td></tr>
     <tr><td class="k">Licence</td><td>CC0 1.0, public domain. It is a record of public facts; nobody should have to ask us for it.</td></tr>
     <tr><td class="k">Rebuilt</td><td>on each deploy, by <span class="mono">npm run servicedb</span></td></tr>
@@ -275,18 +275,18 @@ export function dataBody(f: PageFacts, db: any, chrome: Chrome): string {
 
   <div class="sec"><h2>The pictures, and why most are missing</h2></div>
   <p class="lede">Every row carries the image URL the launch declared. <span class="mono">image_sha256</span> carries the
-  sha256 of the bytes themselves, when we hold them — the proof rather than the picture, so the archive stays a file
+  sha256 of the bytes themselves, when we hold them: the proof rather than the picture, so the archive stays a file
   you can mirror. On most rows that hash is NULL, and it means <b>we did not fetch the image</b>. It does not mean the
   launch had none: that case is a NULL <span class="mono">image</span> with <span class="mono">meta_at</span> set,
   which is a different statement and stored differently on purpose.</p>
   <p class="lede">We fetch the bytes for launches that completed their curve. The reason is arithmetic rather than
-  judgement. Around 24,000 launches a day declare an image and they average 409 KB — 13.6 GB a day, the whole storage
+  judgement. Around 24,000 launches a day declare an image and they average 409 KB, which is 13.6 GB a day, the whole storage
   volume every 33 hours. Graduations run near 1,400 a day, about 570 MB, and that is what can actually be kept.
   Pictures are stored by content hash, so the many launches reusing the same image cost one copy.</p>
   <p class="callout">This is a gap in the archive and naming it is the point. The image is the one thing here that
   cannot be rebuilt from chain by anyone willing to pay for archival RPC: it sits behind a pin the operator can drop.
   If that happens to a launch we did not fetch, the picture is gone and this file will not have it. The URLs are all
-  in the record and nothing stops you fetching them yourself — the only reason we did not is that we could not
+  in the record and nothing stops you fetching them yourself. The only reason we did not is that we could not
   afford the disk.</p>
 
   <div class="sec"><h2>When a launch names a person</h2></div>
@@ -294,7 +294,7 @@ export function dataBody(f: PageFacts, db: any, chrome: Chrome): string {
   contain an <span class="mono">@</span> and ${fmt(f.nameRefs.links)} link to x.com or twitter.com, out of
   ${fmt(f.nameRefs.described)} descriptions in total. They are published exactly as the launch wrote them.</p>
   <p class="lede">The reason is that those are the creator's words, not ours and not the named account's. When a launch
-  claims someone is behind it, that claim <b>is</b> the evidence — and when the claim is false it is usually the only
+  claims someone is behind it, that claim <b>is</b> the evidence, and when the claim is false it is usually the only
   surviving evidence that the impersonation happened at all. A launch can be edited or unpinned at its source; what it
   said at the moment we read it cannot be recovered anywhere else. Redacting the sentence would remove the thing a
   reader most needs from the record.</p>
@@ -333,7 +333,7 @@ WHERE t.venue='curve' AND t.side='buy'
 GROUP BY t.wallet ORDER BY curves DESC;</td><td>who takes the most curves, counted from the trade rows in this file rather than from an aggregate you cannot check</td></tr>
     <tr><td class="mono" style="white-space:pre-wrap">SELECT COUNT(*) FROM tokens
 WHERE graduated=1
-  AND graduated_confirmed_by IS NULL;</td><td>graduations our feed inferred but never confirmed against a pool or the curve account — where we say less</td></tr>
+  AND graduated_confirmed_by IS NULL;</td><td>graduations our feed inferred but never confirmed against a pool or the curve account, where we say less</td></tr>
   </table>`;
 }
 
@@ -409,7 +409,7 @@ export function apiBody(chrome: Chrome): string {
     <tr><td class="k">CORS</td><td>open to every origin. Call it from your own front end.</td></tr>
     <tr><td class="k">Caching</td><td>a settled record is immutable and served <span class="mono">max-age=3600, stale-while-revalidate=86400</span>. Anything unsettled is <span class="mono">no-store</span>.</td></tr>
     <tr><td class="k">Stability</td><td>fields are added, never repurposed. A breaking change gets a new version prefix and the old one keeps answering.</td></tr>
-    <tr><td class="k">What it is not</td><td>not a price feed, not a signal, not advice. A clean record means a launch was <b>not manufactured</b>, and says nothing about what it will do. Of 19,412 bonding-curve positions measured over 24 hours in September 2026 — organic launches only — none reached 5x. That is a dated measurement of a favourable subset, not a claim about the whole archive.</td></tr>
+    <tr><td class="k">What it is not</td><td>not a price feed, not a signal, not advice. A clean record means a launch was <b>not manufactured</b>, and says nothing about what it will do. Of 19,412 bonding-curve positions measured over 24 hours in September 2026, organic launches only, none reached 5x. That is a dated measurement of a favourable subset, not a claim about the whole archive.</td></tr>
   </table>
   <p class="callout">If you ship this in front of users and find a record you think is wrong, tell us: a false
   warning on an honest launch costs us more than a missed one. <a href="mailto:${esc(CONTACT)}">${esc(CONTACT)}</a></p>
@@ -452,7 +452,7 @@ export function findingsBody(f: PageFacts, builtAt: number | null): string {
   <h1 class="headline">Nearly half of the graduations we watched had no outside buyer</h1>
   <p class="lede">Of <b>${fmt(f.F.watched)}</b> tokens that completed a pump.fun bonding curve, which this archive
   watched from the creation transaction and confirmed against the curve account itself,
-  <b>${fmt(f.F.noBuyer)}</b> — <b>${pct(f.F.noBuyer, f.F.watched)}</b> — had no outside buyer at all. Not one wallet
+  <b>${fmt(f.F.noBuyer)}</b> (<b>${pct(f.F.noBuyer, f.F.watched)}</b>) had no outside buyer at all. Not one wallet
   other than the creator ever bought on the curve. The creator funded the entire graduation.</p>
 
   <div class="sec"><h2>What ${fmt(f.F.watched)} confirmed graduations look like at birth</h2></div>
@@ -482,12 +482,12 @@ export function findingsBody(f: PageFacts, builtAt: number | null): string {
   ${f.F.curveChecked ? `<div class="sec"><h2>What we found when we checked our own claims</h2>
     <span class="cnt">${fmt(f.F.curveChecked)} curves read on chain</span></div>
   <p class="lede">A graduation reaches us as an event on a feed, and an event is not a curve. Where a graduation was
-  independently confirmed &mdash; by the pool existing, or by the curve account's own complete bit &mdash; reading
+  independently confirmed (by the pool existing, or by the curve account's own complete bit), reading
   the curve again disproved <b>${fmt(f.F.confIncomplete)}</b> of the ${fmt(f.F.confChecked)} we re-read
   (${pct(f.F.confIncomplete, f.F.confChecked)}). Those hold up.</p>
   <p class="lede">The graduations we could <b>not</b> confirm are a different population. We have read the curve for
   <b>${fmt(f.F.unconfChecked)}</b> of the ${fmt(f.F.unconfTotal)} of them, and
-  <b>${fmt(f.F.unconfIncomplete)}</b> &mdash; ${pct(f.F.unconfIncomplete, f.F.unconfChecked)} &mdash; had not
+  <b>${fmt(f.F.unconfIncomplete)}</b> (${pct(f.F.unconfIncomplete, f.F.unconfChecked)}) had not
   completed. A threshold crossed on a feed, and no curve behind it.</p>
   ${/*
       The split is the finding, and stating it unsplit was the error.
@@ -510,11 +510,11 @@ export function findingsBody(f: PageFacts, builtAt: number | null): string {
   is a fact about that moment and not a live total. The queries below return the current answer from the current
   file.</p>
   <p class="lede">Coverage begins <b>${when(f.COV.from ?? 0)}</b>. A token that launched before then was not watched
-  and this archive answers <span class="mono">UNKNOWN</span> for it — the honest answer, and not a useful one.
+  and this archive answers <span class="mono">UNKNOWN</span> for it: the honest answer, and not a useful one.
   Reconstruction of older launches is in progress and is marked as reconstruction wherever it lands.</p>
   <p class="lede">The population above deliberately excludes two kinds of row, and the exclusions matter more than
   the headline. A token that a detector restored <i>after</i> its launch carries a zero buyer count because nobody
-  was watching it, not because nobody bought — there are <b>${fmt(f.F.excludedLate)}</b> such rows and counting them
+  was watching it, not because nobody bought. There are <b>${fmt(f.F.excludedLate)}</b> such rows and counting them
   would inflate this finding by nearly half. A launch rebuilt from chain history is not an observation either.
   Both are excluded here and both are labelled in the file.</p>
   <p class="lede">None of this says a token was a fraud, and none of it is advice about anything. It says what the
@@ -522,7 +522,7 @@ export function findingsBody(f: PageFacts, builtAt: number | null): string {
 
   <div class="sec"><h2>Check it yourself</h2></div>
   <p class="lede">The record is public domain and the whole file is one download. These are the queries above,
-  verbatim — disagreeing with us is the point of publishing it.</p>
+  verbatim, and disagreeing with us is the point of publishing it.</p>
   <table>
     <tr><td class="mono" style="white-space:pre-wrap">SELECT COUNT(*) FROM tokens
 WHERE graduated_confirmed_by IS NOT NULL
@@ -576,7 +576,7 @@ export function correctionsBody(f: PageFacts): string {
     */ ""}
   <div class="sec"><h2>Corrections issued</h2><span class="cnt">${fmt(f.corrections.length)}</span></div>
   ${f.corrections.length ? f.corrections.map((c) => `
-  <h3>${esc(reportDate(new Date(c.issued_at).toISOString().slice(0, 10)))} &mdash; ${esc(c.id)}</h3>
+  <h3>${esc(reportDate(new Date(c.issued_at).toISOString().slice(0, 10)))}: ${esc(c.id)}</h3>
   <p class="sub" style="margin:-2px 0 10px">${esc(c.scope)}${c.subject ? ` &middot; <span class="mono">${esc(c.subject)}</span>` : ""}${
     c.supersedes ? ` &middot; supersedes <span class="mono">${esc(c.supersedes)}</span>` : ""}</p>
   <p class="lede"><b>What was wrong.</b> ${esc(c.finding)}</p>

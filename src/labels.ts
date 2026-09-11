@@ -5,18 +5,18 @@
  *   npm run labels               check the criteria against it (exit 1 on any false clean)
  *
  * The claim this project makes is "this launch was not manufactured". Precision is the whole game: a missed warning
- * costs nothing, a wrong all-clear costs everything. So the gate is one-sided — a manufactured token certified clean
+ * costs nothing, a wrong all-clear costs everything. So the gate is one-sided - a manufactured token certified clean
  * is a build failure; a manufactured token we merely fail to flag is reported and tolerated.
  *
  * **Independence.** A labelled set derived from the rules under test proves nothing. The label here comes from an axis
- * no rule in provenance.ts looks at — creator-wallet reuse. A factory relaunches one ticker under a *fresh* wallet
+ * no rule in provenance.ts looks at - creator-wallet reuse. A factory relaunches one ticker under a *fresh* wallet
  * every time, because burning the creator identity is the point. Creator share, curve buyer counts, graduation speed
- * and pool balances — every input the criteria actually use — play no part in assigning the label.
+ * and pool balances - every input the criteria actually use - play no part in assigning the label.
  *
  * The first version of this rule looked only at the ticker and mislabelled 5 tokens, which is how the two-sided test
  * below came about. Symbols like "?" and "AMC" recur too, but their creators average 34-57 launches each: those are
  * serial launchers reusing a generic name, not an operation burning identities. A family therefore has to show
- * identity-burning at both levels — across the family, and for the individual token being labelled.
+ * identity-burning at both levels - across the family, and for the individual token being labelled.
  *
  * The four tokens verified by hand (WOFI, PONST, PSHROOM, Squads) are pinned in as well and must never come back clean.
  */
@@ -29,7 +29,7 @@ const BUILD = process.argv.includes("--build");
 const PATH = "data/labels.json";
 const MIN_FAMILY = 15;      // graduated mints sharing a ticker
 const MIN_BURN = 0.9;       // distinct creators per mint: ~1.0 means a fresh wallet every launch
-const MAX_CREATOR_LAUNCHES = 2; // a burnt identity launches once, maybe twice — never dozens of times
+const MAX_CREATOR_LAUNCHES = 2; // a burnt identity launches once, maybe twice - never dozens of times
 
 const db = openDb(config.dbPath);
 db.exec("PRAGMA query_only = 1");
@@ -47,7 +47,7 @@ const PINNED: Record<string, string> = {
 };
 
 function build(): void {
-  // launches per creator wallet, over every launch we have seen — not just the graduated ones.
+  // launches per creator wallet, over every launch we have seen - not just the graduated ones.
   const CREATOR_LAUNCHES = "creator_launches AS (SELECT creator, COUNT(*) n FROM tokens GROUP BY creator)";
   const fams = db.prepare(`WITH ${CREATOR_LAUNCHES}
     SELECT t.symbol, COUNT(*) mints, COUNT(DISTINCT t.creator) creators, AVG(c.n) avg_launches
@@ -79,7 +79,7 @@ function build(): void {
   }
   writeFileSync(PATH, JSON.stringify({
     builtAt: Date.now(),
-    method: `ticker families with >= ${MIN_FAMILY} graduated mints, >= ${MIN_BURN} distinct creators per mint, and <= ${MAX_CREATOR_LAUNCHES} launches per creator wallet (identity burning at both the family and the token level), plus hand-verified tokens. Derived from creator-wallet reuse only — independent of every input the clean criteria read.`,
+    method: `ticker families with >= ${MIN_FAMILY} graduated mints, >= ${MIN_BURN} distinct creators per mint, and <= ${MAX_CREATOR_LAUNCHES} launches per creator wallet (identity burning at both the family and the token level), plus hand-verified tokens. Derived from creator-wallet reuse only - independent of every input the clean criteria read.`,
     families: fams.map((f: any) => ({ symbol: f.symbol, mints: f.mints, creators: f.creators, avgCreatorLaunches: Number(f.avg_launches.toFixed(2)) })),
     labels: out,
   }, null, 2));
@@ -87,7 +87,7 @@ function build(): void {
 }
 
 if (BUILD) { build(); process.exit(0); }
-if (!existsSync(PATH)) { console.error(`no ${PATH} — run: npm run labels -- --build`); process.exit(1); }
+if (!existsSync(PATH)) { console.error(`no ${PATH} - run: npm run labels -- --build`); process.exit(1); }
 
 const set = JSON.parse(readFileSync(PATH, "utf8")) as { labels: Label[]; families: any[]; method: string };
 const stmt = db.prepare(`SELECT ${TOKEN_COLUMNS} FROM tokens WHERE mint = ?`);
@@ -111,26 +111,26 @@ console.log(`\nlabelled set: ${set.labels.length} tokens across ${set.families.l
 console.log(`method: ${set.method}\n`);
 console.log(`checked        ${checked}${missing ? `  (${missing} not in this database)` : ""}`);
 console.log(`flagged DANGER ${flaggedDanger}  ${pct(flaggedDanger)}`);
-console.log(`not flagged    ${quiet}  ${pct(quiet)}   — no warning raised, but not certified either`);
+console.log(`not flagged    ${quiet}  ${pct(quiet)} - no warning raised, but not certified either`);
 console.log(`CERTIFIED CLEAN ${falseClean}  ${pct(falseClean)}  <- must be zero\n`);
 
 if (silent.length) {
   console.log(`known-manufactured tokens that raise no danger flag (first 15 of ${silent.length}):`);
   for (const s of silent.slice(0, 15)) console.log(`  ${(s.symbol ?? "?").padEnd(12)} ${s.mint}`);
-  console.log(`  These are recall gaps, not correctness failures — we stay silent rather than certify.\n`);
+  console.log(`  These are recall gaps, not correctness failures - we stay silent rather than certify.\n`);
 }
 
 /**
  * The second gate: does the pipeline still certify anything at all?
  *
- * Everything above is one-sided by design — it fails only on a false clean. That makes it vacuous in exactly the
+ * Everything above is one-sided by design - it fails only on a false clean. That makes it vacuous in exactly the
  * situation it is least able to notice: a pipeline that certifies *nothing* passes it perfectly, with a triumphant
  * "0 false cleans" on a criteria set that has silently stopped answering. That is not hypothetical. When the record
  * database carried no pool reading for any of its 143,102 rows, the site's clean list fell to four and this validator
  * would have reported a flawless run throughout, because zero certificates cannot contain a wrong one.
  *
  * So the check is two-sided from here: no known-manufactured token may be certified, AND the criteria must still
- * certify somebody. A recall collapse is a failure too — it just fails quietly, which is why it needs its own alarm.
+ * certify somebody. A recall collapse is a failure too - it just fails quietly, which is why it needs its own alarm.
  * The count is taken over candidates that already pass the cheap birth filters, so this costs a few hundred assess()
  * calls rather than a scan of the archive. The liquidity gate is deliberately not applied: freshness is the serving
  * layer's job, and this asks whether the *criteria* still recognise a clean launch, not whether a pool was readable
@@ -152,7 +152,7 @@ if (falseClean) {
 if (certified < MIN_CERTIFIED) {
   console.error(`\nFAIL: the criteria certify ${certified} launches out of ${candidates.length} candidates.`);
   console.error(`  Nothing is being certified, so "no false cleans" above is vacuous rather than reassuring.`);
-  console.error(`  Look for a missing input before touching a threshold — the last time this happened the criteria`);
+  console.error(`  Look for a missing input before touching a threshold - the last time this happened the criteria`);
   console.error(`  were fine and the pool readings were absent.\n`);
   process.exit(1);
 }

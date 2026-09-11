@@ -15,7 +15,7 @@ export const BRAND = "Chain of Title";
 
 /**
  * Two interlocking links. Literal rather than clever, which is the right register for a registry, and it survives
- * being 16 pixels wide in a browser tab — the size at which a mark actually has to work. Inline, so it costs no
+ * being 16 pixels wide in a browser tab - the size at which a mark actually has to work. Inline, so it costs no
  * request and inherits the page's colour in both themes.
  */
 export const MARK = `<svg class="mark" viewBox="0 0 34 20" width="26" height="16" aria-hidden="true" focusable="false">
@@ -38,7 +38,7 @@ export const ago = (ms: number) => ms < 90_000 ? "just now" : `${dur(ms)} ago`;
  * "2 Sep 2026" from "2026-09-02 12:29 UTC".
  *
  * The status bar runs five facts across one line and was handed full ISO timestamps, which overflowed every cell
- * and ellipsised into "COVERAGE FROM 2026-09-02 12:..." — a date truncated mid-value, which is worse than a
+ * and ellipsised into "COVERAGE FROM 2026-09-02 12:..." - a date truncated mid-value, which is worse than a
  * coarser date honestly given. A coverage window does not need a minute on it.
  */
 export const compactDate = (s: string) => {
@@ -538,13 +538,13 @@ td.mut,.mut{color:var(--mut)}
  * The front page's address, and it is `/` rather than `/index.html`.
  *
  * Every link home pointed at `index.html`, so clicking the masthead from anywhere on the site put a filename in the
- * reader's address bar — a site that shows its own build artifacts. `serve.ts` already answered `/` by rewriting it
+ * reader's address bar - a site that shows its own build artifacts. `serve.ts` already answered `/` by rewriting it
  * to `/index.html` internally, so the good URL worked and nothing ever sent anyone to it; `/index.html` now 301s to
  * `/` so the two addresses collapse into one rather than being two documents to a crawler.
  *
  * Absolute, not relative, because this has to be right from `/t/<mint>.html` and `/reports/<slug>.html` too, and
  * `../` from those lands on `/` only by accident of depth. The cost is an offline copy opened over `file://`, where
- * `/` is the filesystem root — that tree is built to be SERVED, and every page in it already assumes a web root.
+ * `/` is the filesystem root - that tree is built to be SERVED, and every page in it already assumes a web root.
  */
 export const HOME_HREF = "/";
 
@@ -560,7 +560,7 @@ export const NAV: { href: string; label: string }[] = [
 /**
  * Is this nav entry the section the reader is in?
  *
- * Matched on the first path segment rather than the whole path, so /reports/ticker-factories.html marks Reports —
+ * Matched on the first path segment rather than the whole path, so /reports/ticker-factories.html marks Reports -
  * a report page is in the Reports section, and a nav that goes blank the moment you follow a link out of its index
  * is worse than no highlight, because it tells the reader they have left the site.
  */
@@ -575,7 +575,7 @@ export function navCurrent(href: string, path?: string): boolean {
  * The facts every page states about the archive itself, in the status bar under the masthead.
  *
  * `onFile` and `builtAt` are new here and were previously reachable only from the front page's body, which meant a
- * reader who landed on a record page — which is how most people arrive, from a pasted link — had no way to tell how
+ * reader who landed on a record page - which is how most people arrive, from a pasted link - had no way to tell how
  * large the archive was or how current. Both are properties of the record the process is serving, so they belong
  * with the coverage window rather than with one page's figures.
  */
@@ -584,30 +584,30 @@ export interface Chrome { coverageFrom: string; gapMin: number; onFile?: number;
 /**
  * A record page is this project's only real distribution. Nobody shares a registry's front page; they paste a link to
  * one record into a group chat to settle an argument. With no metadata every such link rendered as a blank grey box,
- * so the most persuasive thing here — a specific, checkable finding about a specific token — was invisible at exactly
+ * so the most persuasive thing here - a specific, checkable finding about a specific token - was invisible at exactly
  * the moment someone chose to pass it on. The preview is written from the record, so it is an advertisement that
  * cannot say anything the page does not.
  */
 /**
  * The site's one true origin. Every page declares which URL it really lives at, or the same record served from a
- * second hostname — an apex and a www, or the platform's own *.up.railway.app — is two documents to a crawler and two
+ * second hostname - an apex and a www, or the platform's own *.up.railway.app - is two documents to a crawler and two
  * link previews to a chat client, which splits the only distribution this project has.
  *
  * This defaults to the real host rather than to nothing. It was an env var alone, CANONICAL_HOST was never set on the
- * deployed service, and so the tag shipped on no live page at all — a mechanism that exists only in the repository
+ * deployed service, and so the tag shipped on no live page at all - a mechanism that exists only in the repository
  * protects nothing. CANONICAL_HOST still overrides, for a staging host that must not claim to be this one.
  */
 export const CANONICAL_HOST = (process.env.CANONICAL_HOST ?? "https://chainoftitle.org").replace(/\/+$/, "");
 
 /**
  * Who keeps this. A registry that will not say who stands behind it is asking for a trust it has not offered, and it
- * is the first thing a grant reviewer looks for. The address must be a real mailbox before this ships — a published
+ * is the first thing a grant reviewer looks for. The address must be a real mailbox before this ships - a published
  * contact that bounces is worse than none.
  */
 export const CONTACT = "hello@chainoftitle.org";
 export const KEEPER = "the Chain of Title project";
 /**
- * Set this to the public repository URL once the auditable half of the code is pushed — the criteria (`provenance.ts`),
+ * Set this to the public repository URL once the auditable half of the code is pushed - the criteria (`provenance.ts`),
  * the site, and the validation harness (`labels.ts`). Until then the footer says nothing about source rather than
  * linking somewhere dead, which is the same discipline the rest of the site applies to its own claims.
  */
@@ -694,7 +694,7 @@ ${/*
     It reads the record's own count when the page is rendered and then follows the collector, which is the honest
     pair: the first cell is how many launches the archive HAS, the cell beside it is when the file you can download
     was last built. A snapshot count under a live label would understate the record by thousands by the end of each
-    build cycle, which is what it did while this script was missing — the markup carried `id` and `data-n` and
+    build cycle, which is what it did while this script was missing: the markup carried `id` and `data-n` and
     nothing acted on them, a promise in the HTML with no code behind it.
     
     It only ever displays values the collector actually reported. The animation interpolates between two real
@@ -736,7 +736,7 @@ In property law, the chain of title is the unbroken documented history of owners
 before you believe a claim about what something is. Coverage begins ${c.coverageFrom}${c.gapMin >= 1 ? `, with ${fmt(c.gapMin)} min of recorded downtime` : ", no recorded downtime"}.
 Everything here is read from the Solana chain. Where we recorded a launch's creation transaction, its page cites it and you can check every figure yourself; where we did not, the page says so. Where we say no markers were found, we checked the launch against every pattern we record and none was present. That is a statement about what we checked, not a prediction and not advice.
 Most launches lose money regardless: of 19,412 bonding-curve positions measured over 24 hours in September 2026,
-none reached 5x &mdash; and those were the organic ones, filtered to launches with a creator share under 50% and at
+none reached 5x, and those were the organic ones, filtered to launches with a creator share under 50% and at
 least 30 outside buyers. A dated measurement of a favourable subset, not a running total over the archive above.
 <div class="who">Kept by <b>${esc(KEEPER)}</b> · <a href="mailto:${esc(CONTACT)}">${esc(CONTACT)}</a>${SOURCE_URL ? ` · <a href="${esc(SOURCE_URL)}">Source</a>` : ""}<br>
 Free to use, with no account and no wallet connection. The archive is public domain (<a href="${root}data.html">CC0</a>) and
@@ -746,8 +746,8 @@ services that read it, never by the projects it reports on, and never by sending
 }
 
 /**
- * The search box. On the front page, on every page that could not answer, and — because checking one token is rarely
- * what anyone came to do — at the foot of every record.
+ * The search box. On the front page, on every page that could not answer, and - because checking one token is rarely
+ * what anyone came to do - at the foot of every record.
  *
  * The form submits for real. It was an `onsubmit` handler with no action or method, so with scripting off the button
  * did nothing at all and the site's one interactive element was a decoration; `/lookup` (serve.ts) redirects to the
@@ -775,14 +775,14 @@ export const SEARCH = `
   </script>`;
 
 /**
- * How long after launch a curve was taken — stated only as finely as the record can support.
+ * How long after launch a curve was taken - stated only as finely as the record can support.
  *
  * A curve trade's `ts` is `Date.now()` inside the handler that decodes the websocket batch it arrived in, and so is
  * the launch's `created_at`. 1,692 of the 1,736 recorded buyouts have a gap of exactly zero, which is not 1,692
  * measurements of "the same instant": it is one clock reading assigned twice in one batch. The tracker's own bundling
  * heuristic knows this and falls back to a 2 s window when slots are unknown (tracker.ts:313).
  *
- * So "0 min after launch" printed a limit of the collector as a finding about the operator — on 97% of the wallet
+ * So "0 min after launch" printed a limit of the collector as a finding about the operator - on 97% of the wallet
  * rows, in the section whose whole purpose is to say that a curve was taken suspiciously fast. Below the resolution
  * we actually have, the page says what it knows instead. Settling it properly needs the creation slot stored on
  * `tokens` and compared against the trade slot; `slot` is now carried into the published record so the comparison is
@@ -826,22 +826,22 @@ export function tokenPreview(t: any, a: Assessment, clean: boolean): { title: st
 
 /**
  * The single worst thing the launch record says about a token, as a phrase. Written for the purpose rather than
- * sliced out of a flag sentence, which produced "WOTF — The creator took 79.3% of the entire supply in the first
+ * sliced out of a flag sentence, which produced "WOTF - The creator took 79.3% of the entire supply in the first
  * block. Nothin". Shared by the link preview and the verdict so the two can never say different things about the
- * same record — the failure this module exists to prevent.
+ * same record - the failure this module exists to prevent.
  */
 function manufactureHeadline(t: any, a: Assessment): string | null {
   const gradS = t.graduated_at && t.created_at ? (t.graduated_at - t.created_at) / 1000 : null;
   /**
    * Each phrase is a complete clause carrying its own article, because the caller says "The record shows <phrase>."
    * The prefix used to supply a "the", which read correctly for the creator-share phrases and produced "The record
-   * shows the nobody bought its curve." for the rest — on the single most-read line of the most-read page.
+   * shows the nobody bought its curve." for the rest - on the single most-read line of the most-read page.
    */
   return t.dev_pct >= 50 ? `the creator took ${t.dev_pct.toFixed(0)}% of supply at launch`
     /**
      * These three assert the curve completed, so none may be said until that is confirmed. `a.completed` is decided
      * once in provenance.ts and read here; deriving it again from t.graduated is what let this function label an
-     * ordinary dud — no buyers, never graduated — a "Manufactured launch". Not completing a curve is how most tokens
+     * ordinary dud - no buyers, never graduated - a "Manufactured launch". Not completing a curve is how most tokens
      * die, and it is not evidence of anything.
      */
     : a.completed && a.curveBuyers === 0 ? "nobody bought its curve"
@@ -907,7 +907,7 @@ export function verdict(t: any, a: Assessment, clean: boolean): Verdict {
 
 /**
  * The body of a token page. `origin` says how we know what we know, which the reader is entitled to:
- * "observed" — watched live from creation; "rebuilt" — reconstructed completely from chain history.
+ * "observed" - watched live from creation; "rebuilt" - reconstructed completely from chain history.
  */
 /**
  * What else this launch is a copy of.
@@ -917,7 +917,7 @@ export function verdict(t: any, a: Assessment, clean: boolean): Verdict {
  * exact picture, and what else this creator has launched.
  *
  * They matter more than any single figure on the page. 57% of the launches whose picture we hold use a picture
- * another launch also used — one image is shared by 194 launches all called STONKPUMP — and 81% of all launches come
+ * another launch also used - one image is shared by 194 launches all called STONKPUMP - and 81% of all launches come
  * from a wallet that has launched more than one, the busiest having launched 1,994. A reader looking at creator
  * share and buyer counts is being asked to judge a token. A reader told this is the 194th launch of the same picture
  * is being told what it is.
@@ -959,7 +959,7 @@ export function tokenBody(
         Whether we went and read the curve account ourselves, and what it said.
         
         The feed emits a threshold event; that event is not the curve. We read the account on chain and 5,218 of the
-        8,095 curves we have checked turned out to be incomplete — the event fired and the curve had not finished.
+        8,095 curves we have checked turned out to be incomplete: the event fired and the curve had not finished.
         The check was written into the record, published in the bulk file, and exposed in the API as
         `graduationCheck`, and then appeared on no page a human reads. Every consumer that could reach it was a
         machine. That is this codebase's own recurring fault wearing a product's clothes.
@@ -987,14 +987,14 @@ export function tokenBody(
       */ ""}
     <tr><td class="k">Recorded from</td><td>${t.create_sig
       ? `${txLink(t.create_sig)}${t.create_slot ? ` <span class="sub">slot ${fmt(t.create_slot)}</span>` : ""}
-         <div class="sub">The transaction this record was decoded from. Every figure above is in it — fetch it and check us.</div>`
+         <div class="sub">The transaction this record was decoded from. Every figure above is in it. Fetch it and check us.</div>`
       : `<span class="sub">Not recorded. This launch predates our keeping the creation transaction, or its trade rows were pruned before we backfilled it. The figures above stand on our contemporaneous observation alone, which is weaker, and we would rather say so.</span>`}</td></tr>`
     : `<tr><td class="k">Launch</td><td>Not observed. ${t.late_discovery ? "Found only after it was already trading." : "The collector was down when it launched."}</td></tr>`;
 
   const selfBought = !!a.buyout && !!t.creator && a.buyout.wallet === t.creator;
   const boBlock = a.buyout ? `<h2>Who took the curve</h2>
     <p class="mono"><a href="../w/${esc(a.buyout.wallet)}.html">${esc(a.buyout.wallet)}</a>${selfBought
-      ? ` <b class="serif">— the creator's own wallet</b>` : ""}</p>
+      ? ` <b class="serif">(the creator's own wallet)</b>` : ""}</p>
     <p>Bought <b>${a.buyout.sol.toFixed(0)} SOL</b> of this curve in a single transaction${t.created_at ? `, ${curveAge(a.buyout.ts - t.created_at)}` : ""}.${
       a.buyout.sig ? ` ${txLink(a.buyout.sig)}` : ""}</p>
     ${a.buyout.sig && t.create_sig === a.buyout.sig ? `<p class="sub">That is the same transaction the token was created in: the launch and the purchase of its float are one signature.</p>` : ""}
@@ -1012,7 +1012,7 @@ export function tokenBody(
     : t.vault_sol != null ? `<h2>Pool</h2><p class="sub">A balance of ${t.vault_sol.toFixed(1)} SOL is on file but we cannot say when it was read, so it is not quoted here.</p>`
     : a.watched ? `<h2>Pool</h2><p class="sub">We have no pool balance for this token that we can date, so none is quoted. That is a gap in our reading coverage and says nothing about the launch record above, which does not depend on it.</p>` : "";
 
-  // How the record was obtained is part of the record. A rebuild is the same transactions, read later — but it cannot
+  // How the record was obtained is part of the record. A rebuild is the same transactions, read later - but it cannot
   // include what the token claimed to be at launch, because that lives off-chain and the operator can change it.
   /**
    * Stated as counts with a route to the evidence, never as a conclusion. "Used by 193 other launches" is a fact
@@ -1023,7 +1023,7 @@ export function tokenBody(
     const bits: string[] = [];
     if (priors.sameImage !== null && priors.sameImage > 0 && priors.imageSha)
       bits.push(`<tr><td class="k">This picture</td><td><b>Used by ${fmt(priors.sameImage)} other launch${priors.sameImage === 1 ? "" : "es"}.</b>
-        Identical bytes, matched by sha256 — not a similar image, the same one.
+        Identical bytes, matched by sha256: not a similar image, the same one.
         <a href="../i/${esc(priors.imageSha)}.html">See them all &rarr;</a></td></tr>`);
     else if (priors.sameImage === 0)
       bits.push(`<tr><td class="k">This picture</td><td>No other launch we hold a picture for used this one.</td></tr>`);
@@ -1042,13 +1042,13 @@ export function tokenBody(
   /**
    * What the launch said it was.
    *
-   * The token above is called "Cobie" — a real person — and until now this page could report that the creator took
+   * The token above is called "Cobie" - a real person - and until now this page could report that the creator took
    * 79% of supply while never showing the claim that makes the launch worth reporting. The name, the description
    * and the picture are the impersonation; the on-chain figures are only how it was funded.
    *
    * The picture is served from the bytes we captured at launch, addressed by their own sha256, NEVER hot-linked
    * from the URI. The URI is the creator's to repoint, so rendering it live would put whatever they serve today
-   * onto a page that says "what this launch claimed at birth" — this site's own besetting error, committed on the
+   * onto a page that says "what this launch claimed at birth" - this site's own besetting error, committed on the
    * page that exists to point it out. If we did not capture the bytes we say so and show nothing.
    */
   const claimed = (t.name || t.description || t.image_sha256 || t.uri) ? `
@@ -1061,12 +1061,12 @@ export function tokenBody(
         ${t.description ? `<tr><td class="k">Description</td><td>${esc(t.description)}</td></tr>` : ""}
         ${t.meta_sha256 ? `<tr><td class="k">Metadata held</td><td><span class="mono">sha256 ${esc(t.meta_sha256)}</span>${
           t.meta_bytes ? ` · ${fmt(t.meta_bytes)} bytes` : ""}<br><span class="sub"><a href="../d/${esc(t.mint)}">Read the
-          document</a> — the bytes themselves, not our reading of them. The hash above is what the record commits to,
+          document</a>, the bytes themselves rather than our reading of them. The hash above is what the record commits to,
           so anyone can check the two agree.</span></td></tr>` : ""}
         ${t.image_sha256
           ? `<tr><td class="k">Picture held</td><td><span class="mono">sha256 ${esc(t.image_sha256)}</span>${
               t.image_bytes ? ` · ${fmt(t.image_bytes)} bytes` : ""}</td></tr>`
-          : `<tr><td class="k">Picture</td><td>Not captured${t.image ? ", so we cannot show what it published" : " — this launch declared none"}. ${
+          : `<tr><td class="k">Picture</td><td>Not captured${t.image ? ", so we cannot show what it published" : ", this launch declared none"}. ${
               t.image ? "That is our storage budget, not a finding about the launch." : ""}</td></tr>`}
       </table>
     </div>
@@ -1084,8 +1084,8 @@ export function tokenBody(
       */ ""}
     ${/*
         Conditional, because the page knows the answer and a blanket promise is false on the launches that most need
-        the reader's scepticism. 24,494 launches carry no creation transaction — their trade rows were pruned before
-        we began keeping it — and telling their readers the figures are checkable, on a page that offers nothing to
+        the reader's scepticism. 24,494 launches carry no creation transaction, because their trade rows were pruned before
+        we began keeping it, and telling their readers the figures are checkable, on a page that offers nothing to
         check them with, is the same overclaim this project exists to report in other people.
       */ ""}
     <p class="vscope">A record of what this launch was at birth, read from the Solana chain. ${t.create_sig
@@ -1109,8 +1109,8 @@ export function tokenBody(
 /**
  * The front page, rendered from data rather than built into a file.
  *
- * It exists here because the page is now produced two ways — `site.ts` writes it during a build, `serve.ts` renders it
- * per request — and a registry whose front page disagrees with itself depending on how you arrived is not a registry.
+ * It exists here because the page is now produced two ways - `site.ts` writes it during a build, `serve.ts` renders it
+ * per request - and a registry whose front page disagrees with itself depending on how you arrived is not a registry.
  * Same rule as the token page: one renderer, two callers.
  *
  * It states two ages, deliberately, because it has two kinds of fact on it. The counts come from an archive the
@@ -1120,7 +1120,7 @@ export function tokenBody(
  */
 /**
  * `poolSol` and `readAt` are null when there is no reading fresh enough to quote. That is not a fact about the
- * token — it is a fact about our pool coverage — so the row still appears and says which it is.
+ * token - it is a fact about our pool coverage - so the row still appears and says which it is.
  */
 export interface CleanRow { mint: string; symbol: string | null; devPct: number; buyers: number; fillMs: number | null; poolSol: number | null; readAt: number | null; liquid: boolean }
 export interface OpRow { wallet: string; taken: number; spent: number; sold: number; bought: number }
@@ -1192,7 +1192,7 @@ function cleanRowHtml(r: CleanRow, now: number): string {
     <td class="num">${fmt(r.buyers)}</td><td class="num">${r.fillMs === null ? "?" : dur(r.fillMs)}</td>
     ${r.poolSol !== null && r.readAt !== null
       ? `<td class="num${r.liquid ? "" : " thin"}">${r.poolSol.toFixed(0)} SOL</td><td class="num">${ago(now - r.readAt)}</td>`
-      : `<td class="num mut">not read</td><td class="num mut">&mdash;</td>`}</tr>`;
+      : `<td class="num mut">not read</td><td class="num mut"></td>`}</tr>`;
 }
 export const CLEAN_HEAD = `<tr><th>Token</th><th class="num">Creator kept</th><th class="num">Buyers</th>
   <th class="num">Time to fill</th><th class="num">Liquidity</th><th class="num">Read</th></tr>`;
@@ -1226,7 +1226,7 @@ export function homeBody(h: Home): string {
   /**
    * The headline names the single most common finding, with its count.
    *
-   * It was the whole partition in one forty-word sentence set at 40px — the reader met the subject on line three,
+   * It was the whole partition in one forty-word sentence set at 40px - the reader met the subject on line three,
    * and the two numbers that carry the story were buried mid-clause. A headline is short, and this project's own
    * rule is to say WHAT was found rather than that something was found, which rules out "476 carry a finding": it
    * counts a thing the reader has no name for. So the commonest finding leads, by name and by count, and the
@@ -1252,7 +1252,7 @@ export function homeBody(h: Home): string {
         <p>We checked all ${fmt(h.graduated24h)}. ${h.cleanBirth24h === 0
           ? `<strong>Not one was free of all of it.</strong>`
           : `<strong>${fmt(h.cleanBirth24h)} showed none of it.</strong>`} The other ${fmt(between)} fall between:
-        nothing recorded against them, and still short of one of our tests &mdash; most often the creator sold, or
+        nothing recorded against them, and still short of one of our tests: most often the creator sold, or
         fewer than ${h.minBuyers} outside wallets bought the curve. Checked, not unexamined.</p>
         <p>All of it is visible for about thirty seconds and unrecoverable afterwards. Once the float has been
         spread across wallets none of it can be read off the chain any more, which is why the record has to be taken
@@ -1290,7 +1290,7 @@ export function homeBody(h: Home): string {
     <div>
       <p class="k">Take the whole thing</p>
       <h3>${fmt(h.onFile)} launches, public domain</h3>
-      <p>The complete record as a single SQLite file, free and CC0, with a permanent DOI deposit &mdash; so nothing
+      <p>The complete record as a single SQLite file, free and CC0, with a permanent DOI deposit, so nothing
       here depends on trusting us to keep publishing it.</p>
       <a class="go" href="data.html">Take the data &rarr;</a>
     </div>
@@ -1310,7 +1310,7 @@ export function homeBody(h: Home): string {
     <div class="now">
       <h3>2 · Then, what a checker reports</h3>
       <ul>
-        <li>Mint and freeze authority <b>renounced</b> — pump.fun does that to every token it creates</li>
+        <li>Mint and freeze authority <b>renounced</b>, which pump.fun does to every token it creates</li>
         <li>The creator's ${p.devPct.toFixed(1)}% <b>no longer visible</b>, the float spread across wallets</li>
         <li>A pool, a price and a chart, and <b>every one of them real</b></li>
       </ul>
@@ -1325,7 +1325,7 @@ export function homeBody(h: Home): string {
     </div>
   </div>
   <p class="verdictline">Steps 1 and 3 are readings we took and kept, each with the moment it was taken. Step 2 is
-  what a present-tense check reports, not a measurement of ours — and it finds nothing wrong, because by then there
+  what a present-tense check reports, not a measurement of ours, and it finds nothing wrong, because by then there
   is nothing left to find: the operator bought the float, then paid for the appearance of a market. A check run at
   step 3 reports thin liquidity, correctly, and far too late to be worth anything. The launch record was true at
   every step, and it is the only thing here that could not be bought.</p>` : ""}
@@ -1374,7 +1374,7 @@ export function homeBody(h: Home): string {
     */ ""}
   <p class="callout">Two different claims, kept apart. <b>No markers found</b> is a fact about the first blocks and does
   not expire. <b>Liquidity</b> is one balance read at one moment, shown with its age. ${h.unread
-    ? `<b>${fmt(h.unread)}</b> of these have no reading under ${Math.round(h.maxReadingAgeMs / 60000)} minutes old and say <i>not read</i> — a gap in our pool coverage, never a finding about the token. `
+    ? `<b>${fmt(h.unread)}</b> of these have no reading under ${Math.round(h.maxReadingAgeMs / 60000)} minutes old and say <i>not read</i>: a gap in our pool coverage, never a finding about the token. `
     : `Every row here carries a reading under ${Math.round(h.maxReadingAgeMs / 60000)} minutes old. `}A balance shown in red is one we did read, and it is under ${h.minPoolSol} SOL. We never quote a balance we could not confirm.</p>`;
 }
 
@@ -1382,13 +1382,13 @@ export function homeBody(h: Home): string {
  * The most recently recorded launches, on the front page.
  *
  * An archive's "recently added" shelf, not a ticker. The rows come from the same collector feed /live.html reads
- * and reuse its markup and CSS wholesale, so the two cannot drift into different renderings of one feed — only the
+ * and reuse its markup and CSS wholesale, so the two cannot drift into different renderings of one feed - only the
  * framing differs, and deliberately: no rate counter, no "arriving now". A number about how busy the feed is tells
  * a reader nothing they came for; whether what they are reading is current tells them everything, so that is what
  * the header carries.
  *
  * The server renders three real records inside the box before any script runs. A visitor with scripting off, or a
- * collector that never answers, gets those and a line saying so — never an empty panel captioned "connecting",
+ * collector that never answers, gets those and a line saying so - never an empty panel captioned "connecting",
  * which is the one outcome that makes an archive look broken rather than quiet.
  */
 export function liveRail(startHere: Home["startHere"], now: number): string {
@@ -1411,7 +1411,7 @@ ${/*
     
     Rows are built to the shape /live.html uses. On the first poll that returns launches the server-rendered
     records are cleared and replaced; if the collector never answers, or answers that it is unavailable, the
-    records stay and the header says why. It never empties the rail to report a problem — a panel captioned
+    records stay and the header says why. It never empties the rail to report a problem: a panel captioned
     "connecting" is the one outcome that makes an archive look broken rather than quiet.
   */ ""}
 <script>(function(){
@@ -1441,7 +1441,7 @@ ${/*
       fails=0;
       if(d.unavailable){st.textContent='unreachable';return}
       var ls=d.launches||[];
-      // The first poll asks since=0 and the collector answers with its whole ring — 120 rows on a normal day. The
+      // The first poll asks since=0 and the collector answers with its whole ring - 120 rows on a normal day. The
       // feed is oldest-first and each row is prepended, so only the tail can survive the trim: taking it up front
       // saves building elements to destroy them. Later polls carry only what is new and are unaffected.
       if(ls.length>MAX)ls=ls.slice(ls.length-MAX);
@@ -1469,8 +1469,8 @@ ${/*
 /**
  * A wallet's record: every curve it bought outright, and what it did with the tokens afterwards.
  *
- * It used to open with the word "Priors" on every wallet page — a term most readers will not decode, saying nothing
- * about whose priors — and then render its verdict as one flag box among the furniture. A reader arrives here from a
+ * It used to open with the word "Priors" on every wallet page - a term most readers will not decode, saying nothing
+ * about whose priors - and then render its verdict as one flag box among the furniture. A reader arrives here from a
  * token page having just read that this wallet bought the whole curve, and the question in their head is who this is
  * and whether they do it often. So: the address is the heading, the verdict is the verdict, and the size of the
  * evidence behind it is stated rather than left for the reader to infer from the length of a table.
@@ -1483,7 +1483,7 @@ export function walletBody(w: string, p: any, v: { label: string; why: string } 
 
   /**
    * How much evidence the sentence above rests on. One buyout and thirty produced identical prose, so a single
-   * event read with the same confidence as a habit — the reader could only tell them apart by counting the rows.
+   * event read with the same confidence as a habit - the reader could only tell them apart by counting the rows.
    */
   const basis = n === 0 ? "" : n === 1
     ? `Based on <b>one</b> curve. A record of one event is not yet a pattern.`
@@ -1530,7 +1530,7 @@ export function walletBody(w: string, p: any, v: { label: string; why: string } 
 
 export { MIN_POOL_SOL };
 
-/** One row in a list of launches that share something — a picture, or a creator. */
+/** One row in a list of launches that share something - a picture, or a creator. */
 /** Aggregates over the entire matching set, not over the page of rows shown. */
 export interface SiblingStats { total: number; flagged: number; grad: number; span: number }
 
@@ -1547,8 +1547,8 @@ export interface SiblingRow {
  * been launched 194 times under the same ticker. Serial reuse is not visible in any one launch, which is precisely
  * why a scanner reading present state cannot see it at all.
  *
- * Oldest first on purpose: the interesting shape is the cadence — a burst of launches minutes apart, or a picture
- * that returns every few days — and that reads forwards, not backwards.
+ * Oldest first on purpose: the interesting shape is the cadence - a burst of launches minutes apart, or a picture
+ * that returns every few days - and that reads forwards, not backwards.
  */
 export function siblingsBody(
   kind: "image" | "creator", key: string, rows: SiblingRow[], stats: SiblingStats, now: number, shownCap: number,
@@ -1558,7 +1558,7 @@ export function siblingsBody(
    * Every headline figure is computed over the WHOLE set, never over the rows that happen to be displayed.
    *
    * The first version took the span from the listed rows while the heading counted all of them, so a wallet with
-   * 1,994 launches was described as spanning 3.2 hours — the span of the oldest 300. Two numbers side by side drawn
+   * 1,994 launches was described as spanning 3.2 hours - the span of the oldest 300. Two numbers side by side drawn
    * from different populations, which is the fault this project spent the day removing from its own front page.
    */
   const { total, flagged, grad, span } = stats;
@@ -1566,7 +1566,7 @@ export function siblingsBody(
     ? `${fmt(total)} launches used this picture`
     : `${fmt(total)} launches by this wallet`;
   const lede = kind === "image"
-    ? `Identical bytes, matched by sha256 — the same file, not a similar one. We keep the picture because the creator
+    ? `Identical bytes, matched by sha256: the same file, not a similar one. We keep the picture because the creator
        controls the URI it came from and can repoint or unpin it at any time; once that happens this is the only
        place the launch's own image survives.`
     : `Every launch we hold from this creator wallet. A creator address is on-chain and permanent, so this list is as
@@ -1616,12 +1616,12 @@ export interface StripMark { t: number; mint: string; symbol: string | null; dan
  * The relaunch strip: every launch as a mark on a real time axis.
  *
  * A table of 194 timestamps is a table. The same 194 launches as marks on nine hours of wall clock is a comb, and
- * the comb is the finding — you see a launch every three minutes without reading a single row. Cadence is the thing
+ * the comb is the finding - you see a launch every three minutes without reading a single row. Cadence is the thing
  * serial reuse actually looks like, and it is invisible in any presentation that sorts rather than *places*.
  *
  * Inline SVG on purpose. The pages are self-contained, mirror-able and carry no external request; a charting library
  * would be the first dependency in a file whose credibility partly rests on not having any. Marks are `<a>` elements
- * with a `<title>`, so hover and click work with no JavaScript at all — the script below only adds a readout, and
+ * with a `<title>`, so hover and click work with no JavaScript at all - the script below only adds a readout, and
  * the strip is fully usable when it does not run.
  *
  * Density is not smoothed away. Where launches overlap, the marks overlap; a solid black band means exactly what it
@@ -1711,7 +1711,7 @@ export function swimlane(events: LaneEvent[], walletCurves: Map<string, number>)
   let lanes = [...firstSeen.keys()];
   const dropped = Math.max(0, lanes.length - LANES_MAX);
   if (dropped) {
-    // When there are too many lanes to draw, keep the busiest ones — but restore first-seen order afterwards, so
+    // When there are too many lanes to draw, keep the busiest ones - but restore first-seen order afterwards, so
     // the chart is still read the same way. The head says how many were left out; it never silently plots a subset.
     const busiest = new Set([...lanes].sort((a, b) => (walletCurves.get(b) ?? 0) - (walletCurves.get(a) ?? 0)).slice(0, LANES_MAX));
     lanes = lanes.filter((w) => busiest.has(w));
@@ -1763,7 +1763,7 @@ export function swimlane(events: LaneEvent[], walletCurves: Map<string, number>)
     const wait = e.createdAt === null ? "" : ` · bought ${curveAge(e.ts - e.createdAt)}`;
     const label = `${esc(e.symbol ?? "?")} · ${when(e.ts)} · ${e.sol.toFixed(0)} SOL · ${esc(e.wallet.slice(0, 6))}${wait}`;
     // The tail is drawn only when we hold the launch time. Where we do not, there is no tail rather than a tail of
-    // length zero, which would read as "bought at launch" — the archive's oldest rule: absence is not a finding.
+    // length zero, which would read as "bought at launch" - the archive's oldest rule: absence is not a finding.
     const tail = e.createdAt !== null && e.createdAt < e.ts
       ? `<line x1="${x(e.createdAt).toFixed(1)}" x2="${cx.toFixed(1)}" y1="${cy}" y2="${cy}" class="wt"/>` : "";
     return `${tail}<a href="../t/${esc(e.mint)}.html" class="dot${e.danger ? " d" : ""}" data-l="${label}">` +
@@ -1789,7 +1789,7 @@ export function swimlane(events: LaneEvent[], walletCurves: Map<string, number>)
  * An operator cluster: the group, not the wallet.
  *
  * Wallet pages have named the cluster since they were written and there was nowhere to go from it. That is the
- * failure this repo keeps repeating in a different costume — the attribution was computed, stored, published in the
+ * failure this repo keeps repeating in a different costume - the attribution was computed, stored, published in the
  * record, printed on the page as a bare six-character string, and left as a dead end. The reader who most needs
  * this page is the one who has just been told "one of 66 wallets seeded from one funder" and reasonably asks to
  * see the other sixty-five.
@@ -1888,7 +1888,7 @@ export function clusterBody(p: {
 /**
  * The live wall: launches arriving as they happen.
  *
- * Everything else on this site is a record — something that already happened, looked up afterwards. This is the only
+ * Everything else on this site is a record - something that already happened, looked up afterwards. This is the only
  * page that shows the instrument working, and it is the clearest possible statement of what the archive is: not a
  * database someone assembled, but a machine that was watching at the time. A visitor who sees a launch appear, and
  * the creator's share appear beside it a second later, understands the whole product without reading a word of it.
@@ -1897,7 +1897,7 @@ export function clusterBody(p: {
  * statistic; watching them scroll past with the creator holding 79% of supply is a different kind of argument.
  *
  * The page holds no state worth keeping and makes no claim beyond what each row says. Rows link to the record, which
- * is where the evidence and the caveats live — the wall is a window, not a verdict.
+ * is where the evidence and the caveats live - the wall is a window, not a verdict.
  */
 /**
  * The three lists in full: every wallet on file, every operator group we have traced, every launch in the window
@@ -1924,7 +1924,7 @@ export function walletsBody(rows: OpRow[], total: number, shown: number, buyoutS
     title: "Who takes the curves",
     count: `${fmt(total)} wallets on file${shown < total ? ` · busiest ${fmt(shown)} shown` : ""}`,
     lede: `Every wallet that has completed a bonding curve with a single buy of ${buyoutSol} SOL or more, taking the
-      whole remaining float in one transaction &mdash; ordered by how much they sold into the market afterwards.
+      whole remaining float in one transaction, ordered by how much they sold into the market afterwards.
       Each address links to its own record: every curve it took, what it paid, and the transaction behind each buy.`,
     back: "Back to the front page",
   }, `<table class="data">${OPS_HEAD}${rows.map(opRowHtml).join("")}</table>`,
@@ -1970,7 +1970,7 @@ export function cleanBody(h: Home): string {
     `<p class="callout">Two different claims, kept apart. <b>No markers found</b> is a fact about the first blocks
       and does not expire. <b>Liquidity</b> is one balance read at one moment, shown with its age. ${h.unread
         ? `<b>${fmt(h.unread)}</b> of these have no reading under ${Math.round(h.maxReadingAgeMs / 60000)} minutes
-           old and say <i>not read</i> &mdash; a gap in our pool coverage, never a finding about the token. `
+           old and say <i>not read</i>: a gap in our pool coverage, never a finding about the token. `
         : `Every row here carries a reading under ${Math.round(h.maxReadingAgeMs / 60000)} minutes old. `}A balance
       shown in red is one we did read, and it is under ${h.minPoolSol} SOL. We never quote a balance we could not
       confirm.</p>`);
@@ -1994,11 +1994,11 @@ export function reportBody(r: Report): string {
   const provenance = `<p class="lede">Coverage began <b>${r.coverageFrom ? when(Date.parse(r.coverageFrom)) : "unknown"}</b>
     and the figures were taken from the record built <b>${r.recordBuiltAt ? when(Date.parse(r.recordBuiltAt)) : "unknown"}</b>.
     Launches before then were not watched. Rows a detector restored after the fact, and rows rebuilt from chain
-    history, are excluded throughout &mdash; a launch found late shows no outside buyers because nobody was watching
+    history, are excluded throughout: a launch found late shows no outside buyers because nobody was watching
     it, which would flatter every figure here.</p>`;
   const check = `<div class="sec"><h2>Check it yourself</h2></div>
     <p class="lede">One query against the public-domain file. Run it today and you will get a larger answer than the
-    table above, because the archive has grown since publication &mdash; that is the difference between a report and
+    table above, because the archive has grown since publication, and that is the difference between a report and
     a live view, and it is why both exist. Disagreeing with either is the point of publishing them.</p>
     <table><tr><td class="mono" style="white-space:pre-wrap">${esc(r.query)}</td>
       <td>the table above, verbatim, as it stood on ${esc(r.published)}. Bulk file:
@@ -2009,6 +2009,61 @@ export function reportBody(r: Report): string {
     that date and are not updated afterwards: they are read from a file written when this report was published, not
     recomputed when this page is built. <a href="../findings.html">The live view is here</a>.</p>
     ${rev}`;
+
+  if (r.slug === "graduation-events") {
+    const t = r.totals, row = (k: string) => r.rows.find((x) => x.confirmed_by === k) ?? {};
+    const pct1 = (n: number, d: number) => d > 0 ? `${(100 * n / d).toFixed(1)}%` : "n/a";
+    return `
+  ${head}
+  <p class="lede">A bonding curve graduating is an event on a feed before it is anything else. We record that event,
+  and then, separately, we go and read the curve account on chain. Across ${fmt(t.events ?? 0)} graduation events in
+  this archive the two agree for some and disagree for a great many, and which group a launch falls into is knowable
+  at the time rather than in hindsight.</p>
+
+  <p class="lede"><b>Where a PumpSwap pool exists, the event holds up.</b> Of the ${fmt(t.poolEvents ?? 0)} events
+  backed by a pool, we have re-read the curve for ${fmt(t.poolRead ?? 0)}, and ${fmt(t.poolIncomplete ?? 0)}
+  (${pct1(t.poolIncomplete ?? 0, t.poolRead ?? 0)}) read incomplete. Two independent pieces of evidence agreeing is
+  what a confirmed graduation looks like.</p>
+
+  <p class="lede"><b>Where no pool exists, mostly nothing happened.</b> ${fmt(t.noneEvents ?? 0)} events have no pool
+  behind them. We have read the curve for ${fmt(t.noneRead ?? 0)} of them: ${fmt(t.noneIncomplete ?? 0)}
+  (${pct1(t.noneIncomplete ?? 0, t.noneRead ?? 0)}) had not completed, and ${fmt(t.noneComplete ?? 0)} had. A
+  threshold crossed on a feed, and no curve behind it.</p>
+
+  <div class="sec"><h2>What the record held</h2><span class="cnt">as published, ${esc(r.published)}</span></div>
+  <table class="data">
+    <tr><th>Confirmed by</th><th class="num">Feed events</th><th class="num">Read on chain</th>
+      <th class="num">Read complete</th><th class="num">Read incomplete</th><th class="num">Account gone</th></tr>
+    ${r.rows.map((x) => `<tr>
+      <td class="mono">${esc(x.confirmed_by)}</td>
+      <td class="num">${fmt(Number(x.feed_events ?? 0))}</td>
+      <td class="num">${fmt(Number(x.read_on_chain ?? 0))}</td>
+      <td class="num">${fmt(Number(x.read_complete ?? 0))}</td>
+      <td class="num${Number(x.read_incomplete ?? 0) > Number(x.read_complete ?? 0) ? " thin" : ""}">${fmt(Number(x.read_incomplete ?? 0))}</td>
+      <td class="num mut">${fmt(Number(x.account_gone ?? 0))}</td></tr>`).join("")}
+  </table>
+
+  <div class="sec"><h2>The row you must not use</h2></div>
+  <p class="lede">The middle group is circular and is printed anyway, because leaving it out would be the more
+  misleading choice. <span class="mono">graduated_confirmed_by = 'curve_complete'</span> means the curve read <i>is</i>
+  the confirmation: those ${fmt(t.circular ?? 0)} rows are complete by construction and can appear in no rate about
+  curve readings without making it say what it was built from. The comparison above is between the pool-confirmed
+  group and the unconfirmed one, because a pool existing is evidence the curve read had no part in producing.</p>
+
+  <div class="sec"><h2>What this does not say</h2></div>
+  <p class="lede">It does not say these tokens are frauds. A curve that has not completed is a curve that has not
+  completed, and launches fail at that stage constantly and innocently. What it says is narrower and more useful: a
+  graduation event, taken alone, is not evidence that a curve finished, and roughly two in five of them in this
+  archive have nothing else behind them.</p>
+  <p class="lede">It is also not a rate over graduations in general. We read the curve for unconfirmed events far
+  more often than for confirmed ones, deliberately, which is why the two populations are reported separately and
+  never pooled into one figure.</p>
+  <p class="lede">A curve can complete long after launch, so a single incomplete reading does not settle a launch
+  forever; the readings are retaken on a cooldown and the published columns are rewritten from the collector on every
+  build. The counts here are what those columns held on ${esc(r.published)}.</p>
+  ${provenance}
+  ${check}`;
+  }
 
   if (r.slug === "ticker-factories") return `
   ${head}
@@ -2036,7 +2091,7 @@ export function reportBody(r: Report): string {
   <p class="lede">Every heuristic that judges a launch by its creator's history fails against a wallet with no
   history. A creator that has launched forty tokens is visible; forty creators that have launched one each are not,
   and they are the same operation. That is why this project validates its own criteria against creator-wallet reuse
-  rather than with it &mdash; it is an axis <a href="../method.html">none of the published criteria read</a>, which is
+  rather than with it, because it is an axis <a href="../method.html">none of the published criteria read</a>, which is
   what makes it usable as an independent check on them.</p>
   <p class="callout">Several of these tickers match the names of well-known companies, films and products. The record
   states what ticker a launch declared for itself and nothing more: it is not evidence that any named business was
@@ -2069,7 +2124,7 @@ export function reportsIndexBody(reports: Report[]): string {
   </table>` : `<p class="callout">Nothing published yet. Reports appear here when they are written; this page does
     not generate them, which is why it can be empty.</p>`}
   <p class="callout">Every figure in a report is a query against <a href="data.html">the public-domain record</a>,
-  printed beside it so anyone can run it and get the same answer for that date &mdash; or a different one, and say so.
+  printed beside it so anyone can run it and get the same answer for that date, or a different one, and say so.
   A report is never rewritten by a later build: it is written once, and a correction has to say what it changed.</p>`;
 }
 
@@ -2084,11 +2139,11 @@ export function wallBody(): string {
   <div class="col-b"><div class="stats" style="margin:4px 0 0">
     <div class="stat"><span>seen on this page</span><b class="big" id="wc">0</b></div>
     <div class="stat"><span>creator took 20%+</span><b class="big" id="wd">0</b></div>
-    <div class="stat"><span>per minute</span><b class="big" id="wr">&mdash;</b></div>
+    <div class="stat"><span>per minute</span><b class="big" id="wr">&hellip;</b></div>
   </div>
   <p class="sub" style="margin:6px 0 0"><span id="wstat">connecting&hellip;</span></p></div></div>
 
-  <div class="sec"><h2>Live</h2><span class="cnt" id="wago">&mdash;</span></div>
+  <div class="sec"><h2>Live</h2><span class="cnt" id="wago">&hellip;</span></div>
   <div class="wall" id="wall"><p class="callout" id="wempty">Waiting for the next launch. At this hour that is
   usually a few seconds.</p></div>
   <p class="callout">A launch appearing here is not a finding about it. The creator's share is the only figure known

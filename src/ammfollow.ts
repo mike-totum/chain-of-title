@@ -145,7 +145,7 @@ for (const { path } of paths.values()) {
     }
   }
 }
-console.log(`\n=== PumpSwap copy-trading — ${paths.size} usable graduated tokens (${skipped} skipped), ${signals} AMM buys >= ${minBuy} SOL replayed as follow signals (last ${hours}h) ===`);
+console.log(`\n=== PumpSwap copy-trading - ${paths.size} usable graduated tokens (${skipped} skipped), ${signals} AMM buys >= ${minBuy} SOL replayed as follow signals (last ${hours}h) ===`);
 console.log("Wallet record = realized SOL on tokens whose stored path ended >= 60 min before the signal (prospective). Cells: avg x (winsorized 20x) / median / win % / >=2x share, fees 1 % per side, 1.5 s latency both ways.\n");
 console.log("  signal bucket".padEnd(44) + EXITS.map((e) => e.name.padEnd(30)).join(""));
 for (const b of BUCKETS) console.log(`  ${b}`.padEnd(44) + EXITS.map((e) => (grid.get(`${b}|${e.name}`)?.cell() ?? "-").padEnd(30)).join(""));
@@ -153,7 +153,7 @@ const endShare = grid.get("any buy (control)|hold to end of data");
 console.log(`\n  "hold to end of data" is bounded by our watch window (median ~30 min of AMM data per token); ${endShare ? pct(endShare.endShare, endShare.n) : "-"} of those exits are the data ending, not a decision.`);
 {
   const days = [...new Set([...gridDay.keys()].map((k) => k.split("|")[2]))].sort();
-  console.log("\n  DAY BY DAY (persistence) — avg x / win % / n per day of the signal");
+  console.log("\n  DAY BY DAY (persistence) - avg x / win % / n per day of the signal");
   for (const b of ["any buy (control)", "any buy, mcap 2.5-35x grad (~$200k-3M) (control)", "any buy, token >= 1h on AMM (control)", "LIVE RULE: first buy >=0.5 SOL at >=2.5x grad with >=30 buyers so far (one per token)", "in band >= 10 min already (any buy)", "in band >= 10 min, 2nd+ hour on AMM (any buy)", "band, NOT chasing (price <= 1.15x price 2 min ago)", "band, chasing (price > 1.15x price 2 min ago)", "band, >= 1h on AMM, not chasing", "band, >= 1h on AMM, >= 30 AMM buyers, not chasing", "big winner (>=5 SOL, >=60% wins)"])
     for (const e of ["hold to end of data", "trail30 arm1.3 sl0.7 6h", "trail20 arm1.15 sl0.8 6h"]) {
       const cells = days.map((d) => { const a = gridDay.get(`${b}|${e}|${d}`); return a && a.n ? `${d}: ${f(a.avg)}/${pct(a.wins, a.n)}/n${a.n}` : `${d}: -`; });

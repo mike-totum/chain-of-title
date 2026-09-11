@@ -61,7 +61,7 @@ export class TelegramWatcher extends EventEmitter {
      * The newest message id already archived for a channel, if any.
      *
      * Without this, start() sets the cursor to whatever is newest RIGHT NOW, so every message posted while the
-     * process was down is skipped — silently, permanently, and invisibly, because a message we never fetched leaves
+     * process was down is skipped - silently, permanently, and invisibly, because a message we never fetched leaves
      * nothing behind to notice. For a signal generator that was correct: stale calls are worthless. For an archive it
      * is the whole failure this project keeps finding, since the gap is indistinguishable afterwards from a quiet
      * channel.
@@ -95,7 +95,7 @@ export class TelegramWatcher extends EventEmitter {
         /**
          * A channel we can no longer reach is a fact, and the most perishable one here.
          *
-         * @SolanaGemsChecked stopped existing on 2026-09-09 — not renamed as far as we can tell, gone — and because
+         * @SolanaGemsChecked stopped existing on 2026-09-09 - not renamed as far as we can tell, gone - and because
          * it had never been captured, nothing of what it called survives at any price. Dropping silently out of the
          * watch loop is how that becomes invisible: the channel simply stops appearing, and a year later there is no
          * way to tell a channel that went quiet from one that was deleted from one we stopped asking about.
@@ -141,7 +141,7 @@ export class TelegramWatcher extends EventEmitter {
       } catch (e) {
         this.stats.pollErrors++;
         this.emit("status", `poll error @${ch}: ${(e as Error).message}`);
-        // A failed poll is a hole in coverage, and the cursor deliberately does NOT advance — but the failure has to
+        // A failed poll is a hole in coverage, and the cursor deliberately does NOT advance - but the failure has to
         // be recorded too, or the hole is indistinguishable from a channel that said nothing.
         this.emit("gap", { channel: ch, at: Date.now(), reason: (e as Error).message.slice(0, 200) });
       }
@@ -159,8 +159,8 @@ export class TelegramWatcher extends EventEmitter {
      * rest is the record: what was said about a launch before anyone knew how it ended, by whom, and when. It is
      * unrecoverable once deleted, and a deletion is the event most worth having recorded.
      *
-     * Emitted rather than written here so this file stays a reader of Telegram and the storage decision — including
-     * the decision not to publish any of it — lives with the process that owns the database.
+     * Emitted rather than written here so this file stays a reader of Telegram and the storage decision - including
+     * the decision not to publish any of it - lives with the process that owns the database.
      */
     this.emit("message", {
       channel,

@@ -71,7 +71,7 @@ const notify = (text: string) => {
   selfNotify?.(text);
 };
 /**
- * Per-token signal alerts. Silent unless ALERT_SIGNALS=1 — see `config.alertSignals` for why the default is off.
+ * Per-token signal alerts. Silent unless ALERT_SIGNALS=1 - see `config.alertSignals` for why the default is off.
  * The signals are still computed, still written to the `signals` table, and still visible in the log; what stops is
  * the interruption. Muting these is what keeps the two alerts above worth reading.
  */
@@ -199,7 +199,7 @@ let seen = 0;
  * every launch is tracked from creation, so an untracked mint is one we already dropped (>= 6 h old) or
  * never saw (launched before this monitor, or days/weeks ago). This is the event the verified winners came
  * from (Kshama, Squads, Simba, Axolotl, onoda) and until now it was only detected when the buyer's wallet
- * happened to already be in operator_wallets — which, measured over 72 h, was 13 of 988 buyouts.
+ * happened to already be in operator_wallets - which, measured over 72 h, was 13 of 988 buyouts.
  * The pump.fun feed already carries every trade on every curve; this stops throwing them away.
  */
 const BUYOUT_MIN_SOL = Number(process.env.BUYOUT_MIN_SOL || 40);
@@ -207,8 +207,8 @@ const seenBuyout = new Set<string>();
 /**
  * Wallets caught doing a buyout without being in operator_wallets. They must keep being followed after the buy, or the
  * `farm-sell` exit is blind: it fires on cluster wallets selling, and a wallet that is not in the loaded cluster map
- * never reaches noteOperator again. Found 2026-09-06 on 8UfkYXd2… — five 85 SOL buyouts, 17.8 SOL bought on the AMM
- * against 421.1 SOL sold, i.e. a pure distributor — while cluster-follow held two positions alongside it with no exit.
+ * never reaches noteOperator again. Found 2026-09-06 on 8UfkYXd2… - five 85 SOL buyouts, 17.8 SOL bought on the AMM
+ * against 421.1 SOL sold, i.e. a pure distributor - while cluster-follow held two positions alongside it with no exit.
  */
 const blindOperators = new Set<string>();
 /**
@@ -245,11 +245,11 @@ for (const s of strategies) realized.set(s.name, { n: 0, pnl: 0, wins: 0 });
  *
  * Deliberately a ring and not a query. "What launched in the last two minutes" is answerable from the database, but
  * only by polling it on a timer from another service, and the answer would be as old as the poll. This is the same
- * event the collector already handles to record the launch — the wall shows what the archive saw, at the moment it
+ * event the collector already handles to record the launch - the wall shows what the archive saw, at the moment it
  * saw it, or it is not a live wall.
  *
  * Bounded and lossy on purpose: at ~25,000 launches a day this holds a couple of minutes and drops the rest. Nothing
- * here is a record — every one of these is written to `tokens` by the line below, and the ring is a view of the last
+ * here is a record - every one of these is written to `tokens` by the line below, and the ring is a view of the last
  * moments of that, thrown away on restart. A consumer that misses events has missed nothing it cannot look up.
  */
 const RECENT_MAX = 400;
@@ -299,7 +299,7 @@ feed.on("trade", (e, now) => {
     const born = (db.prepare("SELECT created_at FROM tokens WHERE mint = ?").get(e.mint) as { created_at: number } | undefined)?.created_at;
     const ageH = born ? (now - born) / 3600_000 : null;
     log(`[buyout] ${e.solAmount.toFixed(1)} SOL took the curve of ${t.symbol} ${short(e.mint)} by ${short(e.traderPublicKey)} (${ageH === null ? "age unknown, never seen" : `dormant ${ageH.toFixed(1)} h`}, restored)`);
-    signalNotify(`💰 curve buyout ${e.solAmount.toFixed(0)} SOL — ${t.symbol}\nwallet ${e.traderPublicKey}\nhttps://pump.fun/coin/${e.mint}`);
+    signalNotify(`💰 curve buyout ${e.solAmount.toFixed(0)} SOL - ${t.symbol}\nwallet ${e.traderPublicKey}\nhttps://pump.fun/coin/${e.mint}`);
     db.prepare("INSERT INTO signals (source, account, mint, symbol, kind, text, url, posted_at, seen_at) VALUES (?,?,?,?,?,?,?,?,?)")
       .run("buyout", `wallet:${e.traderPublicKey}`, e.mint, t.symbol, "curve-buyout", `${e.solAmount.toFixed(1)} SOL, ${ageH === null ? "age unknown" : `dormant ${ageH.toFixed(1)} h`}`, `https://pump.fun/coin/${e.mint}`, now, now);
     blindOperators.add(e.traderPublicKey);
@@ -308,7 +308,7 @@ feed.on("trade", (e, now) => {
   if (lateGrad) {
     seenLateGrad.add(e.mint);
     t.watchCapMs = Math.max(t.watchCapMs ?? 0, 12 * 3600_000);
-    log(`[lategrad] ${t.symbol} ${short(e.mint)} curve at ${e.vSolInBondingCurve.toFixed(0)} vSOL and not tracked — restored`);
+    log(`[lategrad] ${t.symbol} ${short(e.mint)} curve at ${e.vSolInBondingCurve.toFixed(0)} vSOL and not tracked - restored`);
     db.prepare("INSERT INTO signals (source, account, mint, symbol, kind, text, url, posted_at, seen_at) VALUES (?,?,?,?,?,?,?,?,?)")
       .run("lategrad", "curve-scan", e.mint, t.symbol, "late-graduation", `curve at ${e.vSolInBondingCurve.toFixed(1)} vSOL`, `https://pump.fun/coin/${e.mint}`, now, now);
   }
@@ -324,8 +324,8 @@ feed.on("trade", (e, now) => {
 feed.on("status", (m) => log("[feed]", m));
 
 tracker.on("preannounced", (t, k) => {
-  log(`[kol] PRE-ANNOUNCED launch: ${t.symbol} ${short(t.mint)} was posted ${k}x before it existed — evaluating entry at creation`);
-  signalNotify(`🚨 pre-announced launch: ${t.symbol} — mint was posted before launch\nhttps://pump.fun/coin/${t.mint}`);
+  log(`[kol] PRE-ANNOUNCED launch: ${t.symbol} ${short(t.mint)} was posted ${k}x before it existed - evaluating entry at creation`);
+  signalNotify(`🚨 pre-announced launch: ${t.symbol} - mint was posted before launch\nhttps://pump.fun/coin/${t.mint}`);
   db.prepare("INSERT INTO signals (source, account, mint, symbol, kind, text, url, posted_at, seen_at) VALUES (?,?,?,?,?,?,?,?,?)").run("matcher", "pre-announced", t.mint, t.symbol, "pre-announced-mint", "", "", Date.now(), Date.now());
   broker.evaluateEntries(t, Date.now(), true);
 });
@@ -435,7 +435,7 @@ setInterval(() => {
 }, 400);
 /**
  * Movement detector over the WHOLE PumpSwap stream (2026-09-05).
- * The AMM websocket delivers every trade on every pool — ~5.3 M events per run — but only trades on a token still in
+ * The AMM websocket delivers every trade on every pool - ~5.3 M events per run - but only trades on a token still in
  * the tracker were used, about 2 % of them. A token we dropped (the 6 h cap) that starts running hours later was
  * therefore invisible, which is precisely the shape of the verified winners: the run happens on PumpSwap, hours after
  * the curve. This keeps a small rolling window per pool, with no database writes, and raises a signal when real buying
@@ -448,7 +448,7 @@ const MOVE_MIN_LIFT = Number(process.env.MOVE_MIN_LIFT || 1.5);
 /**
  * Anti-wash gates. The pool-capital wash of 3 Sep defeats a price-and-volume test by design: the operator buys ~99 % of
  * its own pool with thousands of its own SOL, so the print is enormous and nobody can sell into it. Its signature in the
- * first live hour of this detector was unmistakable — TRUMPCARD 388x, HOOD 522x, PONS 333x, each "+1500-1900 SOL net
+ * first live hour of this detector was unmistakable - TRUMPCARD 388x, HOOD 522x, PONS 333x, each "+1500-1900 SOL net
  * from 8 buyers" (the factory tickers of `npm run buyouts`). Two gates kill it without touching a real run: nothing
  * genuine moves 20x in five minutes, and a real move is not one wallet's money.
  */
@@ -614,7 +614,7 @@ function handleSignal(sourceName: string, s: KolSignal): void {
   db.prepare("INSERT INTO signals (source, account, mint, symbol, kind, text, url, posted_at, seen_at) VALUES (?,?,?,?,?,?,?,?,?)").run(
     sourceName, s.account, mint, symbol, s.kind, s.text.slice(0, 500), s.url, s.postedAt, now,
   );
-  log(`[${sourceName}] ${s.account} ${s.kind} ${mint ? short(mint) : "$" + symbol} ${mint ? "" : "(no launch yet — will buy a matching launch within 6h)"}`);
+  log(`[${sourceName}] ${s.account} ${s.kind} ${mint ? short(mint) : "$" + symbol} ${mint ? "" : "(no launch yet - will buy a matching launch within 6h)"}`);
   signalNotify(`🐦 ${s.account} posted ${s.kind}: ${mint ?? "$" + symbol}\n${s.url}`);
   if (!mint) {
     if (symbol) expectations.set(symbol, { account: s.account, url: s.url, postedAt: s.postedAt });
@@ -637,7 +637,7 @@ function handleSignal(sourceName: string, s: KolSignal): void {
 /**
  * Having a key is not consent to spend it.
  *
- * This started whenever a provider was configured, which meant polling 37 timelines every 60 seconds — about 53,000
+ * This started whenever a provider was configured, which meant polling 37 timelines every 60 seconds - about 53,000
  * requests a day. It costs nothing today only because the account has no credits and every request 402s, so the
  * moment anyone tops it up this loop drains the balance before the targeted evidence search gets a single query.
  * That is the exact firehose DEPLOY.md already switched off: ~$390/month for kolSignals=0 and a strategy that
@@ -652,7 +652,7 @@ if (provider && kols.length && process.env.X_KOL_WATCH === "1") {
   watcher.on("signal", (s) => handleSignal(provider.name, s));
   watcher.start();
 } else {
-  log(`[kol] watcher disabled (${!provider ? "no TWITTER_PROVIDER/key configured" : !kols.length ? "kols.txt is empty" : "X_KOL_WATCH is not 1 — a configured key is not permission to spend it"})`);
+  log(`[kol] watcher disabled (${!provider ? "no TWITTER_PROVIDER/key configured" : !kols.length ? "kols.txt is empty" : "X_KOL_WATCH is not 1 - a configured key is not permission to spend it"})`);
 }
 let street: StreetListener | null = null;
 const buzz = new BuzzTracker({ windowMs: 10 * 60_000, baselineMs: 3 * 3600_000, minAuthors: config.buzzMinAuthors, minLift: config.buzzMinLift, cooldownMs: 60 * 60_000 });
@@ -687,7 +687,7 @@ if (provider?.search && config.xListenQueries.length) {
         b.term, b.kind, b.authors, b.mentions, b.followers, b.priorMentionsPerWindow, matched, b.sampleUrl, b.sampleText.slice(0, 500), now,
       );
       log(`[buzz] ${b.kind === "cashtag" ? "$" : "#"}${b.term}: ${b.mentions} mentions by ${b.authors} accounts in 10m (baseline ${b.priorMentionsPerWindow.toFixed(1)}/10m)${matched ? ` → matches launch ${short(matched)}` : " → no launch yet, watching for one"}`);
-      signalNotify(`📣 buzz ${b.kind === "cashtag" ? "$" : "#"}${b.term}: ${b.mentions} mentions / ${b.authors} accounts in 10m${matched ? ` — token exists https://pump.fun/coin/${matched}` : " — no token yet"}\n${b.sampleUrl}`);
+      signalNotify(`📣 buzz ${b.kind === "cashtag" ? "$" : "#"}${b.term}: ${b.mentions} mentions / ${b.authors} accounts in 10m${matched ? ` - token exists https://pump.fun/coin/${matched}` : " - no token yet"}\n${b.sampleUrl}`);
       if (b.kind === "cashtag") handleSignal("x-buzz", { account: "x-buzz", kind: "cashtag", mint: matched, symbol: b.term, text: b.sampleText, url: b.sampleUrl, postedAt: now });
     }
   }, 60_000);
@@ -768,7 +768,7 @@ if (telegramConfigured(config.telegramApiId, config.telegramApiHash) && channels
   const client = createClient(config.telegramApiId, config.telegramApiHash);
   /**
    * Resume from the newest message already archived, per channel, so a restart does not silently skip everything
-   * posted while this process was down. Returns 0 when we hold nothing for a channel, which starts it at "now" —
+   * posted while this process was down. Returns 0 when we hold nothing for a channel, which starts it at "now" -
    * the only honest option, since we cannot claim coverage of a period we were not watching.
    */
   const resumeAt = db.prepare("SELECT MAX(msg_id) m FROM tg_messages WHERE channel = ?");
@@ -787,7 +787,7 @@ if (telegramConfigured(config.telegramApiId, config.telegramApiHash) && channels
    * Retained, never published. This does not go into servicedb and must not: the published record carries what a
    * CREATOR claimed about their own launch, which is the subject's own statement and often the only surviving
    * evidence of an impersonation. A channel message is someone else's expression, and most people amplifying a
-   * manufactured token were fooled by it rather than party to it — printing their words beside a fraud label under a
+   * manufactured token were fooled by it rather than party to it - printing their words beside a fraud label under a
    * DOI that cannot be withdrawn would make an accusation this project has no basis to make.
    *
    * Retention is a legal decision and not a technical one. TELEGRAM_RETAIN_DAYS exists so counsel can set one;
@@ -841,7 +841,7 @@ if (telegramConfigured(config.telegramApiId, config.telegramApiHash) && channels
   tg.start()
     .then(() => {
       selfNotify = (text) => tgRef.sendSelf(text);
-      tgRef.sendSelf(`🟢 pump-monitor started — watching ${channels.length} Telegram channels, ${kols.length} X accounts, ${strategies.length} paper strategies`);
+      tgRef.sendSelf(`🟢 pump-monitor started - watching ${channels.length} Telegram channels, ${kols.length} X accounts, ${strategies.length} paper strategies`);
     })
     .catch((e) => log("[tg] failed to start:", e.message));
 } else {
@@ -867,7 +867,7 @@ setInterval(() => {
     }
   } else if (Date.now() - lastSeenChangeAt > 5 * 60_000 && !staleAlerted) {
     staleAlerted = true;
-    log("[health] no launches for 5 minutes — feed may be down");
+    log("[health] no launches for 5 minutes - feed may be down");
     notify("🔴 pump-monitor: no launches seen for 5 minutes (feed down?)");
   }
   // Heartbeat. The product's whole claim is "we watched this launch happen", so it has to be able to say when it was
@@ -879,7 +879,7 @@ setInterval(() => {
   // process is alive, and this project's characteristic failure is a process that is alive and deaf: on 2026-09-07
   // both websockets errored continuously and ingestion stopped dead at launches=4093 while the process stayed up and
   // looked healthy. An unconditional heartbeat records that window as observed, and a launch inside it is then
-  // answered as watched — a clean result about a token nobody saw, which is the one error here that cannot be walked
+  // answered as watched - a clean result about a token nobody saw, which is the one error here that cannot be walked
   // back. Stamping the last arrival makes a deaf collector write a truthful gap by itself, with no detector to get
   // right, and errs toward claiming less coverage than we had rather than more.
   try { db.prepare("UPDATE runs SET stopped_at = ? WHERE id = ?").run(lastSeenChangeAt, runId); } catch {}
@@ -898,13 +898,13 @@ setInterval(() => {
 /**
  * Go back for the launches whose metadata we failed to fetch the first time.
  *
- * A launch is asked for its metadata once, as it happens. When that request failed — and until 2026-09-08 it failed
- * about three times in four, because every launch declares `ipfs.io` and `ipfs.io` returns 429 to us — nothing tried
+ * A launch is asked for its metadata once, as it happens. When that request failed - and until 2026-09-08 it failed
+ * about three times in four, because every launch declares `ipfs.io` and `ipfs.io` returns 429 to us - nothing tried
  * again and nothing was written down, so the row reads exactly like a launch that declared no metadata at all.
  *
  * This is the only loss here that a cheque cannot undo. On-chain history sits on the chain and an archival node will
  * sell it back whenever someone pays. The image and the description live behind a URI the creator controls, and the
- * window to fetch them closes quietly when they repoint or unpin it — no error, no event, just a document that used
+ * window to fetch them closes quietly when they repoint or unpin it - no error, no event, just a document that used
  * to be there. Roughly twenty thousand launches a day were falling through that window.
  *
  * Both ends of the backlog on a slow timer: the obligation this process has is to keep watching the chain, and a
@@ -923,7 +923,7 @@ const META_RETRY_MS = Number(process.env.META_RETRY_HOURS ?? 6) * 3600_000;
  * for anything it fell behind: live capture only started working on 2026-09-08, and by then 116,739 launches with a
  * URI and no document were already older than three days, so this sweep could never see them again however long it
  * ran. A launch's metadata document is the one artefact in this archive that nobody can rebuild from chain at any
- * price — the creator owns the URI and the pin — so a window here is not a bound on cost, it is a decision to lose
+ * price - the creator owns the URI and the pin - so a window here is not a bound on cost, it is a decision to lose
  * the record of everything older than it.
  *
  * The cost it was bounding is also not real: the documents average 306 bytes. Every launch this project has ever
@@ -934,12 +934,12 @@ const META_RETRY_MS = Number(process.env.META_RETRY_HOURS ?? 6) * 3600_000;
  *
  * The batch went from 25 sequential fetches to 200 at concurrency 12, and nothing stopped the 60-second timer
  * firing again while a slow pass was still in flight. Both passes then run the same SELECT with the same ORDER BY,
- * get the same rows, and ask the same gateways for the same documents — observed 2026-09-11 as two identical log
+ * get the same rows, and ask the same gateways for the same documents - observed 2026-09-11 as two identical log
  * lines in the same second: "recovered 48/120 ... 65,683 still without a document", twice.
  *
  * The writes are idempotent so nothing is corrupted, and that is exactly why it could run unnoticed. What it costs
  * is half the gateway budget, and gateway throughput is the binding constraint on the one thing here with a
- * deadline — documents disappear from their hosts whether or not we spent the request on a duplicate.
+ * deadline - documents disappear from their hosts whether or not we spent the request on a duplicate.
  */
 let sweepingMeta = false;
 
@@ -950,7 +950,7 @@ async function sweepMissingMeta(): Promise<void> {
     /**
      * Both ends, for the same reason the image capture needs both: newest keeps pace with the small fraction the
      * live fetch misses, oldest drains what fell behind before it worked. Newest-first alone could never reach the
-     * backlog, because new launches arrive faster than the sweep runs and are always at the head of the ordering —
+     * backlog, because new launches arrive faster than the sweep runs and are always at the head of the ordering -
      * the 09-02 to 09-07 week sat at zero documents in production while this ran every minute for two days.
      */
     const pick = (order: "ASC" | "DESC", n: number) => db.prepare(`SELECT mint, uri FROM tokens
@@ -1015,7 +1015,7 @@ const RETENTION_DAYS = Number(process.env.RETENTION_DAYS || 14);
  * The comment above this function claimed only working data goes and that the archive is never touched. That was
  * false, and quietly so: `findBuyout` reads `trades` to answer who took each curve, which is the attribution side of
  * this product and the part no contract scanner can reproduce. Deleting those rows on a timer destroys the proof
- * behind a claim the site keeps making, while every count on the site stays exactly the same — the record still says
+ * behind a claim the site keeps making, while every count on the site stays exactly the same - the record still says
  * 169,100 launches and can no longer show you who bought them.
  *
  * Measured 2026-09-08: the collector's record carried 580 buyout trades against the laptop's 2,099, purely because
@@ -1024,7 +1024,7 @@ const RETENTION_DAYS = Number(process.env.RETENTION_DAYS || 14);
  *
  * The exemption is narrow on purpose. Curve buys at or above BUYOUT_SOL are what `servicedb` copies into the record
  * and what `findBuyout` reads; everything else in `trades` really is working data and still goes. At ~2,100 rows
- * over the whole archive this costs nothing to keep and cannot be rebuilt once dropped — the transactions remain on
+ * over the whole archive this costs nothing to keep and cannot be rebuilt once dropped - the transactions remain on
  * chain, but only an archival node can reach back for them, and by then we are reconstructing what we watched.
  */
 const KEEP_EVIDENCE = KEEP_TRADE_EVIDENCE;
@@ -1039,7 +1039,7 @@ function pruneWorkingData(): void {
   if (hold) {
     if (!prunedHoldLogged) {
       prunedHoldLogged = true;
-      log(`[prune] LEGAL HOLD set — retention suspended, nothing will be deleted`);
+      log(`[prune] LEGAL HOLD set - retention suspended, nothing will be deleted`);
       // Recorded, not just logged: a hold that leaves no trace of when it began cannot be testified to afterwards.
       try {
         const open = db.prepare("SELECT id FROM legal_holds WHERE released_at IS NULL ORDER BY id DESC LIMIT 1").get() as any;
@@ -1050,7 +1050,7 @@ function pruneWorkingData(): void {
     }
     return;
   }
-  /** Anything older than the earliest hold ever set stays, released or not — see legal_holds.protect_before. */
+  /** Anything older than the earliest hold ever set stays, released or not - see legal_holds.protect_before. */
   let floor = 0;
   try { floor = Number((db.prepare("SELECT MIN(protect_before) m FROM legal_holds").get() as any)?.m ?? 0) || 0; } catch {}
   const cutoff = Date.now() - RETENTION_DAYS * 86400_000;
@@ -1060,7 +1060,7 @@ function pruneWorkingData(): void {
     /**
      * Each table in its own try, because one missing table used to abort the whole pass.
      *
-     * `curve_snapshots` is created by curvepoll.ts, which has only ever run on the laptop — so on this collector the
+     * `curve_snapshots` is created by curvepoll.ts, which has only ever run on the laptop - so on this collector the
      * table does not exist, the DELETE threw, the single surrounding catch swallowed it, and every statement AFTER
      * it was skipped. Trades were pruned, tweets never were, and the log said one line about a failure. A retention
      * pass that half-runs looks exactly like one that ran.
@@ -1071,8 +1071,8 @@ function pruneWorkingData(): void {
       /**
        * Tweets are kept unless someone sets a retention period, the same footing as tg_messages.
        *
-       * Until today this DELETE never ran here at all — the curve_snapshots throw above aborted the pass before
-       * reaching it — so fixing that fault would have ARMED the deletion of 88,133 posts as its first act. That
+       * Until today this DELETE never ran here at all - the curve_snapshots throw above aborted the pass before
+       * reaching it - so fixing that fault would have ARMED the deletion of 88,133 posts as its first act. That
        * corpus is the only sample of broad pump.fun X chatter anyone here holds; it is what showed this morning that
        * promotion tracks attention rather than manufacture, and it cannot be re-collected at any price now the
        * account has no credits.
@@ -1118,7 +1118,7 @@ if (strategies.length) {
   for (const s of strategies) log(`   ${s.name.padEnd(16)} ${s.description}`);
 } else {
   log(`paper trading OFF (${ALL_STRATEGIES.length} strategies available; PAPER=1 to run them). The curve thesis is `
-    + `settled — 0 of 19,412 positions ever reached 5x — and this process's job is ingestion.`);
+    + `settled - 0 of 19,412 positions ever reached 5x - and this process's job is ingestion.`);
 }
 
 function shutdown() {
@@ -1138,7 +1138,7 @@ function shutdown() {
 /**
  * Publishing the record from the machine that holds it.
  *
- * A Railway volume attaches to exactly one service, and `pump.db` lives on this one — so the record database has to
+ * A Railway volume attaches to exactly one service, and `pump.db` lives on this one - so the record database has to
  * be built here, and handed to the web service over the private network. Until now it was built on a laptop and baked
  * into the image, which meant the published archive was only ever as fresh as the last manual deploy, and twice went
  * missing entirely because an ignore file excluded it.
@@ -1172,14 +1172,14 @@ async function buildRecord(): Promise<void> {
         stdio: ["ignore", "pipe", "pipe"], env: process.env,
       });
       // Keep enough to see the actual failure. The first version kept 400 chars and then logged only the last line,
-      // which for a Node crash is the version banner — the exception itself had already been trimmed away.
+      // which for a Node crash is the version banner - the exception itself had already been trimmed away.
       let tail = "";
       child.stdout?.on("data", (d) => { tail = (tail + d).slice(-4000); });
       child.stderr?.on("data", (d) => { tail = (tail + d).slice(-4000); });
       child.on("error", (e) => { log(`[record] could not start build: ${e.message}`); resolve(); });
       child.on("exit", (code) => {
         const secs = ((Date.now() - started) / 1000).toFixed(0);
-        if (code === 0) log(`[record] rebuilt ${RECORD_PATH} in ${secs}s — ${tail.trim().split("\n").pop() ?? ""}`);
+        if (code === 0) log(`[record] rebuilt ${RECORD_PATH} in ${secs}s - ${tail.trim().split("\n").pop() ?? ""}`);
         else {
           const lines = tail.trim().split("\n").filter((l) => l.trim() && !/^Node\.js v/.test(l));
           log(`[record] build FAILED (exit ${code}) after ${secs}s: ${lines.slice(-4).join(" | ").slice(0, 600)}`);
@@ -1204,7 +1204,7 @@ async function runChild(script: string, args: string[], tag: string): Promise<vo
     child.on("error", (e) => { log(`[${tag}] could not start build: ${e.message}`); resolve(); });
     child.on("exit", (code) => {
       const secs = ((Date.now() - started) / 1000).toFixed(0);
-      if (code === 0) log(`[${tag}] rebuilt in ${secs}s — ${tail.trim().split("\n").filter((l) => l.trim()).slice(-2).join(" | ")}`);
+      if (code === 0) log(`[${tag}] rebuilt in ${secs}s - ${tail.trim().split("\n").filter((l) => l.trim()).slice(-2).join(" | ")}`);
       else log(`[${tag}] build FAILED (exit ${code}) after ${secs}s: ` +
         tail.trim().split("\n").filter((l) => l.trim() && !/^Node\.js v/.test(l)).slice(-4).join(" | ").slice(0, 600));
       resolve();
@@ -1224,7 +1224,7 @@ if (process.env.RECORD_BUILD === "1") {
  * The web service watches the age of the record it serves, which catches a frozen archive and cannot catch its own
  * death: a container that is gone, crash-looping, or wedged sends nothing, and silence from a watcher is
  * indistinguishable from good news. This probe lives in the other service, in another container, and asks the
- * question the way a visitor does — over the public internet, through Cloudflare, at the canonical host.
+ * question the way a visitor does - over the public internet, through Cloudflare, at the canonical host.
  *
  * That makes the two checks genuinely independent rather than two copies of one check: this one alarms when the site
  * is unreachable or answering wrong, and it keeps alarming about staleness even if the process that would normally
@@ -1252,13 +1252,13 @@ if (process.env.SITE_WATCH !== "0") {
       const j = await res.json() as any;
       const asOf = Number(j?.asOf?.ms);
       // A 200 carrying no timestamp is a failure, not a pass. The one thing this must never do is read a shape it
-      // does not understand as health — that is how a check ends up unable to fail.
+      // does not understand as health - that is how a check ends up unable to fail.
       if (!Number.isFinite(asOf) || asOf <= 0) return { ok: false, detail: `${SITE_URL}/api/v1/status carried no readable asOf` };
       const age = Date.now() - asOf;
       const launches = Number(j?.launches) || 0;
       return age < SITE_STALE_MS
         ? { ok: true, detail: `${launches.toLocaleString()} launches, built ${fmtAge(age)} ago` }
-        : { ok: false, detail: `${SITE_URL} is serving a record built ${fmtAge(age)} ago (limit ${fmtAge(SITE_STALE_MS)}) — ` +
+        : { ok: false, detail: `${SITE_URL} is serving a record built ${fmtAge(age)} ago (limit ${fmtAge(SITE_STALE_MS)}) - ` +
             `${launches.toLocaleString()} launches. Every route answers; the counts are old. Publishing has stopped.` };
     },
   });
@@ -1271,7 +1271,7 @@ startHeartbeat(process.env.HEARTBEAT_URL ?? "", 5 * 60_000, "collector");
  *
  * Every other fact this project publishes can be rebuilt from chain by anyone with archival RPC. The picture cannot:
  * it lives on IPFS behind a pin the operator can drop, and when it goes there is no price at which it comes back. It
- * was an hourly launchd job on one machine, which means it stopped whenever that machine slept — collecting the one
+ * was an hourly launchd job on one machine, which means it stopped whenever that machine slept - collecting the one
  * unrecoverable thing on the least reliable schedule in the system.
  *
  * In-process rather than a child process. `images.ts` argues for a separate job so slow gateways cannot stall the
@@ -1283,7 +1283,7 @@ startHeartbeat(process.env.HEARTBEAT_URL ?? "", 5 * 60_000, "collector");
  * `IMAGES_EVERY_MINUTES`. Bytes go to the object store when one is configured, and next to the database otherwise.
  *
  * THE DEFAULTS MUST BEAT THE LAUNCH RATE, and for two days they did not. They were sized when capture covered only
- * graduated launches — about 1,400 a day — and 300 rows every 20 minutes is ample for that. Scope was then widened
+ * graduated launches - about 1,400 a day - and 300 rows every 20 minutes is ample for that. Scope was then widened
  * to every launch (`all: true` below, and it is the right call) without resizing the schedule: 900 an hour against
  * roughly 1,070 launches an hour. A deficit of 171 an hour, 4,100 a day, growing forever.
  *
@@ -1316,12 +1316,12 @@ if (process.env.IMAGES_CAPTURE === "1") {
          * Every launch, not only the ones that graduated.
          *
          * Restricting capture to graduations meant the archive kept the picture only for launches that had already
-         * passed a test — so it could never answer a question about the ones it had filtered out, and could never
+         * passed a test - so it could never answer a question about the ones it had filtered out, and could never
          * establish what an ordinary launch looked like to compare a suspicious one against. An archive that keeps
          * evidence only where it already suspects something has made the determination before preserving the record.
          *
          * The store is content-addressed by sha256 and skips bytes it already holds, so the 41% of launches that
-         * reuse another launch's picture cost nothing beyond the fetch — and that reuse is itself the signal: 249
+         * reuse another launch's picture cost nothing beyond the fetch - and that reuse is itself the signal: 249
          * launches sharing one image is a factory, and it is only visible if the unremarkable ones were kept too.
          */
         all: true,
@@ -1346,7 +1346,7 @@ if (process.env.IMAGES_CAPTURE === "1") {
         /**
          * Said as a fault, not as a statistic. A backlog that grows across a pass means the schedule is below the
          * launch rate, and every hour it stays there is a fixed number of launches whose picture nobody will ever
-         * hold — the one loss in this project that a later pass cannot repair.
+         * hold - the one loss in this project that a later pass cannot repair.
          */
         if (backlogWas !== null && backlog > backlogWas)
           log(`[images] FALLING BEHIND: capture is slower than launches arrive. Raise IMAGES_LIMIT or lower ` +
@@ -1400,14 +1400,14 @@ if (process.env.PLATFORM_CAPTURE === "1") {
  * Confirm recorded graduations against the bonding curve account, continuously.
  *
  * Confirmation used to arrive only through pool discovery, so it inherited pool discovery's coverage and stalled
- * near half of all graduations — and `assess()` withholds every statement about how a curve filled until a
+ * near half of all graduations - and `assess()` withholds every statement about how a curve filled until a
  * graduation is confirmed. This closes the loop in the process that records them: the backlog is a few dozen
  * `getMultipleAccounts` calls, and a pass costs less than a single image fetch.
  *
  * Newest-first here on purpose. The old end of the backlog is a one-off backfill worth running by hand
  * (`npm run confirm -- --oldest`); what the collector needs is for today's graduations to stop accumulating
  * unconfirmed behind it. Bounded per pass, never fatal, and it shares this process's database connection for the
- * same reason images does — a second writer against the busy timeout costs dropped launches, and a launch dropped
+ * same reason images does - a second writer against the busy timeout costs dropped launches, and a launch dropped
  * is the one loss here that cannot be repaired.
  */
 if (process.env.CONFIRM_SWEEP === "1") {
@@ -1423,7 +1423,7 @@ if (process.env.CONFIRM_SWEEP === "1") {
       const { confirmGraduations } = await import("./confirm.ts");
       /**
        * Alternate ends. Newest-first stops today's graduations accumulating unconfirmed; oldest-first works the
-       * backlog, where the yield is far higher — measured 2026-09-09, the newest 2,000 unconfirmed returned 9
+       * backlog, where the yield is far higher - measured 2026-09-09, the newest 2,000 unconfirmed returned 9
        * completions and the oldest 2,000 returned 824, because the old end is where pool discovery was blind and
        * the new end is mostly the vSOL inference firing on curves that never completed. Running only one end would
        * either let the front edge rot or never reach the backlog.
@@ -1444,13 +1444,13 @@ if (process.env.CONFIRM_SWEEP === "1") {
 /**
  * Trace the operator map here, because the alternative was a laptop and the alternative broke the archive.
  *
- * `operator_wallets` is the attribution half of the product — every wallet page and the front page's "who takes the
- * curves" reads it — and it only ever grew where a person ran `npm run clusters`. Tonight that came due: the web
+ * `operator_wallets` is the attribution half of the product - every wallet page and the front page's "who takes the
+ * curves" reads it - and it only ever grew where a person ran `npm run clusters`. Tonight that came due: the web
  * service refused the collector's record for carrying 8,598 operator wallets against 10,243 already served, so the
  * published archive stopped advancing. The guard was right. The gap existed because this code had no home in the
  * cloud, and relaxing the guard would have published less evidence to make a number go up.
  *
- * Runs on the collector's own connection, not its own — a second writer against a 10 s busy_timeout costs dropped
+ * Runs on the collector's own connection, not its own - a second writer against a 10 s busy_timeout costs dropped
  * launches. Slow and bounded, because it is RPC-heavy and ingestion always outranks it.
  */
 if (process.env.CLUSTERS_TRACE === "1") {
@@ -1464,7 +1464,7 @@ if (process.env.CLUSTERS_TRACE === "1") {
      * Logged on entry, not only on completion.
      *
      * Logging the result alone cannot distinguish "the timer never fired" from "it fired and is still inside an RPC
-     * call" — and those need opposite fixes. An hour went into that ambiguity tonight: the operator map sat at
+     * call" - and those need opposite fixes. An hour went into that ambiguity tonight: the operator map sat at
      * 8,598 with no line either way, and the only honest reading was that something might be hanging, might be
      * unconfigured, or might simply not have reached a log window. A start line and an end line answer it.
      */
@@ -1554,7 +1554,7 @@ if (process.env.BACKFILL_SIG === "1") {
 }
 
 /**
- * Hand the record to the web service. Private network only in normal operation — Railway routes
+ * Hand the record to the web service. Private network only in normal operation - Railway routes
  * `collector.railway.internal` between services without exposing anything publicly.
  */
 if (process.env.RECORD_PORT) {
@@ -1568,7 +1568,7 @@ if (process.env.RECORD_PORT) {
         /**
          * The live count, which is a different claim from every other number this service publishes.
          *
-         * `bytes`/`builtAt` describe the record FILE — a snapshot, correct only about itself. This describes what
+         * `bytes`/`builtAt` describe the record FILE - a snapshot, correct only about itself. This describes what
          * the collector holds right now, and it is the honest source for "how many launches are on record", which
          * the site had been answering out of the published snapshot. Those are two different sentences and the site
          * was using one number for both: the download page understated the file it offered by 8,818 launches on
@@ -1590,7 +1590,7 @@ if (process.env.RECORD_PORT) {
            *
            * `serve.ts` refuses a pulled record carrying under 90% of the operator_wallets it already serves, and on
            * 2026-09-09 that froze publishing: the collector had 8,598 against 10,243 because `clusters` had only
-           * ever run on a laptop. The guard was right and the number it turned on was invisible from outside — no
+           * ever run on a laptop. The guard was right and the number it turned on was invisible from outside - no
            * endpoint reported it, so "is the archive able to advance yet" could not be answered without a deploy.
            * A figure that gates publishing has to be observable, or the next freeze is diagnosed the same slow way.
            */
@@ -1598,7 +1598,7 @@ if (process.env.RECORD_PORT) {
         /**
          * Counted separately, and its failure reported rather than swallowed.
          *
-         * Folded into the try above, a throw here left `held` and `observed` set and `operators` null — which is
+         * Folded into the try above, a throw here left `held` and `observed` set and `operators` null - which is
          * indistinguishable from "the collector is old and does not send this field", and that is exactly how it was
          * first misread. The two states have different causes and different fixes, so they are told apart: `null`
          * plus `operatorsError` is a query that failed and says why, `null` alone is a field that was never sent.
@@ -1614,20 +1614,20 @@ if (process.env.RECORD_PORT) {
        * One launch, answered by the machine that watched it.
        *
        * The public service reads a record file rebuilt every six hours, so for the first hours of a launch's life it
-       * held no row and answered `UNKNOWN — Launch not observed`, then set about reconstructing the launch from
+       * held no row and answered `UNKNOWN - Launch not observed`, then set about reconstructing the launch from
        * chain history. About a launch we had watched from its creation transaction. That is the worst failure this
        * product has: the single thing it offers that a cold scanner cannot is being there at birth, and it was
        * disclaiming exactly that during the only window when anyone is asking.
        *
        * The lag was never a property of the data. It came from welding a question about one launch to the rebuild of
-       * a seventy-megabyte file — 1.6 MB of new launches shipped inside 69.6 MB of packaging, so the packaging set
+       * a seventy-megabyte file - 1.6 MB of new launches shipped inside 69.6 MB of packaging, so the packaging set
        * the clock. This answers from the live database instead, in milliseconds, over the private network the web
        * service already polls for the counter.
        *
        * THE ASSESSMENT IS COMPUTED HERE, not there, and that is the point rather than an optimisation. `assess`
        * needs the trade rows behind a buyout and the run intervals proving we were watching; both live here and
        * neither is in a six-hour-old extract. Sending the row alone would have the web service judge it against
-       * evidence it does not hold — missing a buyout it cannot see, and calling the launch uncovered because the
+       * evidence it does not hold - missing a buyout it cannot see, and calling the launch uncovered because the
        * record's last run ended when the file was built. Same code from `provenance.ts`, run where the evidence is.
        */
       /**
@@ -1635,7 +1635,7 @@ if (process.env.RECORD_PORT) {
        *
        * Cursor is a timestamp rather than an offset, so a consumer that reconnects asks for "anything after what I
        * already showed" and cannot double-count or skip when the ring rotates under it. An empty array is a real
-       * answer — a quiet few seconds — and is not the same as an error, which is why this never returns 204.
+       * answer - a quiet few seconds - and is not the same as an error, which is why this never returns 204.
        */
       if (req.url?.startsWith("/recent")) {
         const since = Number(new URL(req.url, "http://x").searchParams.get("since") ?? 0);
@@ -1649,7 +1649,7 @@ if (process.env.RECORD_PORT) {
           const t = db.prepare(`SELECT ${TOKEN_COLUMNS} FROM tokens WHERE mint = ?`).get(lm[1]) as any;
           if (!t) { res.writeHead(404, { "content-type": "application/json" }); return res.end(JSON.stringify({ held: false })); }
           /**
-           * Coverage up to now, not up to the last heartbeat — and only while ingestion proves it.
+           * Coverage up to now, not up to the last heartbeat - and only while ingestion proves it.
            *
            * `runs.stopped_at` is stamped with the last launch actually observed, once a minute. So the newest
            * coverage window always trails the clock by up to sixty seconds, and a launch from the last minute reads
@@ -1657,7 +1657,7 @@ if (process.env.RECORD_PORT) {
            * and it would have disclaimed every one of them for their first minute of life.
            *
            * Extending the window to now is safe ONLY because of what the heartbeat means. It is not a liveness
-           * timer — that version of it recorded deaf hours as covered and is the first row of the failure table in
+           * timer - that version of it recorded deaf hours as covered and is the first row of the failure table in
            * HANDOFF. It is the timestamp of the last launch this process actually decoded. A fresh one is therefore
            * evidence of ingestion, not of the process merely being up, and 180s is the same threshold `npm run
            * health` uses to call ingestion advancing.
@@ -1683,8 +1683,8 @@ if (process.env.RECORD_PORT) {
        * The captured launch image, by content hash, over the private network.
        *
        * The bytes live on THIS service's volume because this is the process that captured them. The web service has
-       * no volume, so its only alternatives were to ship the pictures inside its build context — which puts whichever
-       * laptop deploys back in the publish path, and dies at ~570 MB a day — or to hot-link the creator's IPFS URI,
+       * no volume, so its only alternatives were to ship the pictures inside its build context - which puts whichever
+       * laptop deploys back in the publish path, and dies at ~570 MB a day - or to hot-link the creator's IPFS URI,
        * which would have the page that reports what a launch claimed at birth quietly showing whatever the operator
        * is serving today. Both are the failure this project exists to point at. So the record travels over the
        * private network and the pictures travel the same way.
@@ -1697,7 +1697,7 @@ if (process.env.RECORD_PORT) {
        * The launch's own metadata document, by mint, over the private network.
        *
        * `record.db` carries `meta_sha256` and not the document, so a reader could verify bytes they already had and
-       * could not obtain any — which for the one artefact here that cannot be rebuilt from chain at any price is the
+       * could not obtain any - which for the one artefact here that cannot be rebuilt from chain at any price is the
        * difference between being the copy and merely attesting to it. Several thousand of these exist nowhere else:
        * metadata.j7tracker.io hosted 30,443 launches and now answers 404 for every one.
        *
@@ -1745,7 +1745,7 @@ if (process.env.RECORD_PORT) {
             const buf = readFileSync(path);
             const actual = createHash("sha256").update(buf).digest("hex");
             if (actual !== sha) {
-              log(`[image] ${path} does not match its own hash — refusing to serve it`);
+              log(`[image] ${path} does not match its own hash - refusing to serve it`);
               res.writeHead(500, { "content-type": "text/plain" });
               return res.end("stored image failed its own checksum");
             }
@@ -1759,7 +1759,7 @@ if (process.env.RECORD_PORT) {
       /**
        * The document bundle, for the web service to publish. Same reasoning as /record.db: the bytes live on this
        * volume because this is the process that captured them, and a rebuild in progress must never be served half
-       * written — a truncated bundle reads as a real one holding fewer documents.
+       * written - a truncated bundle reads as a real one holding fewer documents.
        */
       if (req.url === "/documents.ndjson.gz" || req.url === "/documents.json") {
         const path = req.url === "/documents.json" ? DOCS_PATH.replace(/\.ndjson\.gz$/, ".json") : DOCS_PATH;

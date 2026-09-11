@@ -22,7 +22,7 @@ const table = (rows: Record<string, string | number>[]) => {
   for (const r of rows) console.log("  " + cols.map((c, i) => String(r[c]).padEnd(w[i])).join("  "));
 };
 
-console.log(`\n=== pump.fun paper-trading report${hours ? ` (last ${hours}h)` : ""} — ${config.dbPath} ===\n`);
+console.log(`\n=== pump.fun paper-trading report${hours ? ` (last ${hours}h)` : ""} - ${config.dbPath} ===\n`);
 
 // ---------- universe / base rates ----------
 const u = one(
@@ -108,7 +108,7 @@ for (const s of strats) {
 table(rows);
 const susp = one(`SELECT COUNT(*) n, ROUND(SUM(pnl_sol),1) pnl FROM positions WHERE decided_at >= ? AND suspect = 1`, since);
 if (susp?.n) console.log(`  ${susp.n} position(s) flagged suspect (multiple > 50x, a price-source artifact) and excluded above; their nominal PnL was ${susp.pnl} SOL.`);
-console.log("  ifheld5m/15m/60m = avg (token price N min after launch / our entry price) over every entry — the no-exit-rules outcome; up@15m = share of entries above entry price at 15m");
+console.log("  ifheld5m/15m/60m = avg (token price N min after launch / our entry price) over every entry - the no-exit-rules outcome; up@15m = share of entries above entry price at 15m");
 
 for (const s of strats) {
   const ex = q<{ exit_reason: string; n: number; pnl: number }>(

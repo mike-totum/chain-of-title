@@ -3,7 +3,7 @@
  *
  *   npm run serve -- [--port 8899] [--dir site]
  *
- * The static site can only answer the launches it was generated from, so every other mint hit a 404 — the single
+ * The static site can only answer the launches it was generated from, so every other mint hit a 404 - the single
  * worst page on the site, because a stranger's first action is to paste an address we probably do not hold. Here that
  * request instead queues a chain rebuild (`backfill.ts`), tells the visitor what is happening and how long it takes,
  * and writes the finished page into the static tree so the answer is permanent and the next request never touches
@@ -49,13 +49,13 @@ const MAX_QUEUE = 40;                 // beyond this we say we are busy rather t
 const RETRY_FAILED_AFTER = 3600_000;  // a failed rebuild may be retried after an hour, not on every reload
 
 /**
- * Limits. Every rebuild spends someone else's money — archival RPC calls, thousands of them for a busy curve — and
+ * Limits. Every rebuild spends someone else's money - archival RPC calls, thousands of them for a busy curve - and
  * the request comes from the open internet. Without a bound, one visitor can occupy the single worker indefinitely
  * and exhaust the RPC quota that the collector also depends on. Refusing is safe; the visitor is told plainly why and
  * when to come back. These are deliberately generous for a human and useless for a script.
  *
  * The per-caller and global ceilings are in `api.ts`, with the rest of the published contract, because the API page
- * quotes them. Reads are not limited at all — an unmetered read is the whole strategy.
+ * quotes them. Reads are not limited at all - an unmetered read is the whole strategy.
  */
 /** Signature cap for a rebuild nobody asked us to pay for. The CLI has no cap. */
 const MAX_SIGS_ON_DEMAND = 8_000;
@@ -79,7 +79,7 @@ function peek(key: string, windowMs: number): number {
 
 /**
  * The client address. Behind Cloudflare or Railway the socket address is the proxy, so the forwarded header is what
- * identifies a visitor — but it is caller-supplied and trivially spoofed if we are ever exposed directly. Set
+ * identifies a visitor - but it is caller-supplied and trivially spoofed if we are ever exposed directly. Set
  * TRUST_PROXY=1 only when something in front is known to overwrite it.
  */
 const TRUST_PROXY = process.env.TRUST_PROXY === "1";
@@ -94,8 +94,8 @@ function clientIp(req: any): string {
 }
 
 /**
- * Fetch the record from the machine that builds it. A Railway volume attaches to one service, so `pump.db` — and
- * therefore `servicedb` — lives on the collector; this service pulls the finished file over the private network.
+ * Fetch the record from the machine that builds it. A Railway volume attaches to one service, so `pump.db` - and
+ * therefore `servicedb` - lives on the collector; this service pulls the finished file over the private network.
  * Removing the database from the image also removes the failure that took the site down twice: an ignore rule
  * silently excluding a build product.
  */
@@ -107,7 +107,7 @@ const REFRESH_MS = Number(process.env.RECORD_REFRESH_HOURS ?? 6) * 3600_000;
  *
  * Everything else this service reports comes out of `record.db`: a snapshot, exact about itself and as old as the
  * last build. That is the right source for "how many launches are in the file you are downloading" and the wrong one
- * for "how many launches are on record", which the site had been answering from it — so the headline sat frozen for
+ * for "how many launches are on record", which the site had been answering from it - so the headline sat frozen for
  * six hours at a stretch while the collector never stopped ingesting, and understated the archive by thousands by
  * the end of each cycle.
  *
@@ -121,8 +121,8 @@ const REFRESH_MS = Number(process.env.RECORD_REFRESH_HOURS ?? 6) * 3600_000;
  *
  * Deriving it from RECORD_URL alone would mean the live counter could not be switched on without also arming
  * `pullRecord`, which adopts whatever record the collector is serving. That pull is the step being deliberately held
- * back until the collector's build has been observed producing something sane — it is the path that can replace a
- * 165,025-launch published archive — and a display feature must not be the thing that arms it. Set
+ * back until the collector's build has been observed producing something sane - it is the path that can replace a
+ * 165,025-launch published archive - and a display feature must not be the thing that arms it. Set
  * COLLECTOR_HEALTH_URL for the counter; set RECORD_URL when, separately, the pull is meant to be live.
  */
 const HEALTH_URL = process.env.COLLECTOR_HEALTH_URL || (RECORD_URL ? RECORD_URL.replace(/\/record\.db$/, "/health") : "");
@@ -140,7 +140,7 @@ const LAUNCH_URL = HEALTH_URL ? HEALTH_URL.replace(/\/health$/, "/launch/") : ""
 let lastLaunchLookup = "no lookup attempted yet";
 let live: { observed: number; held: number; operators?: number | null; operatorsError?: string | null; at: number } | null = null;
 /**
- * Why the last poll produced nothing. The page renders the same either way — no counter — but "the collector is
+ * Why the last poll produced nothing. The page renders the same either way - no counter - but "the collector is
  * unreachable" and "the collector answered and could not count" are different faults with different fixes, and a
  * single blank number collapses them into one. Reported on /api/v1/live rather than logged, so it can be read from
  * outside the container without a shell.
@@ -159,8 +159,8 @@ async function pollLive(): Promise<void> {
       /**
        * Carry the fields through rather than picking two of them.
        *
-       * This picked `observed` and `held` and dropped everything else, so `operators` — added to /health precisely
-       * to make the publish guard observable — arrived and was discarded, and /api/v1/live reported null. Two
+       * This picked `observed` and `held` and dropped everything else, so `operators` - added to /health precisely
+       * to make the publish guard observable - arrived and was discarded, and /api/v1/live reported null. Two
        * deploys were spent diagnosing the producer for a fault in the consumer, which is this evening's shape
        * exactly: the thing that looked broken was the thing being read, not the thing being sent.
        */
@@ -199,7 +199,7 @@ async function pullRecord(first: boolean): Promise<void> {
      *
      * A guard that reads `tokens` alone calls it growth whenever the launch count rises, and on 2026-09-08 that was
      * about to be wrong in the way that matters: the collector's first working build held 169,100 launches against
-     * production's 165,025 — but 580 buyout trades against 2,099, and zero `hist_trades` against 1,072. Adopting it
+     * production's 165,025 - but 580 buyout trades against 2,099, and zero `hist_trades` against 1,072. Adopting it
      * would have grown the headline number while destroying three quarters of the evidence of who took the curves,
      * and this guard would have called it an improvement.
      *
@@ -221,19 +221,19 @@ async function pullRecord(first: boolean): Promise<void> {
      * An archive must never shrink.
      *
      * The count guard above only catches an empty file. It would have accepted a real, well-formed database holding a
-     * fraction of the history — which is exactly what was waiting to happen: the cloud collector was never seeded, so
+     * fraction of the history - which is exactly what was waiting to happen: the cloud collector was never seeded, so
      * it holds 21 hours where the archive it would have replaced holds four months. A successful pull would have cut
      * the public record from 143,102 launches to 16,731 and looked like a normal refresh in the log.
      *
      * The archive is the one asset here that cannot be rebuilt from anywhere else, and losing it silently is the
      * worst outcome this service has. Coverage only ever grows, so a smaller file is by definition a mistake
-     * somewhere upstream — a half-seeded collector, a wrong path, a truncated transfer. Refusing costs a stale
+     * somewhere upstream - a half-seeded collector, a wrong path, a truncated transfer. Refusing costs a stale
      * archive; accepting costs the archive. Set RECORD_ALLOW_SHRINK=1 to override deliberately, e.g. after a prune
      * that is meant to reduce it.
      */
     const holding = (() => {
       // Read the file on disk, not `db`: the first pull runs before the connection is opened, and on a first boot
-      // there may be no archive here at all — in which case anything is an improvement.
+      // there may be no archive here at all - in which case anything is an improvement.
       try {
         const cur = new DatabaseSync(DB_FILE, { readOnly: true });
         const c = (cur.prepare("SELECT COUNT(*) c FROM tokens").get() as any).c as number;
@@ -246,7 +246,7 @@ async function pullRecord(first: boolean): Promise<void> {
         `refusing to shrink the record. If this is intended, set RECORD_ALLOW_SHRINK=1.`);
     /**
      * The same 90% rule on every other dimension, checked against what is already being served. Separate from the
-     * launch check above so the error names the dimension that actually regressed — "fewer launches" and "the same
+     * launch check above so the error names the dimension that actually regressed - "fewer launches" and "the same
      * launches with the buyout evidence gone" are different faults and want different fixes.
      */
     if (process.env.RECORD_ALLOW_SHRINK !== "1") {
@@ -263,17 +263,17 @@ async function pullRecord(first: boolean): Promise<void> {
         if ((held[t] ?? 0) > 0 && incoming[t] < held[t] * 0.9)
           throw new Error(`downloaded archive holds ${incoming[t].toLocaleString()} rows of ${t} against the ` +
             `${held[t].toLocaleString()} already here. The launch count may be higher, but this record carries less ` +
-            `evidence than the one it would replace — refusing. Set RECORD_ALLOW_SHRINK=1 to override deliberately.`);
+            `evidence than the one it would replace - refusing. Set RECORD_ALLOW_SHRINK=1 to override deliberately.`);
       }
     }
     renameSync(tmp, DB_FILE);
     console.log(`[record] pulled ${(buf.length / 1048576).toFixed(1)} MB, ${n.toLocaleString()} launches`);
-    // Renaming swaps the file, but an already-open SQLite handle keeps reading the old inode — so a refresh would be
+    // Renaming swaps the file, but an already-open SQLite handle keeps reading the old inode - so a refresh would be
     // downloaded, verified, and then quietly ignored for as long as the process lived. Exiting hands the platform a
     // clean restart, which reopens the new file. The service is stateless; the queue holds nothing that is not in
     // the database, and a rebuild in flight is cheap to redo.
     // Adopt in place. This used to exit so the platform would restart us onto the new inode, which loops forever on
-    // a service with no volume — see reloadRecord.
+    // a service with no volume - see reloadRecord.
     reloadRecord();
   } catch (e) {
     console.log(`[record] pull failed: ${(e as Error).message}${first ? " (starting on whatever is already here)" : ""}`);
@@ -283,7 +283,7 @@ async function pullRecord(first: boolean): Promise<void> {
  * NOTHING NETWORK-BOUND RUNS BEFORE THIS PROCESS LISTENS.
  *
  * The boot pull used to be awaited here, and it took the site down on 2026-09-09. This service sleeps when idle, so
- * a wake starts a fresh container — which then blocked on downloading a 79 MB record from the collector before
+ * a wake starts a fresh container - which then blocked on downloading a 79 MB record from the collector before
  * binding a port, and the platform's wake timed out. Every request got a 502 while the process was busy fetching the
  * data it wanted to serve. The site had been up for hours; it broke the first time it was allowed to go idle.
  *
@@ -292,7 +292,7 @@ async function pullRecord(first: boolean): Promise<void> {
  * describes honestly on every page. Being unreachable is not.
  *
  * So the pull moves to a timer after `listen`, and the first one is gated on the collector actually holding
- * something newer — otherwise a service that wakes often would download 79 MB and restart itself on every wake.
+ * something newer - otherwise a service that wakes often would download 79 MB and restart itself on every wake.
  */
 async function collectorHasNewer(): Promise<boolean> {
   if (!HEALTH_URL) return true;   // no way to ask: fall through to the pull, which has its own guards
@@ -364,7 +364,7 @@ if (RECORD_URL) {
  * machine sat in the publish path of a public archive: on 2026-09-10 that copy carried a later build timestamp
  * than the collector's, the service preferred it, and the archive sat 29,419 launches behind. With the record on
  * a volume instead, the first boot has nothing at all, and a web service that starts anyway would answer "we hold
- * no record" about every token on Solana — authoritative and wrong, which this project ranks below being down.
+ * no record" about every token on Solana - authoritative and wrong, which this project ranks below being down.
  *
  * Deliberately not `pullRecord`: that ends in `reloadRecord`, which reassigns `db`, and `db` is initialised on the
  * next line. Calling it here would read a binding in its temporal dead zone. This only puts bytes on disk, and the
@@ -413,7 +413,7 @@ await fetchFirstRecord();
 
 /**
  * The published record, opened WITHOUT migrating it. This service serves the file to the public and must not be the
- * reason its bytes differ from what servicedb built — see openDb. Readings still write here; only schema changes and
+ * reason its bytes differ from what servicedb built - see openDb. Readings still write here; only schema changes and
  * journal_mode are withheld.
  */
 let db = openDb(DB_FILE, { migrate: false });
@@ -423,7 +423,7 @@ let db = openDb(DB_FILE, { migrate: false });
  *
  * It used to sit fifty lines below `coverageWindows(db)`, which was harmless only while `openDb` created the tables
  * it needed: a missing record produced empty tables and the guard caught it with a clear message. Opening without
- * migrating removes that floor — there is no `runs` table either — so a missing or truncated file threw inside
+ * migrating removes that floor - there is no `runs` table either - so a missing or truncated file threw inside
  * `coverageWindows` and the refusal below could never be reached. The message the guard exists to print was
  * replaced by a stack trace, on the one path where the service must fail comprehensibly.
  */
@@ -448,7 +448,7 @@ let chrome: Chrome = {
 /** The same coverage statement the page footer makes, in the shape the JSON records carry. */
 /**
  * When the archive we are serving was actually built. The web service reads a file the collector produced and pulled
- * across, so "now" is never the right answer for how current the data is — the two 6-hour intervals in front of it
+ * across, so "now" is never the right answer for how current the data is - the two 6-hour intervals in front of it
  * (RECORD_EVERY_HOURS, RECORD_REFRESH_HOURS) can put twelve hours between the chain and this process. `meta.built_at`
  * is written by servicedb; the newest row it holds is the fallback for a record built before that field existed.
  */
@@ -472,7 +472,7 @@ let COV: Coverage = { from: win.length ? win[0].a : null, downtimeMinutes: chrom
  * so only a restart can pick up the new one. That is true, and on 2026-09-09 it took the site down for hours: this
  * service has no volume, so the restart returns a container built from the image, the 80 MB that was just pulled is
  * gone, the record is old again, and it pulls and restarts forever. Every request 502s because the process never
- * lives long enough to answer one. The freshness gate did not help — the collector is newer than the image on every
+ * lives long enough to answer one. The freshness gate did not help - the collector is newer than the image on every
  * single fresh container, by construction.
  *
  * Reopening in place is the fix that needs no volume and keeps the service stateless: swap the handle, re-derive
@@ -516,7 +516,7 @@ function reloadRecord(): void {
 
 /**
  * Refuse to serve an empty archive. `openDb` creates its tables when the file is missing, so a database that failed to
- * ship produces a service that answers "we have no record of this launch" for every token on Solana — confidently,
+ * ship produces a service that answers "we have no record of this launch" for every token on Solana - confidently,
  * with a clean 200, and indistinguishable from the truth. Being down is recoverable; being authoritatively wrong about
  * every token is not. This is exactly what a missing `data/record.db` did on the first deploy.
  */
@@ -545,8 +545,8 @@ function reloadRecord(): void {
  * during the failure it was written for: a closed lid stops the publish timer AND the hourly probe that would have
  * noticed, so the site froze and the alarm slept beside it.
  *
- * `recordBuiltAt` is fixed for the life of this process — adopting a pulled record renames the file and exits so the
- * platform restarts us onto the new inode — so this age is exactly "how long since a record was successfully
+ * `recordBuiltAt` is fixed for the life of this process - adopting a pulled record renames the file and exits so the
+ * platform restarts us onto the new inode - so this age is exactly "how long since a record was successfully
  * published", whatever the cause. A collector that stopped building, a pull that stopped passing its guards, a
  * laptop that stopped deploying: all of them surface here as one number that stops moving, which is the only
  * question the public actually cares about.
@@ -574,11 +574,11 @@ startWatchdog({
     const age = Date.now() - recordBuiltAt;
     // Not a pedantic guard: a builder with a wrong clock produces a record that is permanently "fresh" and would silence this
     // check permanently. Fail on it rather than treating negative age as very recent.
-    if (age < 0) return { ok: false, detail: `the record claims to have been built ${fmtAge(-age)} in the future — check the clock on the builder` };
+    if (age < 0) return { ok: false, detail: `the record claims to have been built ${fmtAge(-age)} in the future - check the clock on the builder` };
     return age < STALE_AFTER_MS
       ? { ok: true, detail: `${observed.toLocaleString()} launches, built ${fmtAge(age)} ago (limit ${fmtAge(STALE_AFTER_MS)})` }
       : { ok: false, detail: `${CANONICAL_HOST || "the site"} is serving a record built ${fmtAge(age)} ago (limit ` +
-          `${fmtAge(STALE_AFTER_MS)}) — ${observed.toLocaleString()} launches. The site is up and every route answers; ` +
+          `${fmtAge(STALE_AFTER_MS)}) - ${observed.toLocaleString()} launches. The site is up and every route answers; ` +
           `the counts are simply old. The collector's build or the record pull has stopped.` };
   },
 });
@@ -648,7 +648,7 @@ async function work(): Promise<void> {
  * Certification needs a pool balance read within MAX_READING_AGE_MS, and there are only two places that could come
  * from. Reading per request hands any visitor an RPC amplifier and makes the front page cost a chain round-trip per
  * row. Reading on the collector does not work either: the web service answers from a record file it pulls every few
- * hours, so a balance written there would be stale by hours before it ever arrived — a five-minute window fed by a
+ * hours, so a balance written there would be stale by hours before it ever arrived - a five-minute window fed by a
  * six-hour pipe is not a guarantee, it is a decoration.
  *
  * So it runs here, in the service that serves it. That is `provenance.ts`'s second invariant applied to the
@@ -663,8 +663,8 @@ async function work(): Promise<void> {
  *      the exact bug that caused `vault_at` to be introduced in the first place (see `db.ts`), and doing it here
  *      would reintroduce it on the freshest surface we have.
  *   2. **Newest first, and let the tail age out.** The candidate set runs to a few hundred over seven days. If the
- *      refresher cannot cover all of it, the right outcome is that older rows go uncertified — which the page already
- *      expresses as an unchecked count — not that the window widens to make the list look fuller.
+ *      refresher cannot cover all of it, the right outcome is that older rows go uncertified - which the page already
+ *      expresses as an unchecked count - not that the window widens to make the list look fuller.
  *   3. **It is a background job on our schedule.** Nothing a visitor does can make it run faster or more often, so
  *      traffic cannot be converted into RPC spend.
  */
@@ -685,7 +685,7 @@ const REFRESH_FAIL_COOLDOWN_MS = 30 * 60_000;
  * Reads per cycle. This is what makes "newest first, let the tail age out" real rather than aspirational.
  *
  * Without it a cycle works the whole due list, which during an RPC brownout means hundreds of reads that each take
- * ten to twenty seconds to fail — one cycle running for many minutes, grinding through a list ordered when it started
+ * ten to twenty seconds to fail - one cycle running for many minutes, grinding through a list ordered when it started
  * while newer launches it should be prioritising go stale behind it. Capping the cycle means the refresher always
  * finishes promptly and always re-sorts, so the newest candidates are re-read first every time and the oldest are
  * what gets dropped. Sixty per 30s tick keeps the ~150-token 24-hour set inside the certificate window with headroom.
@@ -696,7 +696,7 @@ const refreshFails = new Map<string, { n: number; until: number }>();
 const refresher = { cycles: 0, read: 0, failed: 0, lastCycleAt: 0, lastCycleMs: 0, due: 0 };
 
 /**
- * The launches that could carry a certificate — the same rule the front page applies, evaluated by the same code.
+ * The launches that could carry a certificate - the same rule the front page applies, evaluated by the same code.
  * Deriving the candidate set independently (a hand-written SQL approximation of `cleanAtBirth`, say) would let the
  * refresher and the page disagree about who matters, and the failure would be silent: tokens the page wants to
  * certify but nothing ever refreshes.
@@ -713,7 +713,7 @@ function refreshCandidates(now: number): any[] {
 let setReading = db.prepare("UPDATE tokens SET vault_sol = ?, vault_at = ? WHERE mint = ?");
 
 /**
- * A cycle can outlast its tick when the chain is slow to answer, and `setInterval` does not care — it would start a
+ * A cycle can outlast its tick when the chain is slow to answer, and `setInterval` does not care - it would start a
  * second cycle on top of the first, then a third, multiplying exactly the RPC pressure that made them slow. The guard
  * makes a tick a no-op while one is already running.
  */
@@ -765,24 +765,24 @@ async function runRefreshCycle(): Promise<void> {
 // ---------- rendering ----------
 /**
  * `judgeable` is not decoration. A thin pool is only evidence about a token whose launch we actually hold: for a row
- * we merely happen to have — a mint named by a detector, or one that leaked in from somewhere else entirely — the
+ * we merely happen to have - a mint named by a detector, or one that leaked in from somewhere else entirely - the
  * stored `pool` may not be that token's pool at all, and reading it produced a confident red DANGER about liquidity.
  * Wrapped SOL was served exactly this way: title "?", a DANGER telling the reader a position could not be sold. On a
  * site whose whole claim is that it says UNKNOWN rather than guess, that is the worst sentence it could emit.
  */
 /**
  * `clean` is a claim about the launch. `liquid` is a claim about right now. They were one boolean and should never
- * have been — see the note on `readRecord`.
+ * have been - see the note on `readRecord`.
  */
 type TokenRead = { a: Assessment; reading: Reading | null; origin: "observed" | "rebuilt"; clean: boolean; liquid: boolean };
 
 /**
  * Everything we are prepared to say about one launch, computed once. The HTML page and the JSON record are both built
- * from this — they must never be able to disagree about the same token, and the JSON is the copy nobody proof-reads.
+ * from this - they must never be able to disagree about the same token, and the JSON is the copy nobody proof-reads.
  *
  * The pool is read from chain on every judgeable record rather than quoted from storage, and a read we could not make
- * is never reported as a balance. That is deliberately fail-closed, and the opposite error — quoting a balance we
- * could not confirm — is the one that ends the project.
+ * is never reported as a balance. That is deliberately fail-closed, and the opposite error - quoting a balance we
+ * could not confirm - is the one that ends the project.
  *
  * **`clean` and `liquid` are two claims and this function returns them separately.** They used to be one boolean:
  * a launch was "clean" only if its birth record was spotless *and* a pool reading under five minutes old showed at
@@ -796,7 +796,7 @@ type TokenRead = { a: Assessment; reading: Reading | null; origin: "observed" | 
  * passed every birth test and the front page published 10 of them.
  *
  * So the birth claim now stands on the birth record alone, and liquidity is reported beside it with the age of the
- * reading, or reported as unread. Nothing is certified on a balance we could not confirm — that rule is unchanged.
+ * reading, or reported as unread. Nothing is certified on a balance we could not confirm - that rule is unchanged.
  * What changed is that failing to read a pool no longer retracts a statement about the past.
  */
 async function readRecord(t: any, judgeable: boolean, precomputed?: any): Promise<TokenRead> {
@@ -820,7 +820,7 @@ async function readRecord(t: any, judgeable: boolean, precomputed?: any): Promis
    *
    * `cleanAtBirth` refuses any launch carrying a DANGER flag, and this function pushes a DANGER flag when the pool is
    * thin. Computing `clean` after the push therefore let a balance read seconds ago decide what the record says about
-   * the first block — which is the conflation this split exists to end, and it produced a live disagreement: the
+   * the first block - which is the conflation this split exists to end, and it produced a live disagreement: the
    * front page listed a launch as clean while the launch's own page said "carries a danger flag", because only one of
    * the two paths had read a pool. Settle the past first; then say what the present looks like.
    */
@@ -869,8 +869,8 @@ async function renderToken(t: any, judgeable: boolean, precomputed?: any): Promi
 /**
  * What we can say about a mint right now, decided once for both surfaces.
  *
- * This ladder — do we hold it, is a rebuild already running, can we afford to start one, is it even a pump.fun launch
- * — used to live inline in the HTML route. Copying it into the API route would let the two drift, and they would
+ * This ladder - do we hold it, is a rebuild already running, can we afford to start one, is it even a pump.fun launch
+ * - used to live inline in the HTML route. Copying it into the API route would let the two drift, and they would
  * drift in the direction that matters: a budget refusal that the JSON reported as an ordinary empty answer is
  * indistinguishable, to an integrator, from "we looked and found nothing wrong". Each surface now only chooses how to
  * *say* the decision, never what it is.
@@ -887,19 +887,19 @@ async function decide(mint: string, ip: string): Promise<Decision> {
   const t = tokenQ.get(mint) as any;
   // Holding a *row* for a mint is not the same as holding its launch: tokens discovered late (named by a post, found
   // by a detector) have no curve history, and treating their presence as an answer meant the most useful thing we
-  // could do for them — rebuild the launch from chain — was never attempted.
+  // could do for them - rebuild the launch from chain - was never attempted.
   const judgeable = !!t && (!!t.rebuilt_complete || (!t.late_discovery && covered(t.created_at)));
   if (judgeable) return { kind: "record", t, judgeable: true };
 
   /**
    * Before reconstructing a launch from chain, ask the machine that watched it.
    *
-   * The record file is rebuilt every six hours, so a launch from the last few hours is simply not in it — and the
+   * The record file is rebuilt every six hours, so a launch from the last few hours is simply not in it - and the
    * service answered "we have no record of this launch" and started reading its entire bonding-curve history back
    * off the chain. About a launch the collector observed live, from the creation transaction, and still holds.
    *
    * That is this product disclaiming the one thing it has. A cold scanner can read the chain too; being there at
-   * birth is the whole claim, and it was being denied during the only window when anybody asks — the first hours,
+   * birth is the whole claim, and it was being denied during the only window when anybody asks - the first hours,
    * when the token is new and the question is live.
    *
    * A rebuild is also strictly worse evidence. `rebuilt_complete` exists precisely to mark reconstruction as a
@@ -1008,7 +1008,7 @@ const isFile = (p: string): boolean => { try { return statSync(p).isFile(); } ca
 /**
  * The front page, per request.
  *
- * It used to be a file, which meant its numbers were true at build time and drifted from then on — and the build that
+ * It used to be a file, which meant its numbers were true at build time and drifted from then on - and the build that
  * produced them could fail for a whole day, as it did. The chain does not stop, so neither should the page.
  *
  * Two things make this affordable. The counts are indexed aggregates over a 45 MB record, single-digit milliseconds.
@@ -1057,7 +1057,7 @@ const HOME_DAYS = Number(process.env.HOME_DAYS ?? 7);
  * The prose pages' figures, from the record this process serves.
  *
  * They used to be baked into `site/*.html` by whoever last ran `npm run site`, which made every one of them as
- * current as that laptop — and on 2026-09-11 that laptop's collector had been stopped for forty hours. Built here
+ * current as that laptop - and on 2026-09-11 that laptop's collector had been stopped for forty hours. Built here
  * instead, and rebuilt in `reloadRecord` the moment a new record is adopted, so these pages describe the archive
  * the service is actually answering from.
  *
@@ -1086,7 +1086,7 @@ let homeCache: { at: number; h: Home; html: string } | null = null;
  *
  * Cached for the life of the process rather than recomputed each rebuild: it moves by single digits an hour against
  * totals in the thousands, and the front page already pays three seconds for the window pass. The exclusions are
- * the same ones findings.html states — a token a detector restored after launch carries a zero because nobody was
+ * the same ones findings.html states - a token a detector restored after launch carries a zero because nobody was
  * watching it, not because nobody bought, and counting those would overstate this by nearly half.
  */
 let everCache: { watched: number; noBuyer: number } | null = null;
@@ -1120,7 +1120,7 @@ function buildHome(now: number): Home {
   const certified = birthClean.filter(({ t }) => readingCertifies(t.vault_at, t.vault_sol, now));
   const uncertified = birthClean.filter(({ t }) => !readingCertifies(t.vault_at, t.vault_sol, now));
   const unchecked = uncertified.length;
-  // Of those, the ones we simply have no recent reading for — as distinct from the ones we read and found thin.
+  // Of those, the ones we simply have no recent reading for - as distinct from the ones we read and found thin.
   // The page says different things about each, so it cannot count them together.
   const unread = birthClean.filter(({ t }) => !readingIsFresh(t.vault_at, now)).length;
 
@@ -1150,7 +1150,7 @@ function buildHome(now: number): Home {
    *
    * These were LIMIT 15 and limit 10 because fifteen and ten were what the front page printed. /wallets.html and
    * /operators.html then had to re-query for the rest, which is two statements that have to agree about one table
-   * — the shape this codebase keeps finding bugs in. Built once and sliced by each consumer instead, for the same
+   * - the shape this codebase keeps finding bugs in. Built once and sliced by each consumer instead, for the same
    * reason summary.json is derived from this object: a preview cannot say something different from the list it
    * links to if they are the same array. 250 rows instead of 15 costs nothing next to the assessment pass above,
    * and clusterTable was measured at 6 ms.
@@ -1171,14 +1171,14 @@ function buildHome(now: number): Home {
     windowDays: HOME_DAYS, gradWindow: toks.length, cleanBirthWindow: birthClean.length, unchecked, unread,
     unchecked24h: uncertified.filter((x) => inDay(x.t)).length,
     /**
-     * Every clean launch, liquid or not, newest first — with the liquidity reading carried as nullable rather than
+     * Every clean launch, liquid or not, newest first - with the liquidity reading carried as nullable rather than
      * used as a filter. A row whose pool we have not read recently belongs on this list with its liquidity column
      * saying so; leaving it off published our RPC coverage as if it were a finding about the token.
      *
      * This was capped at 40 because 40 was what the front page printed. It is now the list itself, sliced by each
      * consumer: the front page takes the newest handful, /clean.html renders all of it, and the API keeps taking
-     * exactly the 40 it has always published (see summaryJson). Widening it costs nothing — `birthClean` is
-     * already fully computed above and this only maps more of it — and it means the page and the page it links to
+     * exactly the 40 it has always published (see summaryJson). Widening it costs nothing - `birthClean` is
+     * already fully computed above and this only maps more of it - and it means the page and the page it links to
      * cannot disagree, which is the same reason summary.json is derived from this object rather than rebuilt.
      */
     cleanRows: birthClean.sort((x, y) => y.t.created_at - x.t.created_at).slice(0, CLEAN_MAX).map(({ t, a }) => ({
@@ -1237,7 +1237,7 @@ function buildHome(now: number): Home {
        * Three records to open, and they have to be three DIFFERENT findings.
        *
        * Chosen on the danger flag rather than on recency alone, because recency alone offered three launches all
-       * reading "Not certified" — a statement about whether we hold a fresh pool balance, not about the token — so
+       * reading "Not certified" - a statement about whether we hold a fresh pool balance, not about the token - so
        * the one door into the archive taught a first-time visitor that the tool has nothing to say.
        *
        * Then it did the same thing again for a different reason. Newest-three-flagged shipped on 2026-09-11
@@ -1246,7 +1246,7 @@ function buildHome(now: number): Home {
        * whose whole job is to show a stranger what a record says was demonstrating that we have one thing to say.
        *
        * So: newest first, but skip a launch whose verdict repeats one already taken. This is a curation and it is
-       * worth being honest about which kind — it selects for the RANGE of what we look for, never for severity,
+       * worth being honest about which kind - it selects for the RANGE of what we look for, never for severity,
        * and the band directly below still reports how often each one actually occurs. A reader is not misled about
        * frequency by a sample that shows variety, because the frequencies are printed underneath it.
        *
@@ -1289,7 +1289,7 @@ function buildHome(now: number): Home {
  * Serve what we have and refresh behind the request, rather than making one visitor pay for the rebuild.
  *
  * Measured against production on 2026-09-10: a warm front page answers in 0.10-0.14 s and the first request after
- * the 60 s cache lapses takes 3.2 s. On a site with sparse traffic that is not an edge case — it is most visitors,
+ * the 60 s cache lapses takes 3.2 s. On a site with sparse traffic that is not an edge case - it is most visitors,
  * because most arrivals follow a gap longer than the TTL. Every one of them was paying for the whole assessment
  * pass while the page they were waiting for already existed in memory, one field away, only slightly out of date.
  *
@@ -1297,7 +1297,7 @@ function buildHome(now: number): Home {
  * design (build interval plus pull interval), and every page states the age of what it is showing. A front page a
  * couple of minutes behind that is not a different kind of claim, it is the same claim rounded.
  *
- * This does not make the rebuild cheaper, and node has one thread, so the 3 s still blocks the loop when it runs —
+ * This does not make the rebuild cheaper, and node has one thread, so the 3 s still blocks the loop when it runs -
  * it just no longer blocks it in front of somebody. The deeper fix is that `assess()` recomputes launch facts that
  * cannot change: for a graduated token everything except the liquidity reading is settled forever, so the pass is
  * re-deriving thousands of immutable answers every minute. Memoising by mint is the real win and belongs with
@@ -1332,7 +1332,7 @@ function currentHome(): Home {
         /**
          * A timer, not setImmediate, and the delay is the whole point.
          *
-         * The first version used setImmediate and measured 1.3 ms locally and 2.9 s in production — the fix
+         * The first version used setImmediate and measured 1.3 ms locally and 2.9 s in production - the fix
          * appeared to work and did nothing. The front page is ~49 KB, which goes out over TLS across several event
          * loop turns; setImmediate fires in the check phase of the very next turn, so the rebuild seized the only
          * thread while the response was still being written and the client waited for it anyway. Over loopback
@@ -1378,7 +1378,7 @@ function summaryJson(): string {
     graduated24h: h.graduated24h,
     /**
      * Two counts, because they answer two questions and used to be one number answering neither cleanly.
-     * `cleanAtBirth24h` is how many launches in the window show no sign of manufacture — a permanent finding about
+     * `cleanAtBirth24h` is how many launches in the window show no sign of manufacture - a permanent finding about
      * the first blocks. `clean24h` is the subset we have also just read a healthy pool for, which decays. A consumer
      * wanting the archive's own judgement wants the first; the second tracks our RPC coverage as much as the market.
      */
@@ -1407,8 +1407,8 @@ const server = createServer(async (req, res) => {
   /**
    * Caching is the CDN's job, not the disk's. A launch record is immutable once complete, so it can be cached hard and
    * revalidated in the background; a page that is still UNKNOWN or waiting on a rebuild must not be, or a visitor is
-   * pinned to an answer we are in the middle of improving. Pre-rendering these to files does not scale — ~24,000
-   * launches a day is millions of pages a year — and an edge cache does the same job without a filesystem.
+   * pinned to an answer we are in the middle of improving. Pre-rendering these to files does not scale - ~24,000
+   * launches a day is millions of pages a year - and an edge cache does the same job without a filesystem.
    */
   const send = (code: number, body: string | Buffer, type = "text/html; charset=utf-8", cache = "none") => {
     const cc = code !== 200 ? "no-store"
@@ -1424,7 +1424,7 @@ const server = createServer(async (req, res) => {
     /**
      * One address for the front page, and it is `/`.
      *
-     * `/index.html` used to be a second, equal address for the same document — reachable, indexable, and the one
+     * `/index.html` used to be a second, equal address for the same document - reachable, indexable, and the one
      * every link in the masthead and footer actually pointed at. A 301 collapses them, so a crawler sees one page
      * and a reader never has a filename in the address bar. Permanent rather than temporary because this will not
      * be changing back, and query strings are carried through so nothing with a `?ref=` loses it on the way.
@@ -1442,7 +1442,7 @@ const server = createServer(async (req, res) => {
      * The two "seen before" views: every launch that used one picture, and every launch by one creator.
      *
      * Bounded at SIBLINGS_MAX rows because a creator with 1,994 launches would otherwise render a page nobody can
-     * read and this service would build it on every request. Oldest first, so the sequence reads from the start —
+     * read and this service would build it on every request. Oldest first, so the sequence reads from the start -
      * the cadence is the finding, and a burst of launches minutes apart is invisible if the newest are shown.
      */
     /**
@@ -1502,7 +1502,7 @@ const server = createServer(async (req, res) => {
      * The prose pages, rendered rather than served from the static tree.
      *
      * Matched before the static handler, so the files `npm run site` leaves in `site/` are shadowed. Those files
-     * are still written and still shipped — they are the offline copy `data.html` offers — but nothing the public
+     * are still written and still shipped - they are the offline copy `data.html` offers - but nothing the public
      * reads comes out of them any more.
      */
     if (safe === "/findings.html") {
@@ -1585,7 +1585,7 @@ const server = createServer(async (req, res) => {
       const where = kind === "image" ? "image_sha256 = ?" : "creator = ?";
       /**
        * Aggregates over the whole set in one pass. The page lists at most SIBLINGS_MAX rows, and every figure beside
-       * the heading must describe all of them or the two disagree — see the note in siblingsBody.
+       * the heading must describe all of them or the two disagree - see the note in siblingsBody.
        */
       const agg = db.prepare(`SELECT COUNT(*) c,
           SUM(CASE WHEN dev_pct >= 50 OR (graduated_confirmed_by IS NOT NULL AND curve_buyers = 0) THEN 1 ELSE 0 END) flagged,
@@ -1608,7 +1608,7 @@ const server = createServer(async (req, res) => {
       const stats = { total, flagged: Number(agg?.flagged ?? 0), grad: Number(agg?.grad ?? 0),
         span: agg?.a != null && agg?.b != null ? Number(agg.b) - Number(agg.a) : 0 };
       /**
-       * The strip plots the WHOLE set, not the page of rows below it — three columns per launch, so a wallet with
+       * The strip plots the WHOLE set, not the page of rows below it - three columns per launch, so a wallet with
        * 1,994 of them is a cheap query and a few hundred kilobytes of SVG. Capped at STRIP_MAX because past a few
        * thousand marks the comb is solid and more marks add bytes without adding information; when the cap bites the
        * strip says so rather than quietly plotting a subset.
@@ -1639,7 +1639,7 @@ const server = createServer(async (req, res) => {
      *
      * Free, keyless and unmetered for reads, because the whole strategy depends on being cited rather than bought:
      * a wallet or a terminal that has to sign up will use whatever is already embedded in its page instead. Only the
-     * expensive path — reconstructing a launch we never watched, which costs thousands of archival RPC calls — carries
+     * expensive path - reconstructing a launch we never watched, which costs thousands of archival RPC calls - carries
      * the same budget a human visitor gets.
      *
      * Matched before the static tree, so `/api/v1/...` is always answered by this code even if a file of that name
@@ -1647,8 +1647,8 @@ const server = createServer(async (req, res) => {
      */
     if (safe.startsWith(`/api/${API_VERSION}/`) || safe === `/api/${API_VERSION}`) {
       /**
-       * Every response is CORS-open. The integrations that matter most — a warning shown inside a wallet or a terminal
-       * — are browser code on someone else's origin, and a missing header makes the whole API unusable to them while
+       * Every response is CORS-open. The integrations that matter most - a warning shown inside a wallet or a terminal
+       * - are browser code on someone else's origin, and a missing header makes the whole API unusable to them while
        * looking perfectly fine to us. It costs nothing: the data is public domain and there is no session to steal.
        */
       const cors = {
@@ -1681,7 +1681,7 @@ const server = createServer(async (req, res) => {
         /**
          * What the collector holds right now, for the counter on the page. Deliberately its own endpoint rather than
          * a field on /status: /status describes the published file and is cacheable, this cannot be cached at all,
-         * and merging them would make one of the two wrong. `null` means the collector is unreachable or stale —
+         * and merging them would make one of the two wrong. `null` means the collector is unreachable or stale -
          * the page then shows the published figure alone rather than a number that has stopped moving.
          */
         const l = liveNow();
@@ -1694,7 +1694,7 @@ const server = createServer(async (req, res) => {
           operatorsServed: (() => { try { return (db.prepare("SELECT COUNT(*) c FROM operator_wallets").get() as any).c; } catch { return null; } })(),
           published: observed, generatedAt: Date.now(), liveLookup: lastLaunchLookup,
           // Null when the counter is working. Says which fault when it is not, including the case where a poll
-          // succeeded long ago and has since gone stale — a value that was real and is no longer current.
+          // succeeded long ago and has since gone stale - a value that was real and is no longer current.
           unavailable: l ? null : (liveErr ?? (live ? `last successful poll ${Math.round((Date.now() - live.at) / 1000)}s ago, past the ${LIVE_MAX_AGE_MS / 1000}s tolerance` : "no successful poll yet")),
         });
       }
@@ -1769,7 +1769,7 @@ const server = createServer(async (req, res) => {
 
     /**
      * The search form's target. The box used to be an onsubmit handler with no action, so with scripting off it did
-     * nothing — the site's only interactive element was decorative for anyone on a locked-down browser, a text-mode
+     * nothing - the site's only interactive element was decorative for anyone on a locked-down browser, a text-mode
      * client or a broken script load. A plain GET lands here and is redirected to the record.
      */
     if (safe === "/lookup") {
@@ -1786,11 +1786,11 @@ const server = createServer(async (req, res) => {
       *
       * Never a redirect to the original URI. The URI belongs to the creator and can be repointed or unpinned, so
       * proxying it live would render whatever they serve today under a heading that says what the launch claimed
-      * at birth — the precise substitution this site exists to report. Content-addressed, so the response is
+      * at birth - the precise substitution this site exists to report. Content-addressed, so the response is
       * immutable by construction and cacheable forever: the hash IS the verification.
       */
     /**
-     * The metadata document a launch published at birth — the bytes, not our reading of them.
+     * The metadata document a launch published at birth - the bytes, not our reading of them.
      *
      * record.db commits to `meta_sha256` and carries no document, so a reader could verify bytes they already held
      * and could not obtain any. For the one artefact in this archive that cannot be rebuilt from chain at any price
@@ -1820,7 +1820,7 @@ const server = createServer(async (req, res) => {
         const sha = createHash("sha256").update(buf).digest("hex");
         /**
          * Refuse rather than serve bytes that do not match what the record committed to. A document that has drifted
-         * from its published hash is the one thing this route must never hand over quietly — the reader's whole
+         * from its published hash is the one thing this route must never hand over quietly - the reader's whole
          * reason for asking us rather than the creator's URI is that ours is the attested copy.
          */
         if (att.meta_sha256 && att.meta_sha256 !== sha)
@@ -1853,7 +1853,7 @@ const server = createServer(async (req, res) => {
        *
        * It matters beyond tidiness. The page says "this is the picture the launch published", and the only thing
        * that makes that claim checkable by a reader is the commitment published beside it in record.db. Serving
-       * bytes for a hash the archive never attested is serving evidence nobody can verify against the archive —
+       * bytes for a hash the archive never attested is serving evidence nobody can verify against the archive -
        * the exact property the whole commitment scheme exists to provide. Prepared inline rather than hoisted,
        * because `db` is swapped in place by reloadRecord and a hoisted statement would outlive its connection.
        */
@@ -1872,7 +1872,7 @@ const server = createServer(async (req, res) => {
        *
        * The bytes live on the COLLECTOR's volume, because that is the process that captured them, and this service
        * has no volume. Reading only from the local directory meant serving whatever pictures happened to be in the
-       * build context of whichever machine deployed — the laptop back in the publish path, and ~570 MB a day of
+       * build context of whichever machine deployed - the laptop back in the publish path, and ~570 MB a day of
        * images inside a container image. The local branch stays because it is right in development and on any deploy
        * that does carry files; the fallback is what makes production honest.
        */
@@ -1895,7 +1895,7 @@ const server = createServer(async (req, res) => {
        * The object store, when there is one, before the collector.
        *
        * Once pictures go to R2 the collector's volume stops accumulating them, so asking the collector for a picture
-       * it captured last week would 404 — a real answer about our records, and the wrong one. The store is where the
+       * it captured last week would 404 - a real answer about our records, and the wrong one. The store is where the
        * bytes actually are; the collector fallback stays for the transition and for any deploy without a store.
        *
        * Content-addressed, so this cannot serve the wrong picture: the key IS the hash the record commits to. A
@@ -1908,7 +1908,7 @@ const server = createServer(async (req, res) => {
             res.writeHead(200, headers(obj.contentType, obj.body.length));
             return res.end(obj.body);
           }
-          // Absent from the store is "we never captured it" — fall through to the collector, which may still hold
+          // Absent from the store is "we never captured it" - fall through to the collector, which may still hold
           // it from before the store existed, and only then to 404.
         } catch { return send(502, "image store unreachable", "text/plain; charset=utf-8", "none"); }
       }
@@ -1935,7 +1935,7 @@ const server = createServer(async (req, res) => {
     const file = join(DIR, safe);
     /**
      * A directory is not a file. `existsSync` is true for `site/api`, and the trailing-slash guard never fired because
-     * the request that reaches here is `/api` with no slash — so readFileSync was handed a directory and threw EISDIR,
+     * the request that reaches here is `/api` with no slash - so readFileSync was handed a directory and threw EISDIR,
      * which the outer catch turned into a 500. Production logged a stack trace for every hit on a bare directory path.
      * A path we do not serve is a 404, not an error on our side.
      */
@@ -1943,14 +1943,14 @@ const server = createServer(async (req, res) => {
 
 
     // The archive itself. Served from the image rather than copied into the static tree, and cached hard because it
-    // is rebuilt on deploy — a public good nobody has to ask for.
+    // is rebuilt on deploy - a public good nobody has to ask for.
     /**
      * The document bundle, streamed from the collector rather than held here.
      *
      * record.db is pulled, verified and adopted by this service because every page depends on it. This is different:
      * it is an optional download that no page reads, ~13 MB gzipped, and giving it its own pull-verify-adopt cycle
      * would be a second copy of the most delicate machinery in the project for a file nothing here queries. So it is
-     * proxied. If the collector is down this 502s, which is the honest answer — the alternative is serving a stale
+     * proxied. If the collector is down this 502s, which is the honest answer - the alternative is serving a stale
      * bundle under a name that promises the current corpus.
      */
     if (safe === "/data/documents.ndjson.gz" || safe === "/data/documents.json") {
@@ -2044,7 +2044,7 @@ const esc2 = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "
 
 /**
  * Started here rather than beside its own functions because `refreshCandidates` reads HOME_DAYS, which is declared
- * with the home-page section further down — running a cycle at that point would hit its temporal dead zone. Starting
+ * with the home-page section further down - running a cycle at that point would hit its temporal dead zone. Starting
  * after the module has finished evaluating also means the first read cannot race the server coming up.
  */
 if (!NO_REFRESH) {
@@ -2076,7 +2076,7 @@ if (!NO_REFRESH) {
   setInterval(() => {
     const worst = loop.max / 1e6;
     loop.reset();
-    if (worst >= LOOP_STALL_MS) console.log(`[loop] blocked for ${Math.round(worst)} ms at some point in the last minute — every request in flight waited that long`);
+    if (worst >= LOOP_STALL_MS) console.log(`[loop] blocked for ${Math.round(worst)} ms at some point in the last minute - every request in flight waited that long`);
   }, 60_000).unref();
 }
 

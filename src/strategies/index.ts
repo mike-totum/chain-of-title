@@ -271,7 +271,7 @@ export const survivorTrail: Strategy = {
     if (!lt || lt.side !== "buy" || lt.sol < 0.5 || lt.wallet === t.creator) return null;
     const x = t.lastPrice / GRAD_CURVE_PRICE;
     if (x < 2.5) return null;
-    // no chasing: the replay splits cleanly on this — entries <= 1.15x the price 2 min earlier averaged 1.12x under the trail,
+    // no chasing: the replay splits cleanly on this - entries <= 1.15x the price 2 min earlier averaged 1.12x under the trail,
     // entries above it 0.96x (the live rule's first day bought spikes and stopped out 15 times in 18). Needs 2 min of prints.
     let ref: number | null = null;
     for (const r of t.recent) { if (r.ts <= ctx.now - 120_000) ref = r.price; else break; }
@@ -329,7 +329,7 @@ export const clusterFollow: Strategy = {
  * winner is *required* to fail there. That is a proof of impossibility rather than a weak result, and it is why
  * every strategy below lands at roughly the fee.
  *
- * They kept running anyway, inside the collector — ten of them, evaluated on every launch and every trade, in the
+ * They kept running anyway, inside the collector - ten of them, evaluated on every launch and every trade, in the
  * one process whose only irreplaceable job is ingestion. On 2026-09-11 the collector's health endpoint timed out
  * for four minutes while its log carried 225 `baseline-all` events in a forty-second sample. Ingestion survived;
  * it should not have had to compete. The thing that must never be starved of attention was sharing a thread with a
@@ -337,7 +337,7 @@ export const clusterFollow: Strategy = {
  *
  * Kept in the file, not deleted: re-checking a settled claim is worth being able to do, and a dead thesis with its
  * apparatus intact is evidence. `PAPER=1` brings them back for a local run. Nothing in the archive depends on them
- * — an empty list makes every loop in PaperBroker a no-op, which is why this is the whole of the change.
+ * - an empty list makes every loop in PaperBroker a no-op, which is why this is the whole of the change.
  */
 export const ALL_STRATEGIES: Strategy[] = [baselineAll, filteredAll, earlyMomentum, strictMomentum, kolSignal, smartWallet, teamWallet, gradRunner, survivorTrail, clusterFollow];
 

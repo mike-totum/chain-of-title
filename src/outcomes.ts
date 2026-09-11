@@ -12,7 +12,7 @@ const WSOL = "So11111111111111111111111111111111111111112";
 
 /**
  * The same reading as `poolReserves`, but through the managed endpoint pool (`SOLANA_RPC_URLS`, with per-endpoint
- * back-off) instead of the single public node pinned above — which our own collector keeps saturated, so a batch of
+ * back-off) instead of the single public node pinned above - which our own collector keeps saturated, so a batch of
  * reads from it returns HTTP 429 rather than balances.
  *
  * That distinction is not a performance detail. A failed read makes a token uncertifiable, so reading through a

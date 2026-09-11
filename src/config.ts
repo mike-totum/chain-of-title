@@ -4,8 +4,8 @@ import { readFileSync, existsSync } from "node:fs";
 if (existsSync(".env")) {
   // FIRST OCCURRENCE WINS, and that is worth stating out loud rather than leaving to be inferred from the condition
   // below. A key repeated later in the file is ignored, so an EMPTY earlier line silently defeats a correct value
-  // further down: `TELEGRAM_BOT_TOKEN=` on line 26 beat a real token on line 44, and every consumer — the collector's
-  // alerts, the daily report, the freshness probe — read it as unconfigured and reported success at telling nobody.
+  // further down: `TELEGRAM_BOT_TOKEN=` on line 26 beat a real token on line 44, and every consumer - the collector's
+  // alerts, the daily report, the freshness probe - read it as unconfigured and reported success at telling nobody.
   //
   // The warning below is the whole fix, and it is deliberately not a silent correction. Which duplicate is the
   // intended one is a question only the author can answer: preferring the last would quietly change behaviour for
@@ -21,7 +21,7 @@ if (existsSync(".env")) {
     if (process.env[m[1]] === undefined) process.env[m[1]] = m[2].replace(/^["']|["']$/g, "");
   }
   if (dupes.length)
-    console.warn(`[config] .env defines ${[...new Set(dupes)].join(", ")} more than once. The FIRST value is used and the rest are ignored — ` +
+    console.warn(`[config] .env defines ${[...new Set(dupes)].join(", ")} more than once. The FIRST value is used and the rest are ignored - ` +
       `if one of them is empty and appears first, the setting is empty. Remove the duplicates.`);
 }
 
@@ -71,9 +71,9 @@ export const config = {
   /** buzz detection: distinct authors mentioning a $TICKER/#tag within 10 min, at >= 3x its baseline rate */
   buzzMinAuthors: num("BUZZ_MIN_AUTHORS", 5),
   buzzMinLift: num("BUZZ_MIN_LIFT", 3),
-  /** PumpSwap (post-graduation) trade stream; empty disables. Its own websocket — use a private RPC if the public one drops. */
+  /** PumpSwap (post-graduation) trade stream; empty disables. Its own websocket - use a private RPC if the public one drops. */
   pumpswapWsUrl: str("PUMPSWAP_WS_URL", process.env.SOLANA_WS_URL || "wss://api.mainnet-beta.solana.com"),
-  /** kol-signal will not enter tokens above this market cap (SOL) — calls on already-huge coins are not our game */
+  /** kol-signal will not enter tokens above this market cap (SOL) - calls on already-huge coins are not our game */
   kolMaxMcapSol: num("KOL_MAX_MCAP_SOL", 3000),
   /** DexScreener price polling for graduated / externally-called tokens */
   extPriceSeconds: num("EXT_PRICE_SECONDS", 20),
@@ -88,13 +88,13 @@ export const config = {
   telegramBotToken: str("TELEGRAM_BOT_TOKEN"),
   telegramChatId: str("TELEGRAM_CHAT_ID"),
   /**
-   * Send a Telegram message for every per-token signal — operator clusters, buyouts, movements, KOL posts, buzz,
+   * Send a Telegram message for every per-token signal - operator clusters, buyouts, movements, KOL posts, buzz,
    * paper trades. Off by default, and the default is the point.
    *
    * These alerts were written when this was a trading bot. That thesis is dead (0 of 19,412 curve positions ever
    * reached 5x), so a per-token signal is now research output, not something anyone needs to act on within seconds.
    * At ~1,300 launches an hour they arrive faster than they can be read, and an alert channel that is mostly noise
-   * is one nobody looks at — which silently disarms the system alerts sharing it. The channel's job is now: is the
+   * is one nobody looks at - which silently disarms the system alerts sharing it. The channel's job is now: is the
    * collector ingesting, and is the archive still being published.
    */
   alertSignals: str("ALERT_SIGNALS") === "1",

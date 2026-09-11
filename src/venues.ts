@@ -1,8 +1,8 @@
 /**
  * What a launch venue has to provide, and what onboarding one is not allowed to do.
  *
- * The record format has always been venue-neutral — `tokens.venue` exists and every published row currently reads
- * `pumpfun` — but the collector is not: the program id, the two Anchor discriminators, the byte layouts and the
+ * The record format has always been venue-neutral - `tokens.venue` exists and every published row currently reads
+ * `pumpfun` - but the collector is not: the program id, the two Anchor discriminators, the byte layouts and the
  * curve PDA are constants in `feed/rpc.ts` and `rpc-http.ts`. This is the seam between the parts that are one
  * venue's and the parts that are every venue's, so the second one is a file rather than a refactor.
  *
@@ -10,33 +10,33 @@
  *
  * Breadth expires; depth does not. Every on-chain fact about a pump.fun launch from last week is still on chain and
  * an archival node will rebuild it next year for the same price. A launch happening on another venue right now is
- * observable only right now — which is the founding argument of this project, applied for a year to one venue and
+ * observable only right now - which is the founding argument of this project, applied for a year to one venue and
  * not to the rest. pump.fun runs at 62-80% of Solana launches today, and LetsBonk held more than half of that market
  * at a point in 2025 before pump.fun recovered. A single-venue collector would have watched the minority venue for
  * months without knowing.
  *
  * THE CONTRACT, WRITTEN BEFORE THE CODE THAT WILL HAVE TO SATISFY IT
  *
- * This repo already does this once — HANDOFF banked the seed-merge criteria before the merge existed, so review had
+ * This repo already does this once - HANDOFF banked the seed-merge criteria before the merge existed, so review had
  * something to check against rather than a description of what had been built. Venue onboarding is the next change
  * of that size, and every clause below is here because something has already gone wrong in its shape.
  *
  * 1. A BULK IMPORT ENFORCES NOTHING. Onboarding a venue is an arrival of rows that are all new, and that is exactly
  *    the branch no policy governs. `TOKEN_POLICY` in db.ts is an ON CONFLICT DO UPDATE clause: it resolves conflicts
  *    and says nothing about inserts. mergeSeed's INSERT ... SELECT carried the seed's columns verbatim straight past
- *    it and produced 1,255 launches holding a pool balance with no reading time — a pair the policy two lines above
+ *    it and produced 1,255 launches holding a pool balance with no reading time - a pair the policy two lines above
  *    forbids in writing. A merge policy is not a schema constraint.
  *
  * 2. SO THE INVARIANTS GO ON THE TABLE, AND THIS IS THE ONE MOMENT THEY ARE FREE. SQLite takes
  *    `CHECK ((vault_sol IS NULL) = (vault_at IS NULL))`, which binds INSERT and UPDATE alike and cannot be bypassed
- *    by an import path nobody thought about. Adding one to a live table means rebuilding it, and pump.db is 6.5 GB —
+ *    by an import path nobody thought about. Adding one to a live table means rebuilding it, and pump.db is 6.5 GB -
  *    which is why it has not happened. A new or widened schema is when that cost is zero. The pairs `servicedb`'s
  *    coherence guard asserts are the candidate list; the guard is the last line of defence and should not be the
  *    only one.
  *
  * 3. COVERAGE IS PER VENUE OR IT IS A LIE. `runs` records when the collector was observing, and with two venues a
  *    single interval cannot answer "were you watching THIS launch". A venue we do not watch must read as unwatched,
- *    never as clean, and the claim the site makes is "every Solana launch we watched" — never "every Solana launch".
+ *    never as clean, and the claim the site makes is "every Solana launch we watched" - never "every Solana launch".
  *
  * 4. NO VENUE MAY QUIETLY BECOME THE DEFAULT. `venue` is NOT NULL with a default of 'pumpfun' because every row
  *    predates the column. A row arriving from a second venue that forgets to set it inherits that default and is
@@ -69,7 +69,7 @@ export interface LaunchVenue {
   /**
    * Address of the account holding this launch's curve state, derived from the mint.
    *
-   * Returning null is a legitimate answer for a venue with no curve — it means completion cannot be confirmed from
+   * Returning null is a legitimate answer for a venue with no curve - it means completion cannot be confirmed from
    * an account and must come from a market, exactly as `graduated_confirmed_by` already distinguishes. It must never
    * mean "we could not work it out".
    */

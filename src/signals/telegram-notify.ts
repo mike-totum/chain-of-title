@@ -16,7 +16,7 @@ export function telegramNotifier(token: string, chatId: string): (text: string) 
  *
  * `telegramNotifier` above is fire-and-forget with a `.catch(() => {})`, which is right for a per-token signal
  * nobody acts on and wrong for an alert: a notifier that cannot tell you it failed manufactures the evidence that
- * someone was told. `notify-summary.ts` did exactly that for weeks — `process.exit(0)` when unconfigured, so the
+ * someone was told. `notify-summary.ts` did exactly that for weeks - `process.exit(0)` when unconfigured, so the
  * morning report logged a successful notification every day and sent nothing.
  *
  * Returns false rather than throwing, including when unconfigured, so the caller decides how loud that is.

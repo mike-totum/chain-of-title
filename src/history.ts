@@ -2,8 +2,8 @@
  * Historical winner dataset: the full bonding-curve life of tokens that became big, rebuilt from chain history.
  *
  * The live database holds ~12 organic runners in 80k launches and saw only 3 of them from launch, so no picker can
- * be learned from it. This job (1) lists candidates — pump.fun's top coins by current and all-time-high market cap,
- * a mints file, and/or our own late-graduating tokens — (2) walks each token's bonding-curve account transaction
+ * be learned from it. This job (1) lists candidates - pump.fun's top coins by current and all-time-high market cap,
+ * a mints file, and/or our own late-graduating tokens - (2) walks each token's bonding-curve account transaction
  * history (getSignaturesForAddress: cheap, gives the activity-over-time shape for free) and (3) decodes every curve
  * transaction (getTransaction, batched) into hist_trades with wallet, side, size and the curve state after each trade.
  * A token's curve account is only used until graduation, so its history is bounded (hundreds to a few thousand txs).
@@ -215,7 +215,7 @@ async function reconstruct(row: any): Promise<void> {
     const peakX = launchPrice ? Math.max(...trades.map((t) => t.vsol / t.vtok)) / launchPrice : null;
     // A rebuild that could not read every transaction is partial, however many it did read. 188 of 2,729 rows were
     // stored as "done" on incomplete fetches (SCI-BOT: 607 of 1,925, recording 560 trades where the full history has
-    // 1,812) — an undercount that lands squarely on buyer counts and dev share. Absence of data is not a finding.
+    // 1,812) - an undercount that lands squarely on buyer counts and dev share. Absence of data is not a finding.
     const wanted = Math.min(MAX_TXS, okSigs.length);
     const status = trades.length === 0 ? "no-trades" : (okSigs.length > MAX_TXS || fetched < wanted) ? "partial" : "done";
     db.prepare(`UPDATE hist_tokens SET status = ?, creator = COALESCE(?, creator), name = COALESCE(name, ?), symbol = COALESCE(symbol, ?), txs_fetched = ?, trades = ?, buyers = ?, dev_pct = ?, dev_buy_pct = ?,

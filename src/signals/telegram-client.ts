@@ -8,7 +8,7 @@ export const SESSION_FILE = process.env.TELEGRAM_SESSION_FILE || "data/telegram.
 /**
  * The session, from the environment first and the file second.
  *
- * A gramjs session string is full access to the Telegram account that created it — not a scoped API key. Baking one
+ * A gramjs session string is full access to the Telegram account that created it - not a scoped API key. Baking one
  * into a container image puts an account credential in every layer of every build and in whatever caches those
  * layers reach. TELEGRAM_SESSION lets it be a platform secret instead, set once, never written to disk, and absent
  * from the image entirely. The file stays the default because that is what `npm run telegram:login` writes locally.

@@ -1,12 +1,12 @@
 /**
- * Build the record database — the file the public service reads, and the thing this project actually is.
+ * Build the record database - the file the public service reads, and the thing this project actually is.
  *
  *   npm run servicedb            incremental: carry across launches changed since the last run
  *   npm run servicedb -- --full  rebuild from scratch
  *
  * **Why this exists.** The collector's database is a research instrument: 13.2 M trade rows, 3.3 GB of them plus
  * 1.7 GB of indexes, growing by roughly a gigabyte a day and pruned on a retention window. None of that is the
- * product. The product is one immutable row per launch — what a token was at birth — and at ~24,000 launches a day
+ * product. The product is one immutable row per launch - what a token was at birth - and at ~24,000 launches a day
  * the arithmetic that matters is per-row, not per-day: about 200 bytes each, so ten million launches is ~2 GB and a
  * hundred million is ~20 GB. That is a file you can serve, replicate, hand to a researcher and publish as a dump.
  *
@@ -41,7 +41,7 @@ const READ_ONLY = process.argv.includes("--read-only");
  *
  * Holding deletion while still rebuilding would defeat itself: `servicedb` rebuilds `rec.trades` and
  * `rec.wallet_flow` in full from whatever the collector currently holds, so evidence already published disappears
- * from the artifact the moment the collector no longer has its source rows — a deletion by another route, arriving
+ * from the artifact the moment the collector no longer has its source rows - a deletion by another route, arriving
  * through the one path nobody would think to suspend. Raised by the other session while reviewing the hold, and it
  * was right.
  *
@@ -51,7 +51,7 @@ const READ_ONLY = process.argv.includes("--read-only");
  */
 const HOLD = (process.env.LEGAL_HOLD ?? "").trim();
 if (HOLD) {
-  console.log(`LEGAL HOLD IS SET (${HOLD}) — the published record is frozen and will not be rebuilt.`);
+  console.log(`LEGAL HOLD IS SET (${HOLD}): the published record is frozen and will not be rebuilt.`);
   console.log(`Collection continues; only publication is suspended. Unset LEGAL_HOLD to resume.`);
   process.exit(0);
 }
@@ -133,7 +133,7 @@ db.exec(`
     -- volume and it is wrong on about two rows in five; this is the reading that says so, published as evidence
     -- rather than used to quietly rewrite the inference.
     --
-    -- Four states, and the pair is what tells them apart — the same shape as image/meta_at:
+    -- Four states, and the pair is what tells them apart - the same shape as image/meta_at:
     --   curve_checked_at NULL                         we hold no reading. Covers a read never attempted and one
     --                                                 that failed: a failed RPC call writes nothing, deliberately,
     --                                                 so it is retried rather than recorded as an observation
@@ -142,7 +142,7 @@ db.exec(`
     --   curve_checked_at set, curve_complete 1        we read it and the curve had completed
     --
     -- A mint we hold no reading for must serialise NULL and must never default to 0. Defaulting would publish our
-    -- own RPC failures as findings about someone else's token — this project's recurring failure with the sign
+    -- own RPC failures as findings about someone else's token - this project's recurring failure with the sign
     -- flipped. The sync below is guarded on EXISTS for exactly that reason: rows we hold nothing for are untouched.
     curve_checked_at INTEGER, curve_complete INTEGER,
     -- The highest price we ever observed for this launch, and when we observed it.
@@ -163,7 +163,7 @@ db.exec(`
   -- only the curve buys large enough to be a buyout: findBuyout's whole input, 1,485 rows of 13.2 million
   CREATE TABLE IF NOT EXISTS rec.trades (
     -- sig is the whole point of publishing these rows rather than a count. This table holds the curve buys large
-    -- enough to be a buyout, which is the most serious thing the record says about a launch — one wallet bought the
+    -- enough to be a buyout, which is the most serious thing the record says about a launch - one wallet bought the
     -- float and called it demand. Without the signature a reader has to take that on our word, on a record whose
     -- own pages promise it can be checked against the chain. NULL where retention took the row before this existed.
     mint TEXT NOT NULL, wallet TEXT NOT NULL, side TEXT, sol REAL, ts INTEGER, slot INTEGER, venue TEXT, is_dev INTEGER,
@@ -202,7 +202,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS rec.pool_map_mint ON pool_map(mint);
   CREATE TABLE IF NOT EXISTS rec.runs (id INTEGER PRIMARY KEY, started_at INTEGER, stopped_at INTEGER, note TEXT);
   -- What each curve-taking wallet did afterwards, precomputed. Derived from every trade the wallet made, so it cannot
-  -- be recomputed from this file — and a wallet page that cannot compute it must not fall back to zero, because zero
+  -- be recomputed from this file - and a wallet page that cannot compute it must not fall back to zero, because zero
   -- reads as "did not sell" about a wallet that may have sold thousands of SOL into buyers.
   CREATE TABLE IF NOT EXISTS rec.wallet_flow (
     wallet TEXT PRIMARY KEY, curve_sol REAL, amm_buy REAL, amm_sell REAL, tokens INTEGER
@@ -211,7 +211,7 @@ db.exec(`
   -- Every correction this project has issued, carried by the record itself.
   --
   -- Until now they existed only as prose on chainoftitle.org/corrections. DATA.md states that the reason this file
-  -- is deposited under a DOI is that "the record outlives the site" — and the corrections did not. Someone who
+  -- is deposited under a DOI is that "the record outlives the site" - and the corrections did not. Someone who
   -- mirrors the CC0 file and never visits the site could not learn that a column they were counting is wrong.
   --
   -- Append-only, and the shape enforces it: a correction that is itself wrong is not edited, it is superseded by a
@@ -239,7 +239,7 @@ db.exec(`
 /**
  * `slot` was added to the published record after the first databases were built. An incremental run reuses the
  * existing file and `CREATE TABLE IF NOT EXISTS` will not widen a table that is already there, so without this the
- * insert below fails on a column-count mismatch — on the collector, which only ever runs incrementally. Defensive
+ * insert below fails on a column-count mismatch - on the collector, which only ever runs incrementally. Defensive
  * ALTER is the same pattern `openDb` uses for the collector's own schema.
  */
 try { db.exec("ALTER TABLE rec.trades ADD COLUMN slot INTEGER"); } catch {}
@@ -248,7 +248,7 @@ try { db.exec("ALTER TABLE rec.trades ADD COLUMN slot INTEGER"); } catch {}
  * the default backfills the rows already in the file.
  *
  * A bare `ADD COLUMN venue TEXT` leaves every existing row NULL, and an incremental run only re-copies rows changed
- * since the watermark — so the first version of this left 143,102 of 145,984 published launches unstamped. That is
+ * since the watermark - so the first version of this left 143,102 of 145,984 published launches unstamped. That is
  * worse than having no column at all: a consumer reading NULL concludes the venue is unknown, when we know exactly
  * what it is. Every row in this file came from the pump.fun collector, so the default states a recorded fact.
  */
@@ -260,7 +260,7 @@ try { db.exec("ALTER TABLE rec.tokens ADD COLUMN venue TEXT NOT NULL DEFAULT 'pu
  */
 try { db.exec("ALTER TABLE rec.tokens ADD COLUMN graduated_confirmed_by TEXT"); } catch {}
 // Added 2026-09-09. The incremental copy only carries rows changed since the watermark, so the backfill that
-// populated these in the collector also bumped updated_at on every row it touched — without that, 181,474
+// populated these in the collector also bumped updated_at on every row it touched - without that, 181,474
 // signatures would sit in the collector and never reach this file. See backfillsig.ts.
 try { db.exec("ALTER TABLE rec.tokens ADD COLUMN create_sig TEXT"); } catch {}
 try { db.exec("ALTER TABLE rec.tokens ADD COLUMN create_slot INTEGER"); } catch {}
@@ -269,7 +269,7 @@ try { db.exec("ALTER TABLE rec.trades ADD COLUMN sig TEXT"); } catch {}
  * Upgrade the rows already in the file from evidence they already carry.
  *
  * The ALTER above only widens the table; an incremental run re-copies nothing behind the watermark, so without this
- * the column arrives NULL on every historical row and stays that way — 4,021 launches with a pool address we
+ * the column arrives NULL on every historical row and stays that way - 4,021 launches with a pool address we
  * observed, reported as unconfirmed. That is the same trap the venue column hit, and it is worth stating once more:
  * a migration that adds a column does not reach the rows a watermark excludes.
  *
@@ -294,8 +294,8 @@ for (const c of ["uri TEXT", "image TEXT", "description TEXT", "meta_at INTEGER"
  * a day to a file whose entire value is that one person can mirror it. But holding a document nobody can verify we
  * hold is a claim, and this project does not publish claims it cannot evidence.
  *
- * A sha256 costs 64 bytes and settles it. Anyone who later obtains the document — from us, lawfully, or by having
- * archived the URI themselves before the creator repointed it — can prove it is the one we read at launch. It is
+ * A sha256 costs 64 bytes and settles it. Anyone who later obtains the document - from us, lawfully, or by having
+ * archived the URI themselves before the creator repointed it - can prove it is the one we read at launch. It is
  * the same trade already made for images: the proof rather than the picture.
  *
  * Computed over the UTF-8 bytes of the stored document, which is what we received; a NULL here means we hold no
@@ -315,13 +315,13 @@ db.function("sha256", (v: unknown) =>
  * correctly bumped `updated_at` still lost 180,951 of 181,474 rows, because a build had crashed after stamping the
  * watermark and before finishing: the next run's `since` was later than timestamps the backfill had already written.
  * So "the writer bumps updated_at" is not sufficient on its own for anything written in bulk or written long after
- * a launch — only a full-rewrite sync or an entry in this list is. That is why create_sig is here rather than
+ * a launch - only a full-rewrite sync or an entry in this list is. That is why create_sig is here rather than
  * relying on the timestamp its backfill sets.
  *
  * Generalised after fixing it once and not learning from it: with meta_sha256 backfilled the record still published
  * ZERO image commitments while the collector held them, because the image columns were added the same way and never
- * got the same treatment. Anything the collector fills in long after a launch — a picture fetched hours later, a
- * document read on a retry — arrives after the row has stopped changing, so it can only ever reach the record this
+ * got the same treatment. Anything the collector fills in long after a launch - a picture fetched hours later, a
+ * document read on a retry - arrives after the row has stopped changing, so it can only ever reach the record this
  * way. One list, so the next such column is a line here rather than a silent hole in the published file.
  */
 for (const [col, expr] of [
@@ -354,7 +354,7 @@ for (const [col, expr] of [
 }
 
 /**
- * The lag, derived from the record's OWN two columns rather than copied from the collector — so it cannot disagree
+ * The lag, derived from the record's OWN two columns rather than copied from the collector - so it cannot disagree
  * with the row it is published beside.
  *
  * The first version computed it from `main.tokens` in the list above, and the build published 154,374 lags against
@@ -381,19 +381,19 @@ try {
  * on every cycle and looked like it had never run.
  *
  * That is worth more attention than the two columns are. The web service migrating the artifact it serves means the
- * file a reader downloads is not byte-identical to the file we built, and its hash moves after publication — which
+ * file a reader downloads is not byte-identical to the file we built, and its hash moves after publication - which
  * is the property an archive under a DOI most needs to keep. The fix belongs in `openDb` (a read-only open that
  * does not migrate), not here, and it is not this file's to make.
  *
  * Until then both columns stay, empty, and the schema page says so rather than pretending they carry something.
  *
- * `image_error` describes our fetch, not the launch — the CREATE above says so and then the file carried it anyway.
+ * `image_error` describes our fetch, not the launch - the CREATE above says so and then the file carried it anyway.
  *
  * `meta_json` is the harder one and is a publication decision rather than a collection one. Keeping the metadata
  * document in the collector is exactly the archaeology this project exists to do: the URI is the creator's to
  * repoint and the document is retrievable once. Publishing it in record.db is a different act. It runs about a
  * kilobyte a launch against roughly 24,000 launches a day, so it would add ~24 MB a day to a 75 MB file and destroy
- * the property the archive is built on — that one person can mirror the whole thing. That is the same argument this
+ * the property the archive is built on - that one person can mirror the whole thing. That is the same argument this
  * file already makes for storing an image's sha256 rather than its bytes, pointed at a much larger column.
  *
  * So: collect it, do not publish it yet, and let it be decided deliberately rather than by an ALTER. Both columns
@@ -411,7 +411,7 @@ try {
            WHERE uri IS NULL AND EXISTS (SELECT 1 FROM main.tokens t WHERE t.mint = rec.tokens.mint AND t.uri IS NOT NULL AND t.uri != '')`);
 } catch {}
 /**
- * `image`, `description` and `meta_at` USED to get none, on the grounds that there was nothing to backfill from —
+ * `image`, `description` and `meta_at` USED to get none, on the grounds that there was nothing to backfill from -
  * nothing had captured them before 2026-09-08 and re-fetching a URI today would stamp today's content as the launch
  * claim. The first half stopped being true on 2026-09-10, when the documents for 09-02 to 09-07 were recovered into
  * the collector; the second half is answered by `meta_lag_ms`, which publishes how late each read was instead of
@@ -421,7 +421,7 @@ try {
  * They are in the late-arriving list above rather than here, because a document recovered days after a launch
  * arrives after the row has stopped changing and can reach the record no other way. Leaving them out produced the
  * incoherence this file elsewhere guards against: a build that published 154,374 values of `meta_lag_ms` against
- * 152,711 of `meta_at` — more lags than timestamps, because the lag was refreshed from the collector while the
+ * 152,711 of `meta_at` - more lags than timestamps, because the lag was refreshed from the collector while the
  * timestamp beside it was not.
  */
 
@@ -432,12 +432,12 @@ db.exec("BEGIN");
 try {
   // Launch facts. `updated_at` is the watermark: a row is carried when the collector last touched it.
   /**
-   * Named columns, not positional — the same fix `rec.trades` already carries, arrived at the same way.
+   * Named columns, not positional - the same fix `rec.trades` already carries, arrived at the same way.
    *
    * A record database built by an earlier version of this file holds columns this one no longer writes:
    * CREATE TABLE IF NOT EXISTS will not widen an existing table, and deleting an ALTER does not narrow one either.
    * data/record.db had 33 columns against the 30 this SELECT supplies and every rebuild died on
-   * "table rec.tokens has 33 columns but 30 values were supplied" — on the collector, which is the only machine
+   * "table rec.tokens has 33 columns but 30 values were supplied" - on the collector, which is the only machine
    * that matters. Naming the columns makes the copy indifferent to what else the file has accumulated.
    */
   db.exec(`INSERT INTO rec.tokens
@@ -490,10 +490,10 @@ try {
   db.exec("DELETE FROM rec.trades");
   // `slot` is carried even though nothing reads it yet. A trade's `ts` is the moment the collector decoded it, not
   // block time, so the gap between a launch and the buy that took its curve is only as fine as the batch they arrived
-  // in — 97% of buyouts record a gap of exactly zero. The slot is the one field that could settle it, and leaving it
+  // in - 97% of buyouts record a gap of exactly zero. The slot is the one field that could settle it, and leaving it
   // out of the published record meant nobody could check the claim, including us.
   // Named columns, not positional. `slot` is new, and on a record database built before it existed the ALTER above
-  // appends it last — so a positional SELECT would quietly write the slot into `venue` on exactly the incremental
+  // appends it last - so a positional SELECT would quietly write the slot into `venue` on exactly the incremental
   // runs the collector actually does. Naming them makes physical column order irrelevant.
   db.exec(`INSERT INTO rec.trades (mint, wallet, side, sol, ts, slot, venue, is_dev, sig)
     SELECT mint, wallet, side, sol, ts, slot, venue, COALESCE(is_dev,0), sig
@@ -507,7 +507,7 @@ try {
    * to take its word, that is the wrong column to have.
    *
    * Scoped to the same (wallet, mint) pairs as the aggregate, so it is exactly the evidence behind the number and not
-   * a second, larger claim. 1,916 rows measured 2026-09-08 against 10,773 for the wallet-wide version — small enough
+   * a second, larger claim. 1,916 rows measured 2026-09-08 against 10,773 for the wallet-wide version - small enough
    * that there was never a size reason not to publish it.
    */
   db.exec(`INSERT INTO rec.trades (mint, wallet, side, sol, ts, slot, venue, is_dev, sig)
@@ -537,12 +537,12 @@ try {
     log("  hist_trades absent in the source (history.ts has never run here); the record carries none");
 
   /**
-   * A table this build's source does not have is skipped, not fatal — the same treatment hist_trades already gets.
+   * A table this build's source does not have is skipped, not fatal - the same treatment hist_trades already gets.
    *
    * These are copied by name from `main`, and a name that is not there throws and takes the whole record build down
    * with it. That is not a theoretical risk: `operator_funders` is new to this list, the collector only has it
    * because a seed merge brought it, and a fresh collector seeded from an older export would not. A build that dies
-   * publishes no record at all, the web service then refuses the pull, and the archive freezes — which is a far
+   * publishes no record at all, the web service then refuses the pull, and the archive freezes - which is a far
    * worse outcome than a record carrying one table fewer and saying so in the log.
    */
   const sourceHas = (t: string) =>
@@ -564,7 +564,7 @@ try {
   /**
    * Scoped to the mints the wallet actually took, which is what every label on it says.
    *
-   * It used to select on `wallet IN (...)` — the wallet had taken SOME curve, and then every trade that wallet ever
+   * It used to select on `wallet IN (...)` - the wallet had taken SOME curve, and then every trade that wallet ever
    * made anywhere was summed into the total. So `amm_sell`, rendered as "sold after taking the curve" on the wallet
    * page and used as a worked example on the data page captioned "who sold the most into buyers after taking a
    * curve", included sells on tokens the wallet had never touched the curve of. The number was real and the sentence
@@ -590,14 +590,14 @@ try {
    *
    * On 2026-09-08 production began serving a record built at 14:37 that appears in no log: the publish loop's own
    * log ends at 12:56, the collector's record build was not enabled locally, and nothing else admitted to it. The
-   * file was correct and there was still no way to say what produced it — which means there was no way to say
+   * file was correct and there was still no way to say what produced it - which means there was no way to say
    * whether the thing that produced it was supposed to.
    *
    * A record that cannot account for its own origin is a strange artefact for a provenance project to publish.
    *
    * Deliberately NOT the hostname. This file is published CC0 and mirrored under a DOI, so anything written here is
    * public forever, and a personal machine name is not ours to publish. Railway names its own services; everything
-   * else is "local", which is the distinction that actually matters — cloud or laptop — without carrying a person
+   * else is "local", which is the distinction that actually matters - cloud or laptop - without carrying a person
    * into a permanent public record. The same care the rest of this project takes about other people's data.
    */
   const builder = process.env.RAILWAY_SERVICE_NAME ? `railway:${process.env.RAILWAY_SERVICE_NAME}` : "local";
@@ -607,11 +607,11 @@ try {
    *
    * Placed here, after every INSERT, and not beside the backfills above: those run before the incremental copy
    * because their columns are also supplied by it, so a fresh file gets them on insert and an existing file
-   * gets them from the backfill. These two columns are supplied by neither — nothing in the copy below reads
-   * curve_checks — so running them up there updated a table that was still empty and published 205,217 NULLs.
+   * gets them from the backfill. These two columns are supplied by neither - nothing in the copy below reads
+   * curve_checks - so running them up there updated a table that was still empty and published 205,217 NULLs.
    *
    * This deliberately does NOT join the list above, and the reason is the difference between a fact and a reading.
-   * Every column in that list is written once and never revised — a document's hash, a picture's size — so filling it
+   * Every column in that list is written once and never revised - a document's hash, a picture's size - so filling it
    * only `WHERE col IS NULL` is right. A curve reading is not like that. `curve_checks` is rechecked on a cooldown
    * while a launch is still settling, and a curve that read `complete = 0` last week can read 1 today: slow fills
    * happen, which is the entire reason the recheck exists.
@@ -629,7 +629,7 @@ try {
    * The peak, re-synced in full rather than backfilled once, for the same reason as the curve reading below.
    *
    * A peak ratchets, so a row unchanged since the watermark can still hold a higher peak in the collector than in
-   * the record — and the watermark can sit AHEAD of writes that already happened, which was established here today.
+   * the record - and the watermark can sit AHEAD of writes that already happened, which was established here today.
    * A NULL-only backfill would publish whichever value arrived first and freeze it.
    *
    * Only where the collector's peak is HIGHER, so this can never walk a published peak downwards: the one
@@ -657,13 +657,13 @@ try {
   /**
    * A balance nobody can date is not published.
    *
-   * DATA.md's rule is that vault_sol is never quoted without vault_at, and every consumer honours it —
+   * DATA.md's rule is that vault_sol is never quoted without vault_at, and every consumer honours it -
    * `readingCertifies` takes both and refuses the pair when either is missing. So an orphaned balance is a number
    * the archive has already committed never to use, and publishing it invites exactly one thing: a reader who does
    * not know the rule quoting it anyway.
    *
    * The write path in db.ts now refuses to create these, so this clears the 1,198 already in the file rather than
-   * carrying them forever. The balance is not destroyed — the collector keeps whatever it holds; this is a decision
+   * carrying them forever. The balance is not destroyed - the collector keeps whatever it holds; this is a decision
    * about what the published record asserts, and it should assert nothing it will not stand behind.
    *
    * With this and the db.ts fix in place, the vault invariant below can only trip on a genuine regression, which is
@@ -679,7 +679,7 @@ try {
    * Coherence: does this file contradict itself, row by row.
    *
    * The count guards below ask whether the archive shrank. This asks a different question that none of them can:
-   * whether a single row now asserts two things that cannot both be true. Twice on 2026-09-10 it did — the record
+   * whether a single row now asserts two things that cannot both be true. Twice on 2026-09-10 it did - the record
    * published 126,217 meta_sha256 against 80,630 documents, and then, in the commit that fixed that, 154,374
    * meta_lag_ms against 152,711 timestamps. More hashes than documents; more lags than the readings they measure.
    *
@@ -697,7 +697,7 @@ try {
    *             equal the derivation, so a stale copy of something computable is caught rather than served.
    *
    * **This guard is not the real fix and must not be mistaken for one.** Where a column can be derived from the
-   * published row instead of copied from the collector, derive it — `meta_lag_ms` and the curve reading both do,
+   * published row instead of copied from the collector, derive it - `meta_lag_ms` and the curve reading both do,
    * and neither can contradict the row it sits beside because there is no second copy to disagree with. Removing
    * the possibility beats detecting the failure. This catches the pairs that cannot be collapsed that way, and it
    * fails the build rather than warning, because a record that contradicts itself is worse than a stale one: a
@@ -710,7 +710,7 @@ try {
     { kind: "IMPLIES", sql: "meta_bytes IS NOT NULL AND meta_at IS NULL", why: "meta_bytes without meta_at" },
     // The picture's proof requires the fetch that produced it.
     { kind: "IMPLIES", sql: "image_sha256 IS NOT NULL AND image_at IS NULL", why: "image_sha256 without image_at" },
-    // A curve reading and the time it was taken. NULL complete with a time is legitimate — the account was gone.
+    // A curve reading and the time it was taken. NULL complete with a time is legitimate - the account was gone.
     { kind: "IMPLIES", sql: "curve_complete IS NOT NULL AND curve_checked_at IS NULL", why: "curve_complete without curve_checked_at" },
     // A peak is only a fact with the moment we saw it, exactly as a pool balance is.
     { kind: "IMPLIES", sql: "peak_price IS NOT NULL AND peak_at IS NULL", why: "peak_price without peak_at" },
@@ -718,12 +718,12 @@ try {
     { kind: "IMPLIES", sql: "peak_source IS NOT NULL AND peak_price IS NULL", why: "peak_source without a peak" },
     // A pool balance is only ever quoted with the moment it was read, and the moment is meaningless without it.
     // db.ts enforces this on write with a CASE; asserting it here checks the invariant survived the copy, which is
-    // the class of failure this file keeps producing — a rule held at the source and lost in transit.
+    // the class of failure this file keeps producing - a rule held at the source and lost in transit.
     { kind: "IMPLIES", sql: "vault_sol IS NOT NULL AND vault_at IS NULL", why: "vault_sol without vault_at" },
     { kind: "IMPLIES", sql: "vault_at IS NOT NULL AND vault_sol IS NULL", why: "vault_at without vault_sol" },
     // Completion facts require the claim they qualify.
     { kind: "IMPLIES", sql: "graduated_at IS NOT NULL AND COALESCE(graduated,0) = 0", why: "graduated_at on a row that did not graduate" },
-    // On the VALUE, not on non-nullness. rebuilt_complete carries a meaningful 0 — 205,737 rows are "not rebuilt",
+    // On the VALUE, not on non-nullness. rebuilt_complete carries a meaningful 0 - 205,737 rows are "not rebuilt",
     // which an IS NOT NULL test reads as "claims to be rebuilt" and fails on correct data. Any column with a
     // meaningful default needs the value form, and a build-failing guard that trips on correct data is switched off
     // within a week, after which there is neither a guard nor any reason to trust the next one.
@@ -734,7 +734,7 @@ try {
   const broken: string[] = [];
   for (const inv of INVARIANTS) {
     const n = (db.prepare(`SELECT COUNT(*) c FROM rec.tokens WHERE ${inv.sql}`).get() as any).c as number;
-    if (n > 0) broken.push(`  ${inv.kind.padEnd(7)} ${n.toLocaleString().padStart(9)} rows — ${inv.why}`);
+    if (n > 0) broken.push(`  ${inv.kind.padEnd(7)} ${n.toLocaleString().padStart(9)} rows: ${inv.why}`);
   }
   if (broken.length)
     throw new Error(`the record contradicts itself and will not be published:\n${broken.join("\n")}\n` +
@@ -753,7 +753,7 @@ try {
  * Publish nothing but the record.
  *
  * `openDb` migrates whatever database it is handed, and until 2026-09-08 both the site generator and the web service
- * pointed it at the published record — so the file the public downloads had accumulated ten empty tables from the
+ * pointed it at the published record - so the file the public downloads had accumulated ten empty tables from the
  * collector's schema: tweets, signals, positions, buzz, smart_wallets, wallet_teams, wallet_token_stats,
  * operator_funders and platform_snapshots. Every one of them held zero rows.
  *
@@ -862,7 +862,7 @@ for (const r of db.prepare("SELECT name FROM rec.sqlite_master WHERE type='table
   // Refuse to drop anything holding data. A table with rows in it is either a table this list has gone stale about
   // or a mistake much larger than a stray schema, and silently deleting published rows to tidy a shape is not a
   // trade this file gets to make on its own.
-  if (rows > 0) { log(`  WARNING: rec.${r.name} is not a record table but holds ${rows} rows — left alone, fix the list`); continue; }
+  if (rows > 0) { log(`  WARNING: rec.${r.name} is not a record table but holds ${rows} rows, left alone, fix the list`); continue; }
   try { db.exec(`DROP TABLE rec.${r.name}`); log(`  dropped stray empty table rec.${r.name}`); } catch { /* view, or in use */ }
 }
 
@@ -871,7 +871,7 @@ const rows = { launches: n("tokens"), buyouts: n("trades") + n("hist_trades"), w
 db.exec("DETACH DATABASE rec");
 
 // Fold the write-ahead log back into the file and leave it in rollback-journal mode. The record is shipped as a
-// single file — baked into an image, copied to a volume, handed to a researcher — and a 42 MB WAL sidecar left
+// single file - baked into an image, copied to a volume, handed to a researcher - and a 42 MB WAL sidecar left
 // beside a 41 MB database means whoever copies just the `.db` gets a partial archive without being told.
 db.exec(`ATTACH DATABASE '${OUT.replace(/'/g, "''")}' AS out2`);
 try { db.exec("PRAGMA out2.wal_checkpoint(TRUNCATE)"); } catch {}

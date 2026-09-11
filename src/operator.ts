@@ -4,7 +4,7 @@
  *
  * A flag says "be careful". This says who took the curve and what they did the last five times. It is the one thing
  * we hold that no configuration scanner can produce, because it needs the history of the wallet across many tokens.
- * Everything is stated as "in our data" — coverage starts 2026-09-02 and only tokens we tracked have per-trade rows.
+ * Everything is stated as "in our data" - coverage starts 2026-09-02 and only tokens we tracked have per-trade rows.
  */
 import { config } from "./config.ts";
 import { openDb } from "./db.ts";
@@ -21,7 +21,7 @@ export interface Profile {
 
 /**
  * A curve buyout may be recorded in either table: `trades` if we watched it live, `hist_trades` if it came from chain
- * reconstruction. Checking only `trades` certified Squads as a clean launch on 2026-09-06 — a token whose 85 SOL
+ * reconstruction. Checking only `trades` certified Squads as a clean launch on 2026-09-06 - a token whose 85 SOL
  * buyout is in `hist_trades` and which the farm dumped 283 SOL into within half an hour. Always check both.
  */
 // findBuyout is called once per token across every graduation in a reporting window, so its two statements are
@@ -96,7 +96,7 @@ export function profile(dbh: any, w: string): Profile {
       WHERE h.wallet = ? AND h.side='buy' AND h.sol >= ? GROUP BY h.mint`).all(w, BUYOUT_SOL) as any[])
       if (!seen.has(h.mint)) buyouts.push(h);
   } catch {}
-  // What the wallet did after taking the curve — the only reason these pages exist. It is derived from every trade
+  // What the wallet did after taking the curve - the only reason these pages exist. It is derived from every trade
   // the wallet made, so a database that carries only the buyouts cannot compute it. `wallet_flow` holds the answer
   // precomputed, one row per wallet; without it, a record database silently reported "0 SOL sold" for a wallet that
   // sold 3,512, which is an exculpatory claim built out of missing data. Prefer the stored row; never invent a zero.
@@ -141,7 +141,7 @@ export function profile(dbh: any, w: string): Profile {
 /**
  * The verdict on a wallet, as a label and its reason rather than one long sentence.
  *
- * It used to be a single string, and the wallet page split it on the first "." to get a heading — which worked until
+ * It used to be a single string, and the wallet page split it on the first "." to get a heading - which worked until
  * a wallet had bought back 0.0 SOL, at which point the decimal point WAS the first full stop: the heading swallowed
  * the whole sentence and the reason under it read "0." Splitting prose on punctuation to recover structure that was
  * thrown away is the bug; giving the structure a shape is the fix.
@@ -189,7 +189,7 @@ export interface ClusterEvent {
 export interface ClusterProfile {
   cluster: string; policy: string | null;
   /**
-   * Every distinct address that funded a wallet in this group, busiest first — not one of them.
+   * Every distinct address that funded a wallet in this group, busiest first - not one of them.
    *
    * 33 of 396 clusters carry more than one, because a cluster is named after the root of a funding chain and the
    * wallets under it record whichever address paid them directly. Reporting `funders[0]` as "funded by" would state

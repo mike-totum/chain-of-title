@@ -30,7 +30,7 @@ const OUT = i > 0 ? process.argv[i + 1] : "data/seed.db";
  *
  * Removing only the database left `seed.db-shm` and `seed.db-wal` behind, and `mergeSeed` chmods a merged seed to
  * read-only so a merged file cannot be edited and re-merged under the same size marker. The next run then deleted
- * the database, created a new one, and SQLite opened the surviving 444 shared-memory file to enable WAL — failing
+ * the database, created a new one, and SQLite opened the surviving 444 shared-memory file to enable WAL - failing
  * with "attempt to write a readonly database" pointing at the schema statement, which is nowhere near the cause.
  * A database is its three files; deleting one of them is not deleting it.
  */
@@ -41,13 +41,13 @@ for (const f of [OUT, `${OUT}-wal`, `${OUT}-shm`]) if (existsSync(f)) rmSync(f, 
  *
  * `trades` was deliberately absent on the grounds that it is bulk rather than asset. That was half right and the
  * wrong half mattered: 17.5M trade rows are indeed bulk, but the curve buys at or above BUYOUT_SOL inside them are
- * the buyout evidence — what `findBuyout` reads and what `servicedb` copies into the published record. Leaving them
+ * the buyout evidence - what `findBuyout` reads and what `servicedb` copies into the published record. Leaving them
  * out produced a collector whose record carried 580 buyouts against the laptop's 2,099, so adopting it would have
  * grown the launch count while destroying three quarters of the proof of who took the curves. The count guard on the
  * pull sees only `tokens` and would have called that growth.
  *
  * `hist_trades` is the same evidence recovered from chain by `history.ts`, which has only ever run on the laptop. A
- * collector cannot reconstruct it — the transactions are still on chain, but reaching back for them needs an
+ * collector cannot reconstruct it - the transactions are still on chain, but reaching back for them needs an
  * archival node and time. Seeding it is the only way a cloud collector ever holds the buyout history that predates
  * it, and without it the collector can never be the source of the record.
  *
@@ -64,7 +64,7 @@ const tables = ["tokens", "operator_wallets", "operator_funders", "operator_poli
 const src = new DatabaseSync(config.dbPath, { readOnly: true });
 const w = openDb(OUT);   // creates the full, correct schema
 /**
- * `openDb` does not create `hist_trades` — it is made by `history.ts`, which has only ever run on the laptop. The
+ * `openDb` does not create `hist_trades` - it is made by `history.ts`, which has only ever run on the laptop. The
  * seed needs somewhere to put the rows, and the collector needs the table to exist before it can receive them, so
  * the definition is stated here verbatim from the source database rather than assumed. `mergeSeed` creates it on the
  * target the same way.
@@ -111,7 +111,7 @@ const counts = tables.map((t) => {
   try { return `${t} ${(w.prepare(`SELECT COUNT(*) c FROM ${t}`).get() as any).c.toLocaleString()}`; } catch { return `${t} -`; }
 });
 w.close();
-console.log(`\nwrote ${OUT} — ${(statSync(OUT).size / 1048576).toFixed(1)} MB`);
+console.log(`\nwrote ${OUT} - ${(statSync(OUT).size / 1048576).toFixed(1)} MB`);
 for (const c of counts) console.log(`  ${c}`);
 console.log(`\nShip it with the deploy. Prove it first against a copy:`);
 console.log(`  npm run mergeseed -- --db <copy-of-collector.db> --seed ${OUT} --dry-run`);

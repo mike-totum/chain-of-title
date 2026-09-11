@@ -110,10 +110,10 @@ for (let i = 0; i < allToks.length; i += tstride) {
   launchUsed++;
   replayScalp("launch", path, fi, t.graduated_at ?? Infinity);
 }
-console.log(`\n=== copy-trade latency / hold sensitivity — ${used.good} "good"-wallet buys, ${used.rest} other early buys replayed (sample stride ${stride}, ${skipped} without a stored path) ===`);
+console.log(`\n=== copy-trade latency / hold sensitivity - ${used.good} "good"-wallet buys, ${used.rest} other early buys replayed (sample stride ${stride}, ${skipped} without a stored path) ===`);
 console.log(`"good" = wallet whose prior finished tokens paid an outsider at 15 min >= 50 % of the time (prospective). Return = 0.97 x exit / fill; avg winsorized at 20x.\n`);
 for (const g of ["good", "rest"] as const) {
-  console.log(`${g.toUpperCase()} — rows: fill latency after the wallet's buy; columns: hold time. Each cell: avg x / median x / win %`);
+  console.log(`${g.toUpperCase()} - rows: fill latency after the wallet's buy; columns: hold time. Each cell: avg x / median x / win %`);
   const head = "  latency ".padEnd(12) + HOLD.map((h) => `hold ${h}s`.padEnd(22)).join("");
   console.log(head);
   for (const L of LAT) {
@@ -124,7 +124,7 @@ for (const g of ["good", "rest"] as const) {
   console.log(`  best price within 60 s of a 1.5 s fill: avg ${f(peak60[g].avg)}x, median ${f(peak60[g].med)}x, reached >1x on ${peak60[g].win === null ? "-" : (100 * peak60[g].win).toFixed(0)}%\n`);
 }
 for (const g of ["good", "rest", "launch"] as const) {
-  console.log(`SCALP after a 1.5 s fill — ${g === "launch" ? `every launch, entry 2 s after creation (${launchUsed} sampled)` : g + " wallets"}: take profit at +X % (sold 1.5 s after the print), else out at the time stop. Cells: avg x / win % [with a -30 % stop: avg x]`);
+  console.log(`SCALP after a 1.5 s fill - ${g === "launch" ? `every launch, entry 2 s after creation (${launchUsed} sampled)` : g + " wallets"}: take profit at +X % (sold 1.5 s after the print), else out at the time stop. Cells: avg x / win % [with a -30 % stop: avg x]`);
   console.log("  take-profit".padEnd(14) + TSTOP.map((T) => `stop ${T}s`.padEnd(30)).join(""));
   for (const tp of TP) {
     let line = `  +${Math.round((tp - 1) * 100)}%`.padEnd(14);

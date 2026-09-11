@@ -35,7 +35,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * The database handle, injectable.
  *
  * This module used to open its own connection at import. Inside the collector that would be a SECOND writer against
- * the file the collector is ingesting into — the precise thing HANDOFF names as costing dropped launches, and the
+ * the file the collector is ingesting into - the precise thing HANDOFF names as costing dropped launches, and the
  * reason this tool stayed on a laptop for a week. `traceClusters` takes the caller's handle instead, so in the
  * collector the tracing and the ingestion serialise on one connection, and the CLI still opens its own.
  */
@@ -70,18 +70,18 @@ const insWallet = db.prepare(`INSERT INTO operator_wallets (wallet, funder, clus
  * Whether the reconstruction tables exist in this database.
  *
  * `hist_tokens` and `hist_trades` are written by `history.ts`, which has only ever run on a laptop. Three queries
- * here read them, and in the collector every one throws `no such table` — so wiring this module into the collector
+ * here read them, and in the collector every one throws `no such table` - so wiring this module into the collector
  * made it fail on entry, on every pass, while the operator map it exists to grow sat unchanged and the published
  * archive stayed frozen behind a guard that map decides.
  *
  * Degrading rather than creating the tables: an empty `hist_tokens` would be a schema this file does not own and a
- * claim that we hold reconstructions we do not. What the tables contribute is seeds and an ordering preference —
- * useful, not required — so without them the pass does less and says nothing false.
+ * claim that we hold reconstructions we do not. What the tables contribute is seeds and an ordering preference -
+ * useful, not required - so without them the pass does less and says nothing false.
  */
 const hasHistory = (): boolean => {
   try {
     /**
-     * BOTH tables, not either. The first version used `name IN (...) LIMIT 1`, which is true when only one exists —
+     * BOTH tables, not either. The first version used `name IN (...) LIMIT 1`, which is true when only one exists -
      * and that is exactly the collector's state: `seed.ts` creates `hist_trades` in the seed database and never
      * `hist_tokens`, so the seeded collector has one of the two. The guard passed and the query on the missing table
      * threw anyway, so the fix changed nothing and looked like a deploy that had not rolled out.
@@ -107,7 +107,7 @@ function collectSeeds(): number {
       for (const w of c.wallets ?? []) { insWallet.run(w, c.funder, clusterName(c.funder), "seeded", null, null, 1, Date.now()); n++; }
     }
   }
-  // the wallet whose buy completed each reconstructed winner's curve — only where reconstructions exist
+  // the wallet whose buy completed each reconstructed winner's curve - only where reconstructions exist
   if (hasHistory()) {
   const grads = db.prepare(`SELECT h.mint, (SELECT wallet FROM hist_trades t WHERE t.mint = h.mint AND t.side = 'buy' AND t.vsol >= 114.4 ORDER BY t.ts LIMIT 1) w
     FROM hist_tokens h WHERE h.status IN ('done', 'partial')`).all() as any[];
@@ -140,10 +140,10 @@ function deltas(t: any): [string, number][] {
 
 /**
  * Trading terminals, bridges and exchanges fund thousands of unrelated retail wallets, and to this tracer that is
- * indistinguishable from a wallet farm — same shape, one payer seeding many wallets that then trade the same tokens.
+ * indistinguishable from a wallet farm - same shape, one payer seeding many wallets that then trade the same tokens.
  * Enumerating one would fill operator_wallets with ordinary users and hand cluster-follow a permanent false signal.
  * Found 2026-09-06 when the first blind-detected buyout (PONST, 85 SOL on a curve dormant 9.5 h) traced to
- * "AxiomRXZAq1..." — a vanity address spelling the name of a Solana trading terminal. Operators do not grind a vanity
+ * "AxiomRXZAq1..." - a vanity address spelling the name of a Solana trading terminal. Operators do not grind a vanity
  * funder address with a product name; platforms do. Prefix match is deliberately loose: these addresses advertise.
  */
 const PLATFORM_FUNDERS = new Set<string>([
@@ -167,7 +167,7 @@ async function traceFunder(wallet: string): Promise<{ funder: string | null; see
     const mine = d.find(([k]) => k === wallet)?.[1] ?? 0;
     const payer = t.transaction.message.accountKeys[0]?.pubkey;
     if (mine > 0 && payer && payer !== wallet) {
-      if (isPlatformFunder(payer)) { console.log(`  funder ${payer.slice(0, 12)} looks like a trading platform, not a farm — not seeded`); return { funder: null, seededAt: null, total, capped }; }
+      if (isPlatformFunder(payer)) { console.log(`  funder ${payer.slice(0, 12)} looks like a trading platform, not a farm - not seeded`); return { funder: null, seededAt: null, total, capped }; }
       return { funder: payer, seededAt: (t.blockTime ?? 0) * 1000, total, capped };
     }
   }
@@ -262,7 +262,7 @@ function computePolicies(): void {
   for (const [cluster, a] of by) {
     // "watch" must mean *no evidence*, not "evidence of distributing that just missed a threshold". The old rule
     // (avoid only at dist >= 2 and dist/n >= 0.67) let through nine clusters that distributed on 100 % of their one
-    // observed play, and DoAsxP, which distributed on 6 of 9 and missed the cut by a third of a percent — cluster-follow
+    // observed play, and DoAsxP, which distributed on 6 of 9 and missed the cut by a third of a percent - cluster-follow
     // duly bought alongside it. Any net distributor is now avoided whatever the sample: entering one is feeding them.
     const policy = a.hold >= 2 && a.hold / a.n >= 0.6 ? "follow" : a.dist > a.hold ? "avoid" : "watch";
     up.run(cluster, policy, a.hold, a.dist, a.n, `${a.hold} hold / ${a.dist} distribute of ${a.n} plays (30 d)`, Date.now());
@@ -312,7 +312,7 @@ function behaviour(): void {
  * One tracing pass, callable rather than only runnable.
  *
  * This file was a script whose whole body executed on import, so the only way to grow the operator map was for a
- * person to run it on a laptop — and that is exactly what happened. The published record froze tonight because the
+ * person to run it on a laptop - and that is exactly what happened. The published record froze tonight because the
  * web service refused the collector's record for carrying 8,598 operator wallets against the 10,243 already served:
  * the guard doing its job about a gap that existed only because this code had no home in the cloud.
  *
@@ -322,7 +322,7 @@ function behaviour(): void {
  *
  * RPC-heavy and bounded: `limit` seeds and `limit` funders per pass. In the collector it runs on a slow timer, in
  * the same process and therefore on the same connection, because a second writer against a 10 s busy_timeout costs
- * dropped launches — the one loss here that cannot be repaired.
+ * dropped launches - the one loss here that cannot be repaired.
  */
 export async function traceClusters(opts: { limit?: number; db?: typeof db; log?: (...a: unknown[]) => void } = {}): Promise<{ traced: number; found: number; wallets: number }> {
   const LIMIT = opts.limit ?? 120;
@@ -333,7 +333,7 @@ export async function traceClusters(opts: { limit?: number; db?: typeof db; log?
   // trace seeds: organic-looking winners first, then the rest
   /**
    * Organic-looking winners first when we can tell, otherwise newest first. The ordering is a preference about which
-   * seeds are worth the RPC calls, not a correctness condition, so a database without reconstructions still traces —
+   * seeds are worth the RPC calls, not a correctness condition, so a database without reconstructions still traces -
    * it just cannot prioritise, which is a far smaller loss than tracing nothing at all.
    */
   const todo = (hasHistory()
@@ -384,13 +384,13 @@ export async function traceClusters(opts: { limit?: number; db?: typeof db; log?
   /**
    * The derived analysis, and it is allowed to fail.
    *
-   * `buildClusterTrades` and `computePolicies` read `token_outcomes` and the reconstruction tables — laptop-only,
+   * `buildClusterTrades` and `computePolicies` read `token_outcomes` and the reconstruction tables - laptop-only,
    * like `hist_tokens`. They summarise what the clusters DID; the tracing loop above is what discovers the wallets,
    * and that is the part the published archive depends on, because the record's operator map is what the shrink
    * guard measures.
    *
    * So a missing analysis table costs a scorecard, not the map. Wrapping these was the difference between a pass
-   * that grows the archive and one that throws on its last line and writes nothing — which is what happened, every
+   * that grows the archive and one that throws on its last line and writes nothing - which is what happened, every
    * pass, for the first hour this ran in the cloud.
    */
   try {

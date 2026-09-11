@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
  *
  * WHY THIS EXISTS. Every pump.fun launch declares its metadata at an `ipfs.io` URL, and the collector fetched that
  * URL as declared, once, with a 4-second timeout. Measured 2026-09-08: `ipfs.io` returns 429 to us on every request,
- * in about 50 ms — not a timeout, a refusal. We were asking one public gateway for a thousand documents an hour and
+ * in about 50 ms - not a timeout, a refusal. We were asking one public gateway for a thousand documents an hour and
  * it stopped answering. The result was 7,771 launches with metadata out of 28,488 in a day: 27%, with a URI in hand
  * for 99.5% of them.
  *
@@ -14,7 +14,7 @@ import { createHash } from "node:crypto";
  * twenty thousand launches a day were being lost that way while every count on the site stayed correct.
  *
  * WHAT A GATEWAY IS. The CID in the URL is the content address; the hostname is only a way of reaching it. The same
- * CID from a different gateway is the same bytes — that is what content addressing means — so rotating hosts is not
+ * CID from a different gateway is the same bytes - that is what content addressing means - so rotating hosts is not
  * a workaround or a way of getting around somebody's limits. It is asking a different volunteer for the same public
  * document, which is how IPFS is designed to be read.
  *
@@ -35,7 +35,7 @@ import { createHash } from "node:crypto";
  * Gateways in preference order: fastest first, and the declared host last since it is the one refusing us.
  *
  * Re-measured 2026-09-10 against 12 random `bafkrei…` CIDs from the archive, checking the BYTES and not the status
- * code (see `verifyCid` — that distinction is the reason the list changed):
+ * code (see `verifyCid` - that distinction is the reason the list changed):
  *
  *   snapshot.4everland.link   12/12 verified   0.12 s/req    added, and put first
  *   ipfs.filebase.io          11/12 verified   0.88 s/req
@@ -46,7 +46,7 @@ import { createHash } from "node:crypto";
  *
  * Four gateways with a 60 s cooldown could not carry the backlog: a recovery pass measured 3 rows/s, and 173 of one
  * 252-row batch's failures were our own rate limiter rather than anything wrong with the documents. Depth here is
- * what converts that backlog into captured documents, and verification is what makes adding depth safe — without it
+ * what converts that backlog into captured documents, and verification is what makes adding depth safe - without it
  * a wider pool is a wider surface for `gw3.io` to write a forgery into the archive.
  *
  * Re-run `npm run gateways` before trusting this list again; a gateway that answered today is not a gateway that
@@ -65,7 +65,7 @@ const GATEWAYS = [
  * A gateway that just refused us is not asked again for a while.
  *
  * Without this, a rate-limited host stays first in the rotation and every fetch pays its refusal before falling
- * through — which is fast but wasteful, and worse, it means the busiest host is the one we hammer hardest. The
+ * through - which is fast but wasteful, and worse, it means the busiest host is the one we hammer hardest. The
  * cooldown is per gateway and in memory only: a restart forgets it, which is correct, because whether a gateway is
  * answering is a fact about now and not something to persist.
  */
@@ -77,7 +77,7 @@ let cursor = 0;
 
 /**
  * The CID and any trailing path, from a URI in whatever shape a launch declared it: `ipfs://<cid>`, any
- * `.../ipfs/<cid>` gateway URL, or a bare CID. Returns null for an ordinary http URL, which is fetched as-is —
+ * `.../ipfs/<cid>` gateway URL, or a bare CID. Returns null for an ordinary http URL, which is fetched as-is -
  * some launches host their metadata normally and those need no help.
  */
 export function ipfsPath(uri: string): string | null {
@@ -93,18 +93,18 @@ export function ipfsPath(uri: string): string | null {
  * Check bytes against the content address they were asked for, where the address makes that possible.
  *
  * WHY. `fetchContent` trusts HTTP 200. Measured 2026-09-10 while looking for more gateways: `gw3.io` returned 200
- * and the SAME 132-byte body for four different CIDs — an error page with a success code — and
+ * and the SAME 132-byte body for four different CIDs - an error page with a success code - and
  * `ipfs.raribleuserdata.com` returned 200 with an empty body for one CID and correct bytes for three others. Either
  * would have been recorded as a launch's own account of itself, permanently, with nothing to distinguish it from a
  * real capture. For an archive whose only claim is that its copy is the true copy, that is the worst available
  * failure: not losing a document, but holding a forgery of one.
  *
- * A CID is a hash of the content — verifying is the whole point of content addressing, and it costs one SHA-256.
+ * A CID is a hash of the content - verifying is the whole point of content addressing, and it costs one SHA-256.
  * That turns "which gateways do we trust" into a question we do not have to answer, which is what makes it safe to
  * ask a wider pool of them and recover the backlog faster.
  *
  * WHAT IS AND IS NOT COVERED. `bafkrei…` is CIDv1, raw codec, sha2-256: the digest is of the bytes themselves and
- * this verifies them outright — 64,752 of the archive's URIs, about a third. `Qm…` (CIDv0) and `bafy…` hash a
+ * this verifies them outright - 64,752 of the archive's URIs, about a third. `Qm…` (CIDv0) and `bafy…` hash a
  * dag-pb block that wraps the bytes rather than the bytes, so a plain digest does not match and reconstructing the
  * wrapper is not worth it here. Those return `"unverifiable"`, which is deliberately not the same answer as `"ok"`.
  * Recording that we could not check is the honest outcome; pretending we did is the thing this project exists not
@@ -114,7 +114,7 @@ export type CidCheck = "ok" | "mismatch" | "unverifiable";
 
 const B32 = "abcdefghijklmnopqrstuvwxyz234567";
 
-/** RFC 4648 base32, lower case, no padding — the multibase `b` prefix used by every CIDv1 in the archive. */
+/** RFC 4648 base32, lower case, no padding - the multibase `b` prefix used by every CIDv1 in the archive. */
 function base32Decode(s: string): Uint8Array | null {
   let bits = 0, value = 0, i = 0;
   const out = new Uint8Array(Math.floor((s.length * 5) / 8));
@@ -151,7 +151,7 @@ export interface FetchResult {
  * Fetch a URI, trying every gateway that is not cooling down before giving up.
  *
  * Never throws. Returns `res: null` with a populated `error`, because the caller's job is to record WHY a launch has
- * no metadata — "we asked four gateways and all refused" and "we never looked" are different facts and this project
+ * no metadata - "we asked four gateways and all refused" and "we never looked" are different facts and this project
  * exists to keep them apart. A 404 or 410 is returned as-is rather than retried elsewhere: content addressing means
  * a CID that one gateway cannot find is genuinely unpinned, not unlucky.
  */
@@ -191,7 +191,7 @@ export async function fetchContent(uri: string, timeoutMs = 8000): Promise<Fetch
   return { res: null, via: "none", error: lastErr };
 }
 
-/** Which gateways are currently in cooldown — for `npm run gateways` and the collector's status line. */
+/** Which gateways are currently in cooldown - for `npm run gateways` and the collector's status line. */
 export function gatewayHealth(): { gateway: string; cooling: boolean }[] {
   const now = Date.now();
   return GATEWAYS.map((g) => ({ gateway: g, cooling: (cooldownUntil.get(g) ?? 0) > now }));

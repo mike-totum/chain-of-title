@@ -31,7 +31,7 @@ function verdict(t: Tok): Flag[] {
   const f: Flag[] = [];
   const mcapSol = (t.last_price ?? 0) * 1e9;      // 1B supply
   // Only a balance whose reading time we know can support a present-tense claim. Rows written before `vault_at`
-  // existed have no such time, so the two pool-dependent flags below simply do not fire on them — a stale low reading
+  // existed have no such time, so the two pool-dependent flags below simply do not fire on them - a stale low reading
   // would otherwise print `no-exit-liquidity` on a pool that has since been refilled, which is a false warning, and
   // false warnings are the one thing this tool cannot afford. Launch-fact flags are unaffected: they never decay.
   const pool = t.vault_at === null ? null : t.vault_sol;
@@ -47,7 +47,7 @@ function verdict(t: Tok): Flag[] {
   }
   // 2. Cannot exit: whatever the cap says, this is the money actually available to sell into.
   if (t.graduated && pool !== null && pool < 40)
-    f.push({ level: "danger", code: "no-exit-liquidity", why: `only ${pool.toFixed(1)} SOL in the pool — a position cannot be sold at anything near the shown price.` });
+    f.push({ level: "danger", code: "no-exit-liquidity", why: `only ${pool.toFixed(1)} SOL in the pool - a position cannot be sold at anything near the shown price.` });
   // 3. The dev owns the supply: every buyer is bidding against the creator's inventory.
   if (t.dev_pct >= 50 && !t.late_discovery)
     f.push({ level: "danger", code: "dev-owns-supply", why: `the creator holds ${t.dev_pct.toFixed(0)}% of supply.` });
@@ -60,7 +60,7 @@ function verdict(t: Tok): Flag[] {
     // Claiming the wrong cause is worse than saying nothing when the whole product is trust.
     const secs = Math.round((t.graduated_at - t.created_at) / 1000);
     const who = t.dev_pct >= 20 ? "the creator funded it" : "a bundle of wallets bought the whole curve in the first block";
-    f.push({ level: "danger", code: "instant-graduation", why: `left the curve ${secs}s after launch — ${who}, so the float was taken before anyone could buy at a normal price.` });
+    f.push({ level: "danger", code: "instant-graduation", why: `left the curve ${secs}s after launch - ${who}, so the float was taken before anyone could buy at a normal price.` });
   }
   // 5. Decoded trades disagree with the pool's own balances: the reported price is unreliable.
   if (t.amm_trusted === 0)
@@ -104,8 +104,8 @@ if (ONE) {
     console.log(`\n${t.symbol} ${t.mint}`);
     const age = t.vault_at ? `${((Date.now() - t.vault_at) / 3600_000).toFixed(1)} h ago` : "measurement time unknown";
     console.log(`  pool ${t.vault_sol ?? "?"} SOL (read ${age}), dev ${t.dev_pct?.toFixed(0)}%, buyers ${t.unique_buyers}, graduated ${t.graduated ? "yes" : "no"}`);
-    if (un) console.log(`  [UNKNOWN] ${un} — not enough observed to judge`);
-    if (!f.length && !un) console.log("  no warning — nothing measurable is wrong with what is displayed");
+    if (un) console.log(`  [UNKNOWN] ${un} - not enough observed to judge`);
+    if (!f.length && !un) console.log("  no warning - nothing measurable is wrong with what is displayed");
     for (const x of f) console.log(`  [${x.level.toUpperCase()}] ${x.code}: ${x.why}`);
   }
 } else {
@@ -121,7 +121,7 @@ if (ONE) {
   console.log(`${rows.length} tokens seen in the last ${HOURS} h\n`);
   console.log(`  danger   ${danger}  (${(100 * danger / rows.length).toFixed(1)}%)`);
   console.log(`  caution  ${caution}  (${(100 * caution / rows.length).toFixed(1)}%)`);
-  console.log(`  unknown  ${unknown}  (${(100 * unknown / rows.length).toFixed(1)}%)  — not enough observed to judge`);
+  console.log(`  unknown  ${unknown}  (${(100 * unknown / rows.length).toFixed(1)}%) - not enough observed to judge`);
   console.log(`  clean    ${clean}  (${(100 * clean / rows.length).toFixed(1)}%)\n`);
   console.log("flag                  tokens");
   for (const [c, n] of [...counts].sort((a, b) => b[1] - a[1])) console.log(`${c.padEnd(20)}  ${String(n).padStart(6)}`);

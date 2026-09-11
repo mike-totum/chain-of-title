@@ -1,5 +1,5 @@
 /**
- * PumpSwap (post-graduation) replay — entry rules x exit rules on our own decoded AMM trade paths.
+ * PumpSwap (post-graduation) replay - entry rules x exit rules on our own decoded AMM trade paths.
  *
  *   npm run ammreplay -- [--hours 96] [--min-n 25] [--top 30]
  *
@@ -195,7 +195,7 @@ for (const t of toks) {
   }
 }
 
-console.log(`\n=== PumpSwap replay — ${used} graduated tokens with usable AMM paths (last ${hours}h); skipped ${skippedPrice} with implausible pool prices, ${skippedShort} with < 5 trades; ${truncated} paths truncated at the AMM storage cap; ${realN} verified real runners ===`);
+console.log(`\n=== PumpSwap replay - ${used} graduated tokens with usable AMM paths (last ${hours}h); skipped ${skippedPrice} with implausible pool prices, ${skippedShort} with < 5 trades; ${truncated} paths truncated at the AMM storage cap; ${realN} verified real runners ===`);
 const days = [...new Set(perToken.map((p) => p.day))].sort();
 console.log("TOKEN OUTCOMES (from the first AMM trade)");
 console.log("  day    n    median minutes of data  x@60m median  x@60m >= 1.5  peak >= 2x  peak >= 5x  truncated");
@@ -209,7 +209,7 @@ console.log();
 console.log("ENTRY RULES: how often they fire");
 for (const e of ENTRIES) { const ec = entryCount.get(e.name); console.log(`  ${e.name.padEnd(68)} fired on ${String(ec?.fired ?? 0).padStart(4)} tokens, filled ${String(ec?.tokens ?? 0).padStart(4)}`); }
 console.log();
-console.log("GRID — avg x (winsorized 20x) / median / win % / >=2x share, fees 1 % per side, 1.5 s latency both ways");
+console.log("GRID - avg x (winsorized 20x) / median / win % / >=2x share, fees 1 % per side, 1.5 s latency both ways");
 const exitHead = EXITS.map((x) => x.name.slice(0, 26).padEnd(28)).join("");
 console.log("  entry".padEnd(70) + exitHead);
 for (const e of ENTRIES) {
@@ -218,7 +218,7 @@ for (const e of ENTRIES) {
   console.log(line);
 }
 console.log();
-console.log(`BEST CELLS (n >= ${minN}), with the same cell on each day — a rule counts only if it is positive on every day`);
+console.log(`BEST CELLS (n >= ${minN}), with the same cell on each day - a rule counts only if it is positive on every day`);
 const rows = [...grid].filter(([, a]) => a.n >= minN).map(([k, a]) => ({ k, a })).sort((x, y) => (y.a.avg ?? 0) - (x.a.avg ?? 0)).slice(0, top);
 console.log("  entry | exit".padEnd(100) + "n".padStart(5) + "  avg x" + "  median" + "  win%" + "  >=2x" + "  trunc-end" + "  " + days.map((d) => `${d}: avg/n`).join("  "));
 for (const { k, a } of rows) {

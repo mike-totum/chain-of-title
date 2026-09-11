@@ -25,7 +25,7 @@ const baseSince = since - baselineMin * 60_000;
 
 const rows = db.prepare(`SELECT id, author, followers, created_at, cashtags, hashtags, mints, likes, views, url FROM (SELECT *, 'https://x.com/' || author || '/status/' || id url FROM tweets) WHERE created_at >= ?`).all(baseSince) as any[];
 const total = db.prepare("SELECT COUNT(*) n, COUNT(DISTINCT author) a, MIN(created_at) first FROM tweets").get() as any;
-console.log(`\n=== X buzz — ${rows.filter((r) => r.created_at >= since).length} tweets in the last ${windowMin} min, ${total.n} stored since ${total.first ? new Date(total.first).toISOString().slice(0, 16) : "-"} from ${total.a} accounts ===\n`);
+console.log(`\n=== X buzz - ${rows.filter((r) => r.created_at >= since).length} tweets in the last ${windowMin} min, ${total.n} stored since ${total.first ? new Date(total.first).toISOString().slice(0, 16) : "-"} from ${total.a} accounts ===\n`);
 
 interface Term { term: string; kind: string; recent: any[]; prior: number }
 const terms = new Map<string, Term>();

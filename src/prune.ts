@@ -6,7 +6,7 @@
  *   npm run prune -- --days 14 --apply
  *   npm run prune -- --apply --vacuum   # reclaim file space (needs ~2x free disk, locks the db)
  *
- * Never touches `tokens`, `signals`, `operator_*`, `pool_map`, `hist_*`, or curve buys at or above BUYOUT_SOL —
+ * Never touches `tokens`, `signals`, `operator_*`, `pool_map`, `hist_*`, or curve buys at or above BUYOUT_SOL -
  * those are provenance, not working data. The last of those was missing until 2026-09-08 and the sentence was false
  * for as long as it was: buyout trades were being deleted on a timer while this comment said the archive was safe.
  */
@@ -17,7 +17,7 @@ import { BUYOUT_SOL, KEEP_TRADE_EVIDENCE, keepTweetEvidence } from "./provenance
 const arg = (k: string, d: number) => { const i = process.argv.indexOf(k); return i > 0 ? Number(process.argv[i + 1]) : d; };
 /**
  * Which database to prune. Defaults to the configured one, and exists because without it this tool could only ever
- * be pointed at production — so the only way to test a retention rule was to run it on the real archive and hope.
+ * be pointed at production - so the only way to test a retention rule was to run it on the real archive and hope.
  * A destructive tool that cannot be rehearsed is one whose guards are verified by reasoning alone, which is how
  * every check found broken today got shipped.
  */
@@ -48,7 +48,7 @@ const db = openDb(DB_ARG || config.dbPath);
  * Record the hold, and remember what it protected.
  *
  * An env var alone is hard to testify about later: it says nothing about when the hold began or who set it. A row
- * does. `protect_before` is the harder half — the retention cutoff at the moment the hold started. Without it,
+ * does. `protect_before` is the harder half - the retention cutoff at the moment the hold started. Without it,
  * unsetting the hold lets the next prune sweep the entire held period in a single pass, so the moment of release
  * becomes the moment the evidence disappears, which is the opposite of what a hold is for.
  */
@@ -69,7 +69,7 @@ export function protectFloor(db2: any): number {
 
 if (LEGAL_HOLD) {
   noteHold(db, LEGAL_HOLD, DAYS);
-  console.log(`LEGAL HOLD IS SET (${LEGAL_HOLD}) — nothing will be deleted, and the hold is recorded in legal_holds.`);
+  console.log(`LEGAL HOLD IS SET (${LEGAL_HOLD}) - nothing will be deleted, and the hold is recorded in legal_holds.`);
   console.log(`Unset LEGAL_HOLD to resume retention. Data protected during a hold stays protected after release.`);
   process.exit(0);
 }
@@ -79,7 +79,7 @@ if (DB_ARG) console.log(`  (pruning ${DB_ARG}, not the configured database)`);
 /**
  * Does this database have that table? Neither pruner may assume one into existence.
  *
- * `curve_snapshots` is created by curvepoll.ts, which has only ever run on the laptop — so on the cloud collector
+ * `curve_snapshots` is created by curvepoll.ts, which has only ever run on the laptop - so on the cloud collector
  * the table does not exist, this script died on its first COUNT, and the collector's own pruner threw partway
  * through its loop and skipped everything after it. A retention job that half-runs is worse than one that fails,
  * because it looks like it ran.
@@ -92,7 +92,7 @@ const cutoff = Date.now() - DAYS * 86400_000;
 const iso = new Date(cutoff).toISOString().slice(0, 16).replace("T", " ");
 const n = (x: number) => x.toLocaleString();
 
-console.log(`retention ${DAYS} days — anything older than ${iso} UTC is working data past its window\n`);
+console.log(`retention ${DAYS} days - anything older than ${iso} UTC is working data past its window\n`);
 
 /** -1 means the table is not in this database, which prints as "absent" rather than as a zero that looks like work done. */
 const countOf = (table: string, sql: string): number => {
@@ -112,10 +112,10 @@ console.log(`  wallet_token_stats  ${show(counts.wts)} to delete (tokens launche
 console.log(`  curve_snapshots     ${show(counts.snaps)} to delete`);
 console.log(Number(process.env.TWEETS_RETAIN_DAYS ?? 0) > 0
   ? `  tweets              ${show(counts.tweets)} to delete (TWEETS_RETAIN_DAYS=${process.env.TWEETS_RETAIN_DAYS})`
-  : `  tweets              ${show(counts.tweets)} older than the cutoff, RETAINED — set TWEETS_RETAIN_DAYS to delete them`);
+  : `  tweets              ${show(counts.tweets)} older than the cutoff, RETAINED - set TWEETS_RETAIN_DAYS to delete them`);
 console.log(`\n  kept untouched: tokens, signals, operator_wallets/funders/policy, pool_map, positions, hist_*`);
 
-if (!APPLY) { console.log(`\ndry run — nothing deleted. Re-run with --apply to execute.`); process.exit(0); }
+if (!APPLY) { console.log(`\ndry run - nothing deleted. Re-run with --apply to execute.`); process.exit(0); }
 
 /** delete in batches so the writer is never blocked for long while the monitor is live */
 function purge(label: string, sql: string, params: unknown[]): void {
@@ -133,14 +133,14 @@ function purge(label: string, sql: string, params: unknown[]): void {
 console.log("");
 // Buyout-sized curve buys are evidence, not working data: `findBuyout` reads them and `servicedb` copies them into
 // the published record. Deleting them leaves every count intact while destroying the proof of who took each curve.
-// See KEEP_EVIDENCE in index.ts — the same exemption, because the collector prunes itself and this prunes by hand,
+// See KEEP_EVIDENCE in index.ts - the same exemption, because the collector prunes itself and this prunes by hand,
 // and a rule that holds in only one of them is not a rule.
 purge("trades", `DELETE FROM trades WHERE rowid IN (SELECT rowid FROM trades WHERE ts < ? AND ts >= ${FLOOR}
   ${KEEP_TRADE_EVIDENCE} LIMIT ${BATCH})`, [cutoff]);
 purge("wallet_token_stats", `DELETE FROM wallet_token_stats WHERE rowid IN (SELECT wts.rowid FROM wallet_token_stats wts JOIN tokens t ON t.mint = wts.mint WHERE t.created_at < ? LIMIT ${BATCH})`, [cutoff]);
 purge("curve_snapshots", `DELETE FROM curve_snapshots WHERE rowid IN (SELECT rowid FROM curve_snapshots WHERE ts < ? LIMIT ${BATCH})`, [cutoff]);
 /**
- * Tweets are kept unless TWEETS_RETAIN_DAYS says otherwise — the same footing as tg_messages, and for the same
+ * Tweets are kept unless TWEETS_RETAIN_DAYS says otherwise - the same footing as tg_messages, and for the same
  * reason. The 88,133 posts already here are the only sample of broad pump.fun X chatter this project holds, they
  * cannot be re-collected now the account has no credits, and deleting them to tidy up is a one-way door.
  */
@@ -150,7 +150,7 @@ if (TWEET_DAYS > 0) {
   if (KEEP_TWEETS) console.log("  tweets cited by token_promotion_hit are evidence and will be kept");
   purge("tweets", `DELETE FROM tweets WHERE rowid IN (SELECT rowid FROM tweets WHERE fetched_at < ${Date.now() - TWEET_DAYS * 86400_000} ${KEEP_TWEETS} LIMIT ${BATCH})`, []);
 } else {
-  console.log("  tweets: retained (TWEETS_RETAIN_DAYS unset) — the only X sample this project holds");
+  console.log("  tweets: retained (TWEETS_RETAIN_DAYS unset) - the only X sample this project holds");
 }
 /**
  * Telegram messages are NOT pruned on the working-data timer, and that is deliberate: they are the archive, not
@@ -169,7 +169,7 @@ if (TG_DAYS > 0) {
 }
 
 if (VACUUM) {
-  console.log("\n  VACUUM — reclaiming file space (this locks the database; the monitor will block until it finishes)");
+  console.log("\n  VACUUM - reclaiming file space (this locks the database; the monitor will block until it finishes)");
   db.exec("VACUUM");
   console.log("  done");
 } else {

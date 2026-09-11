@@ -1,6 +1,6 @@
 /**
  * Pattern mining: which observable features at (or shortly after) launch correlate with graduation
- * and with real runners. Humans are creatures of habit — operators launch at habitual times, size the
+ * and with real runners. Humans are creatures of habit - operators launch at habitual times, size the
  * dev buy habitually, reuse names, and bring the same wallets.
  *
  *   npm run patterns -- [--hours 48] [--min-n 30]
@@ -41,7 +41,7 @@ const real = (t: Tok) => { let v = realCache.get(t.mint); if (v === undefined) {
 const n = toks.length, nG = toks.filter((t) => t.graduated === 1).length, nR = toks.filter(real).length;
 const baseG = nG / n, baseR = nR / n;
 const pct = (x: number) => `${(100 * x).toFixed(1)}%`;
-console.log(`\n=== pattern mining — ${n} finalized launches (last ${hours}h), graduated ${nG} (${pct(baseG)}), real runners ${nR} (${pct(baseR)}) ===`);
+console.log(`\n=== pattern mining - ${n} finalized launches (last ${hours}h), graduated ${nG} (${pct(baseG)}), real runners ${nR} (${pct(baseR)}) ===`);
 console.log("lift = bucket rate / base rate. Real-runner rates need outcomes fetched (run the backtest or daily report first).\n");
 
 interface Bucket { n: number; g: number; r: number }
@@ -131,7 +131,7 @@ feature("median first-10 buy size (SOL)", (t) => { const f = first10.get(t.mint)
 feature("first-10 buyers who flipped within 60 s", (t) => { const f = first10.get(t.mint); if (!f || f.length < 5) return null; const k = f.filter((r) => r.hold_s !== null && r.hold_s <= 60).length / f.length; return bin(k, [0.01, 0.3, 0.6], ["none", "<30%", "30-60%", ">=60%"]); }, ["none", "<30%", "30-60%", ">=60%"]);
 
 // ---------- wallet co-occurrence clusters ----------
-console.log("WALLET CLUSTERS — pairs of wallets that are both in the first 10 buyers of 3+ tokens");
+console.log("WALLET CLUSTERS - pairs of wallets that are both in the first 10 buyers of 3+ tokens");
 console.log("  (graduation credit only when it took >= 60 s: instant graduations are dev-funded and were mislabelling operator bundles as winning crews)");
 // a graduation an outsider could have traded: the token spent at least a minute on the curve
 const gradTradeable = (t: Tok) => t.graduated === 1 && (t.graduated_at === null || t.graduated_at - t.created_at >= 60_000);

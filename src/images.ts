@@ -55,7 +55,7 @@ export type CaptureStats = {
  * That is a change from the original design note above, and the reason is the one this whole file is about: as a
  * separate laptop job it stopped the moment the lid closed, and this is the only thing the project collects that
  * cannot be rebuilt from chain afterwards. A second PROCESS writing the collector's database is what must not
- * happen — a multi-second write transaction against a 10 s busy_timeout costs dropped launches — but sharing the
+ * happen - a multi-second write transaction against a 10 s busy_timeout costs dropped launches - but sharing the
  * collector's own handle has no contention to lose: the writes below are single-row UPDATEs, serialised with
  * ingestion by the same connection, and everything slow here is awaited network I/O that blocks nothing.
  *
@@ -79,14 +79,14 @@ export async function captureImages(
   /**
    * Which end of the backlog this pass works on, and why the choice is not cosmetic.
    *
-   * This was always `created_at DESC`. Newest-first is right for keeping up — a launch's picture is likeliest to be
-   * served in the minutes after it launches — but it is catastrophic as the ONLY order once throughput falls below
+   * This was always `created_at DESC`. Newest-first is right for keeping up - a launch's picture is likeliest to be
+   * served in the minutes after it launches - but it is catastrophic as the ONLY order once throughput falls below
    * the launch rate, because every shortfall lands on the same rows and they are never reached again. Measured in
    * production 2026-09-10, and the shape is unmistakable: 09-08 frozen at 3.5% captured, 09-09 at 9.9%, and the
    * current day at 71.7%. Older days doing worse than newer ones is not decay, it is starvation.
    *
    * So the scheduler runs both ends. `newest` keeps pace with ingestion; `oldest` drains what the shortfall left
-   * behind, and it is the one on a deadline — those pins are the ones closest to lapsing.
+   * behind, and it is the one on a deadline - those pins are the ones closest to lapsing.
    */
   const order = opts.order === "oldest" ? "ASC" : "DESC";
   const pending = db.prepare(`
@@ -98,7 +98,7 @@ export async function captureImages(
 
   /**
    * The whole backlog, not just this pass's slice. Published in the stats so the caller can say out loud whether it
-   * is draining or growing — the failure here was invisible for two days precisely because every pass reported a
+   * is draining or growing - the failure here was invisible for two days precisely because every pass reported a
    * healthy "kept 300 of 300" while falling 171 rows further behind every hour.
    */
   const backlog = (db.prepare(`
@@ -126,8 +126,8 @@ export async function captureImages(
       const buf = Buffer.from(await res.arrayBuffer());
       if (buf.length === 0) { failed.run("empty body", Date.now(), mint); st.failed++; return; }
       /**
-       * The picture must match the address it was fetched from. A gateway answering 200 with something else — an
-       * error page, an empty body, another launch's image — would be stored under a sha256 of the wrong bytes and
+       * The picture must match the address it was fetched from. A gateway answering 200 with something else - an
+       * error page, an empty body, another launch's image - would be stored under a sha256 of the wrong bytes and
        * published as this launch's picture, and nothing downstream could tell. Verifiable where the CID is a plain
        * sha2-256 of the content; `unverifiable` elsewhere, which is recorded as neither pass nor fail.
        */
@@ -142,7 +142,7 @@ export async function captureImages(
       /**
        * Where the bytes go, and why the record does not care.
        *
-       * With R2 configured the picture store is object storage and the collector volume stays flat — which is the
+       * With R2 configured the picture store is object storage and the collector volume stays flat - which is the
        * only way "keep every launch's picture" and "never fill the disk" are both true at ~1 GB/day against 20 GB.
        * Without it, local disk, unchanged. Either way the row records the same sha256, so the published record is
        * identical and a reader verifying a picture never learns, or needs to learn, where we happened to put it.

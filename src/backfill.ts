@@ -3,7 +3,7 @@
  *
  *   npm run backfill -- <mint> [--force]
  *
- * The archive only covers launches since the collector started, so every older mint answered UNKNOWN — fine as a
+ * The archive only covers launches since the collector started, so every older mint answered UNKNOWN - fine as a
  * discipline, useless as a product. A pump.fun token's bonding curve is a single account whose entire transaction
  * history is bounded (hundreds to a few thousand signatures) and, on an archival endpoint, fully readable. So the
  * launch record can be rebuilt: creator, what the creator took in the first block, every distinct outside buyer on
@@ -36,7 +36,7 @@ const ARCHIVAL = /helius|mainnet-beta|quiknode|quicknode|triton|rpcpool|alchemy/
  *
  * The test is account ownership, not transaction history. The curve address is a PDA derived from the mint, so it can
  * be computed for *any* address, and `getSignaturesForAddress` answers for an address that has merely appeared in some
- * transaction — it returned a signature for USDC's derived curve, sending a non-pump.fun token down the expensive
+ * transaction - it returned a signature for USDC's derived curve, sending a non-pump.fun token down the expensive
  * rebuild path the guard exists to prevent. An account owned by the pump.fun program is the actual question.
  */
 export async function curveExists(mint: string): Promise<boolean> {
@@ -68,7 +68,7 @@ interface Sig { signature: string; err: unknown; slot: number; blockTime?: numbe
 
 /**
  * Page the curve account's whole signature history. `capped` means we stopped early and the record is partial.
- * `maxSigs` bounds the work for a caller that did not choose it — a request from the open internet must not be able
+ * `maxSigs` bounds the work for a caller that did not choose it - a request from the open internet must not be able
  * to commission an unbounded number of RPC calls.
  */
 async function signatures(curve: string, maxSigs = Infinity): Promise<{ sigs: Sig[]; capped: boolean }> {
@@ -103,9 +103,9 @@ export async function rebuild(mint: string, opts: { maxSigs?: number } = {}): Pr
         try {
           // The endpoint pool includes non-archival nodes, which answer `null` for anything older than their
           // retention rather than erroring. Retries are pinned to archival endpoints so a null means "not on chain",
-          // not "asked the wrong node" — without this, 741 of 1,925 transactions came back empty.
+          // not "asked the wrong node" - without this, 741 of 1,925 transactions came back empty.
           const tx = await rpc("getTransaction", [ok[i].signature, { encoding: "json", maxSupportedTransactionVersion: 0, commitment: "confirmed" }], 30_000, attempt === 0 ? undefined : ARCHIVAL);
-          // A node that does not hold the transaction answers `result: null` — no error is thrown. Counting that as a
+          // A node that does not hold the transaction answers `result: null` - no error is thrown. Counting that as a
           // successful fetch made a rebuild missing 1,300 of 1,925 transactions report itself complete, and silently
           // dropped the creator's own opening buy. An empty answer is a failure to read, not a reading of nothing.
           if (tx === null || tx === undefined) { if (attempt === 3) { results[i] = null; unfetched++; break; } continue; }
@@ -148,7 +148,7 @@ export async function rebuild(mint: string, opts: { maxSigs?: number } = {}): Pr
   // The curve's first trade is the creation transaction's own buy, so it dates the launch.
   const createdAt = trades.length ? trades[0].ts : null;
   const dev = creator;
-  // "Creator took X% of supply in the first block" — their buy at creation, matching what the live collector records,
+  // "Creator took X% of supply in the first block" - their buy at creation, matching what the live collector records,
   // not their net holdings later. 1% of the 1B supply is 1e7 tokens.
   const devFirst = trades.find((t) => dev && t.wallet === dev && t.buy && t.ts - (trades[0]?.ts ?? 0) < 60_000);
   const devPct = devFirst ? devFirst.tokens / 1e7 : 0;
@@ -161,9 +161,9 @@ export async function rebuild(mint: string, opts: { maxSigs?: number } = {}): Pr
   const tradeCount = trades.length;
 
   // A rebuild is only usable if we could read every transaction. A partial history understates buyers, dev share and
-  // buyouts alike — always in the direction that makes a manufactured launch look ordinary.
+  // buyouts alike - always in the direction that makes a manufactured launch look ordinary.
   let reason: string | null = null;
-  if (capped) reason = `this curve has more than ${sigs.length.toLocaleString()} transactions — more than we rebuild on demand`;
+  if (capped) reason = `this curve has more than ${sigs.length.toLocaleString()} transactions - more than we rebuild on demand`;
   else if (unfetched > 0) reason = `${unfetched} of ${ok.length} transactions could not be fetched`;
   else if (!trades.length) reason = "no pump.fun curve trades found for this mint";
   else if (!creator) reason = "the creator wallet could not be identified from any trade event";

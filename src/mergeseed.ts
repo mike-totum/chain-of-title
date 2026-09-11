@@ -35,10 +35,10 @@ const TABLES = ["tokens", "operator_wallets", "operator_funders", "operator_poli
 /**
  * Columns of `table` in `schema`. The schema goes in the SECOND ARGUMENT, not as a prefix.
  *
- * `seed.pragma_table_info('tokens')` parses, runs, and silently returns MAIN's columns — the prefix on a
+ * `seed.pragma_table_info('tokens')` parses, runs, and silently returns MAIN's columns - the prefix on a
  * table-valued pragma function is ignored rather than rejected. Measured 2026-09-08: 54 for both schemas where the
  * seed actually had 50. So the subset check below was comparing main against main and could never fail, which made
- * it exactly the check that cannot fail during the failure it exists to catch — the shape this codebase keeps
+ * it exactly the check that cannot fail during the failure it exists to catch - the shape this codebase keeps
  * producing, this time inside the guard written to stop it.
  *
  * It surfaced only because a test target had columns the seed lacked. On the real collector both sides are built by
@@ -59,7 +59,7 @@ const count = (db: DatabaseSync, schema: string, table: string): number => {
  *
  * The conflict policy, written out per column rather than generated, because this is where every merge decision
  * lives and each one has to be readable on its own line. The insert column list is derived from the intersection of
- * the two schemas and named explicitly in the SQL — never positional. `seed.ts` copies with `SELECT *`, and a
+ * the two schemas and named explicitly in the SQL - never positional. `seed.ts` copies with `SELECT *`, and a
  * positional copy is precisely what punishes `db.ts`'s hand-maintained column order the day it slips: on 2026-09-07
  * an ALTER appending `slot` would have had a positional INSERT writing slot numbers into `venue`, and a bare
  * `ADD COLUMN venue` left 143,102 rows NULL behind an incremental watermark. Two of the same class in one day.
@@ -111,29 +111,29 @@ const TOKEN_POLICY: Record<string, string> = {
   // the launch, and a later fetch reads today's URI rather than that day's.
   meta_json: `COALESCE(tokens.meta_json, excluded.meta_json)`,
   meta_bytes: `COALESCE(tokens.meta_bytes, excluded.meta_bytes)`,
-  // Our fetch attempt, not the launch — same rule and same reason as image_error below. The target's own attempt
+  // Our fetch attempt, not the launch - same rule and same reason as image_error below. The target's own attempt
   // describes the target, so it wins; the seed only fills a slot the target never wrote. Named here because the
   // guard would otherwise refuse the merge over it, which is the guard doing its job: this column appeared after
   // the policy was written, and the alternative to stopping is dropping it silently.
   meta_error: `COALESCE(tokens.meta_error, excluded.meta_error)`,
   /**
-   * The document's hash moves with the document or not at all — the vault_sol/vault_at rule, for the same reason.
+   * The document's hash moves with the document or not at all - the vault_sol/vault_at rule, for the same reason.
    *
    * Plain keep-first would break the one thing the hash is for. A target holding its own document but no hash (rows
    * written before meta_sha256 existed) would take the SEED's hash while keeping its OWN bytes, and publish a
    * sha256 that verifies nothing. `meta_at` is the marker for "we hold a document", and it is exactly the rows
-   * where meta_at is null that adopt the seed's — so gate on that and the hash always describes the bytes beside it.
+   * where meta_at is null that adopt the seed's - so gate on that and the hash always describes the bytes beside it.
    */
   meta_sha256: `CASE WHEN tokens.meta_at IS NULL THEN excluded.meta_sha256 ELSE tokens.meta_sha256 END`,
   /**
    * The creation transaction and its slot: a launch fact, immutable once recorded, and the two are one observation.
-   * Neither is ever revised, so keep-first — but paired, so a row can never carry one without the other.
+   * Neither is ever revised, so keep-first - but paired, so a row can never carry one without the other.
    */
   create_sig: `CASE WHEN tokens.create_sig IS NULL THEN excluded.create_sig ELSE tokens.create_sig END`,
   create_slot: `CASE WHEN tokens.create_sig IS NULL THEN excluded.create_slot ELSE tokens.create_slot END`,
   // A diagnostic about OUR fetch attempt, not a fact about the launch. The target's own attempt is the one that
   // describes the target, so it wins; the seed only fills a slot the target never wrote. Added 2026-09-08 when the
-  // shared-column guard refused the merge over it — which is the guard working exactly as intended: a column that
+  // shared-column guard refused the merge over it - which is the guard working exactly as intended: a column that
   // appeared after the policy was written stopped the merge instead of being silently dropped.
   image_error: `COALESCE(tokens.image_error, excluded.image_error)`,
   image_sha256: `COALESCE(tokens.image_sha256, excluded.image_sha256)`,
@@ -165,12 +165,12 @@ const TOKEN_POLICY: Record<string, string> = {
   finalized: `MAX(COALESCE(excluded.finalized,0), COALESCE(tokens.finalized,0))`,
   last_seen_at: `MAX(COALESCE(excluded.last_seen_at,0), COALESCE(tokens.last_seen_at,0))`,
   /**
-   * Stamped to the MERGE time, not carried from either side — because `updated_at` is not a fact about the launch
+   * Stamped to the MERGE time, not carried from either side - because `updated_at` is not a fact about the launch
    * here, it is the watermark `servicedb` copies by, and a merged row that does not move it is a row the published
    * record can never see.
    *
    * Taking MAX of the two sides looks conservative and is the bug. The seed's timestamps are whenever the LAPTOP
-   * last touched each row, which for a document captured at 16:30 is 16:30 — behind a collector whose last record
+   * last touched each row, which for a document captured at 16:30 is 16:30 - behind a collector whose last record
    * build stamped its watermark at 17:59. Measured after the 2026-09-10 merge: 113,866 rows carried a document and
    * an `updated_at` behind the watermark, so 70,000 recovered documents sat in the collector invisible to every
    * future incremental build. They needed a full rebuild to surface, and nothing would have reported them missing.
@@ -215,7 +215,7 @@ export async function mergeSeed(
 
   /**
    * The gate that makes a redeploy a no-op. A collector in a crash-loop runs boot code repeatedly, and "merges once
-   * on boot" is a promise about a file that is still sitting on the volume the next time the process starts — so the
+   * on boot" is a promise about a file that is still sitting on the volume the next time the process starts - so the
    * marker is keyed on the file's size and content hash, not its name. A different seed is a different merge.
    */
   // No marker table yet means nothing has ever been merged, which is not an error.
@@ -265,7 +265,7 @@ export async function mergeSeed(
   try {
     /**
      * Refuse a seed whose schema is not a subset of live's. Writing each value into its neighbour's field is the
-     * failure this guards, and it is silent — the rows land, the counts look right, and the data is wrong.
+     * failure this guards, and it is silent - the rows land, the counts look right, and the data is wrong.
      */
     const liveCols = new Set(cols(db, "main", "tokens"));
     const seedCols = cols(db, "seed", "tokens");
@@ -294,12 +294,12 @@ export async function mergeSeed(
     try {
       db.exec(MARKER_DDL);
       /**
-       * Mints the target does not have yet. The INSERT below carries their columns VERBATIM — TOKEN_POLICY governs
-       * only the conflict branch — so every rule the policy encodes is bypassed for a row that is new here, and any
+       * Mints the target does not have yet. The INSERT below carries their columns VERBATIM - TOKEN_POLICY governs
+       * only the conflict branch - so every rule the policy encodes is bypassed for a row that is new here, and any
        * contradiction the seed carries is imported intact.
        *
        * That is not hypothetical: the laptop holds 1,255 rows with a pool balance and no reading time, and the
-       * collector held exactly 1,255. The pair was never written that way by any collector path — it arrived by
+       * collector held exactly 1,255. The pair was never written that way by any collector path - it arrived by
        * this INSERT, from a seed, past a policy that says vault_sol and vault_at move together or not at all.
        */
       db.exec(`CREATE TEMP TABLE inserted_mints AS
@@ -308,7 +308,7 @@ export async function mergeSeed(
                ON CONFLICT(mint) DO UPDATE SET ${setClause}`);
       /**
        * A balance we cannot date is not a reading, and importing one manufactures a contradiction the record then
-       * has to refuse to publish. Dropped only for rows this merge CREATED — a row the collector already owned is
+       * has to refuse to publish. Dropped only for rows this merge CREATED - a row the collector already owned is
        * the collector's to keep or fix, and a merge is not the place to revise it.
        */
       const orphaned = db.prepare(`UPDATE main.tokens SET vault_sol = NULL
@@ -332,14 +332,14 @@ export async function mergeSeed(
 
       /**
        * Buyout evidence: the rows `findBuyout` reads and `servicedb` copies into the published record. This is the
-       * answer to who took each curve — the half of the product a contract scanner cannot produce.
+       * answer to who took each curve - the half of the product a contract scanner cannot produce.
        *
        * Without them a seeded collector builds a record that GROWS the launch count while carrying a quarter of the
        * buyouts, and the pull guard waves it through because it counts `tokens` and nothing else. Measured
        * 2026-09-08: 580 buyout trades on the collector against 2,099 here. The right number is not the right archive.
        *
        * `hist_trades` is created by `history.ts`, which has only ever run on the laptop, so on a collector the table
-       * does not exist and the rows would have nowhere to land. Created here rather than assumed — a missing table
+       * does not exist and the rows would have nowhere to land. Created here rather than assumed - a missing table
        * is exactly what made the record build produce a 94,208-byte file for the life of this deployment.
        *
        * `trades.id` is AUTOINCREMENT and collides, so rows go in without it and dedupe on the transaction signature
@@ -352,7 +352,7 @@ export async function mergeSeed(
       db.exec("CREATE INDEX IF NOT EXISTS main.hist_trades_mint ON hist_trades(mint, ts)");
       /**
        * Only if the seed actually carries them. A seed written before these tables were exported has neither, and an
-       * unconditional copy throws `no such table: seed.hist_trades` and takes the whole merge down — including the
+       * unconditional copy throws `no such table: seed.hist_trades` and takes the whole merge down - including the
        * tokens and operator rows that would otherwise have landed.
        *
        * This is the same assumption that broke `servicedb` for the entire life of the deployment: it copied
@@ -369,15 +369,15 @@ export async function mergeSeed(
                  FROM seed.trades s
                  WHERE NOT EXISTS (SELECT 1 FROM main.trades m
                    WHERE m.sig = s.sig AND m.mint = s.mint AND m.wallet = s.wallet)`);
-      else log(`[seed] this seed carries no trades table — no buyout evidence to inherit`);
+      else log(`[seed] this seed carries no trades table - no buyout evidence to inherit`);
       if (seedHas("hist_trades"))
         db.exec(`INSERT OR IGNORE INTO main.hist_trades (mint, sig, idx, ts, slot, wallet, side, sol, tokens, vsol, vtok, is_dev)
                  SELECT mint, sig, idx, ts, slot, wallet, side, sol, tokens, vsol, vtok, is_dev FROM seed.hist_trades`);
-      else log(`[seed] this seed carries no hist_trades table — reconstructed buyout history will be missing`);
+      else log(`[seed] this seed carries no hist_trades table - reconstructed buyout history will be missing`);
 
       /**
        * `runs` is evidence: provenance.ts derives published coverage from it, so merging tokens without runs would
-       * have the collector disclaim days it actually watched — absence of data reading as a finding, inverted.
+       * have the collector disclaim days it actually watched - absence of data reading as a finding, inverted.
        * `id` is AUTOINCREMENT in both databases so the ids collide; insert without it and dedupe on the pair that
        * identifies a run. health.ts already orders by started_at rather than id, so appended history cannot make a
        * live collector look dead.

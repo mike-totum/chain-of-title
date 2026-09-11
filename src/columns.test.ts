@@ -5,15 +5,15 @@
  * collector queries to answer `/launch/<mint>`, and the published `record.db`, which the web service serves. A
  * column list shared by two schemas is a claim that both satisfy it, and nothing checked the claim.
  *
- * On 2026-09-09 it did not hold. `meta_sha256` was added to the list and to the record — where `servicedb` computes
- * it — but never to the collector, so every query built from TOKEN_COLUMNS threw `no such column` there. The visible
+ * On 2026-09-09 it did not hold. `meta_sha256` was added to the list and to the record - where `servicedb` computes
+ * it - but never to the collector, so every query built from TOKEN_COLUMNS threw `no such column` there. The visible
  * effect was an HTTP 500 from `/launch/<mint>`, which is the endpoint that answers about a token launched moments
- * ago; the web service fell back to reconstructing the launch from chain history and told visitors `UNKNOWN — Launch
+ * ago; the web service fell back to reconstructing the launch from chain history and told visitors `UNKNOWN - Launch
  * not observed` about launches the collector had watched from their creation transaction. The endpoint's own comment
  * calls that "the worst failure this product has". It was reintroduced by one column in a list.
  *
- * This test builds both schemas the way the code builds them — `openDb` for the collector, `servicedb`'s CREATE for
- * the record — and asserts every name in TOKEN_COLUMNS exists in each. It fails on the addition rather than months
+ * This test builds both schemas the way the code builds them - `openDb` for the collector, `servicedb`'s CREATE for
+ * the record - and asserts every name in TOKEN_COLUMNS exists in each. It fails on the addition rather than months
  * later on a route nobody exercises, and it is fast because it needs no data.
  */
 import { test } from "node:test";
@@ -45,7 +45,7 @@ test("the collector's schema satisfies TOKEN_COLUMNS", () => {
     const missing = requestedColumns().filter((c) => !have.has(c));
     assert.deepEqual(missing, [],
       `TOKEN_COLUMNS names ${missing.length} column(s) the collector does not have: ${missing.join(", ")}.\n` +
-      `Every query built from TOKEN_COLUMNS throws "no such column" against the collector database — including\n` +
+      `Every query built from TOKEN_COLUMNS throws "no such column" against the collector database - including\n` +
       `/launch/<mint>, which is how the site answers about a launch it watched minutes ago. Add the column in\n` +
       `db.ts with a paired backfill, or take it out of TOKEN_COLUMNS.`);
     db.close();
@@ -68,7 +68,7 @@ test("the published record's schema satisfies TOKEN_COLUMNS", () => {
   /**
    * Columns appended after the CREATE. Two forms, and both must be read or the test reports a gap that is not there:
    * a literal `ALTER TABLE rec.tokens ADD COLUMN x`, and a loop over a list of `"name TYPE"` strings interpolated
-   * into the same statement — which is how the launch-claim columns are added, including the one that started this.
+   * into the same statement - which is how the launch-claim columns are added, including the one that started this.
    */
   for (const a of src.matchAll(/ALTER TABLE rec\.tokens ADD COLUMN (\w+)/g)) declared.add(a[1]);
   for (const loop of src.matchAll(/for \(const c of \[([\s\S]*?)\]\)\s*\n?\s*try \{ db\.exec\(`ALTER TABLE rec\.tokens ADD COLUMN \$\{c\}`\)/g))

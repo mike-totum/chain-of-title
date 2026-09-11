@@ -60,7 +60,7 @@ const mapTwitterApiIoTweet = (t: any, fallbackUser: string): Tweet => ({
   urls: (t.entities?.urls ?? []).map((x: any) => x.expanded_url ?? x.url).filter(Boolean),
 });
 
-/** twitterapi.io — pay-as-you-go, no subscription. Header X-API-Key. */
+/** twitterapi.io - pay-as-you-go, no subscription. Header X-API-Key. */
 export function twitterApiIoProvider(apiKey: string): TweetProvider {
   return {
     name: "twitterapi.io",
@@ -194,7 +194,7 @@ export class StreetListener extends EventEmitter {
     const start = Math.floor(Date.now() / 1000) - 60;
     for (const q of this.queries) this.since.set(q, start);
     const perDay = (86400 / this.pollSeconds) * this.queries.length;
-    this.emit("status", `street listener: ${this.queries.length} queries every ${this.pollSeconds}s (${this.pages} page${this.pages > 1 ? "s" : ""}) — up to ${Math.round(perDay)} requests/day, worst case ~$${((perDay * this.pages * 20 * 0.15) / 1000).toFixed(0)}/day on twitterapi.io`);
+    this.emit("status", `street listener: ${this.queries.length} queries every ${this.pollSeconds}s (${this.pages} page${this.pages > 1 ? "s" : ""}) - up to ${Math.round(perDay)} requests/day, worst case ~$${((perDay * this.pages * 20 * 0.15) / 1000).toFixed(0)}/day on twitterapi.io`);
     this.timer = setInterval(() => void this.pollAll(), this.pollSeconds * 1000);
     void this.pollAll();
   }

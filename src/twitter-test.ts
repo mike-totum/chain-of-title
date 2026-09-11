@@ -25,4 +25,4 @@ if (provider.search) {
   const r = await provider.search("pump.fun", null);
   console.log(`\nsearch "pump.fun": ${r.tweets.length} tweets on first page${r.next ? ", more available" : ""}`);
 }
-console.log("\nOK — key works.");
+console.log("\nOK - key works.");

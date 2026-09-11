@@ -2,12 +2,12 @@
  * Fetch and keep the launch metadata document for every launch that has a URI and no document.
  *
  * This is the most valuable thing left uncaptured and the only one on a deadline that is not ours. The document is
- * what a launch *claimed to be* — its name, its description, its socials, and the URI of its picture. It lives
+ * what a launch *claimed to be* - its name, its description, its socials, and the URI of its picture. It lives
  * off-chain behind a URI the creator controls, so unlike everything else in this archive it cannot be rebuilt from
  * chain history by anyone, at any price, once the creator repoints it or the pin lapses. An archival node returns
  * the transaction that created "GTA 6 Coin"; nothing returns the sentence claiming Rockstar had announced it.
  *
- * **Why there is a backlog at all.** Live capture only began working on 2026-09-08 — 98.8% of that day's launches
+ * **Why there is a backlog at all.** Live capture only began working on 2026-09-08 - 98.8% of that day's launches
  * carry a document and 0.0% of 09-02 through 09-07 do. The recovery sweep in `index.ts` cannot reach them: it is
  * windowed to launches created in the last three days, so 116,739 of the 158,052 missing documents are already
  * outside it and get further outside it every hour. That window is right for a sweep running beside ingestion and
@@ -23,7 +23,7 @@
  *
  * Resumable and idempotent: it only ever selects rows with no document, and a fetch that fails is recorded so the
  * next pass does not spend the same seconds on the same dead pin. `meta_error` describes OUR fetch, not the launch,
- * which is why it is not published in the record — the same rule `image_error` already follows.
+ * which is why it is not published in the record - the same rule `image_error` already follows.
  */
 import { config } from "./config.ts";
 import { openDb } from "./db.ts";
@@ -48,8 +48,8 @@ console.log(`  at ~306 bytes each, holding all of them costs about ${(missing * 
 if (DRY) { console.log("dry run: nothing fetched, nothing written"); process.exit(0); }
 
 /**
- * Newest first. A launch someone might look up today is worth more than one from last week, and — the reason that
- * matters here rather than being a preference — a recent pin is likelier to still be answering, so the same minute
+ * Newest first. A launch someone might look up today is worth more than one from last week, and - the reason that
+ * matters here rather than being a preference - a recent pin is likelier to still be answering, so the same minute
  * of fetching recovers more documents at the new end than the old. The old end is where the loss is permanent, but
  * it is permanent whether we reach it in an hour or a day, and much of it is already gone.
  */
@@ -105,7 +105,7 @@ for (;;) {
       } else {
         /**
          * The cause, not the word "unreachable". `fetchContent` distinguishes a gateway refusing us from a pin that
-         * is gone, and the whole point of a retry pass is to know which of those it is looking at — 121,832 rows
+         * is gone, and the whole point of a retry pass is to know which of those it is looking at - 121,832 rows
          * were written with one word between them and the permanent loss could not be sized.
          */
         bad.run(r.error ?? "unreachable", now, mint);
@@ -119,7 +119,7 @@ for (;;) {
   }
   seen += rows.length;
   const rate = seen / Math.max(1, (Date.now() - started) / 1000);
-  console.log(`  ${seen.toLocaleString()} tried — ${got.toLocaleString()} kept (${(bytes / 1e6).toFixed(1)} MB), ` +
+  console.log(`  ${seen.toLocaleString()} tried - ${got.toLocaleString()} kept (${(bytes / 1e6).toFixed(1)} MB), ` +
     `${failed.toLocaleString()} unreachable, ${rate.toFixed(0)}/s`);
 }
 

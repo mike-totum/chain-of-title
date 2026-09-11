@@ -2,8 +2,8 @@
  * What was this token at birth, and does what you are shown now match the chain?
  *   npm run check -- <mint>
  *
- * Archive first. The facts that identify a manufactured token — the creator taking most of the supply, a curve
- * completed with no outside buyer — are only visible while it happens. Once the operator funds the pool with real SOL
+ * Archive first. The facts that identify a manufactured token - the creator taking most of the supply, a curve
+ * completed with no outside buyer - are only visible while it happens. Once the operator funds the pool with real SOL
  * and spreads the float, every present-tense check passes: WOFI showed 2,029 SOL against an expected 2,027 under
  * constant product and a 4 % top holder, while having been created with 79.3 % dev supply and zero outside buyers.
  * Cold inspection is therefore the fallback, not the product, and where we did not watch we say so.
@@ -53,11 +53,11 @@ const t = db.prepare(`SELECT symbol, name, creator, created_at, late_discovery, 
 const watched = !!t && !t.late_discovery && inCoverage(t.created_at);
 const inGap = !!t && !t.late_discovery && !inCoverage(t.created_at);
 console.log(`\n${t?.symbol ? `${t.symbol}  ` : ""}${mint}`);
-console.log(`  archive covers pump.fun launches since ${since} UTC — ${cov.n.toLocaleString()} watched from creation${gapMin >= 1 ? `, with ${gapMin.toFixed(0)} min of recorded downtime` : ", no recorded downtime"}\n`);
+console.log(`  archive covers pump.fun launches since ${since} UTC - ${cov.n.toLocaleString()} watched from creation${gapMin >= 1 ? `, with ${gapMin.toFixed(0)} min of recorded downtime` : ", no recorded downtime"}\n`);
 
 if (watched) {
   const gradS = t.graduated_at ? Math.round((t.graduated_at - t.created_at) / 1000) : null;
-  console.log("  AT LAUNCH — recorded live, not reconstructed");
+  console.log("  AT LAUNCH - recorded live, not reconstructed");
   console.log(`    created         ${new Date(t.created_at).toISOString().slice(0, 16).replace("T", " ")} UTC`);
   console.log(`    creator         ${t.creator || "unknown"}`);
   console.log(`    creator took    ${t.dev_pct?.toFixed(1) ?? "?"}% of supply in the first block`);
@@ -67,7 +67,7 @@ if (watched) {
 
   // the checks that only launch-time observation can make
   if (t.dev_pct >= 50)
-    out.push({ level: "DANGER", text: `the creator took ${pct(t.dev_pct)} of the entire supply at launch. Nothing visible on-chain today shows this — the float has since been spread across wallets.` });
+    out.push({ level: "DANGER", text: `the creator took ${pct(t.dev_pct)} of the entire supply at launch. Nothing visible on-chain today shows this - the float has since been spread across wallets.` });
   else if (t.dev_pct >= 20)
     out.push({ level: "CAUTION", text: `the creator took ${pct(t.dev_pct)} of supply at launch.` });
   if (t.graduated && (t.unique_buyers ?? 0) === 0)
@@ -75,7 +75,7 @@ if (watched) {
   else if (t.graduated && (t.unique_buyers ?? 0) < 10)
     out.push({ level: "CAUTION", text: `only ${t.unique_buyers} outside buyers existed on the curve before it graduated.` });
   if (t.graduated && gradS !== null && gradS <= 60)
-    out.push({ level: "DANGER", text: `it left the curve ${gradS}s after launch — the float was taken before anyone could buy at a normal price.` });
+    out.push({ level: "DANGER", text: `it left the curve ${gradS}s after launch - the float was taken before anyone could buy at a normal price.` });
   if (t.dev_sold) out.push({ level: "CAUTION", text: `the creator sold while we were watching.` });
 
   // Who took the curve, and what they did the last time. A flag says "be careful"; this says who is about to sell to
@@ -97,15 +97,15 @@ if (watched) {
   const bad = cl.map((c) => c.cluster).filter((c) => avoid.has(c));
   if (bad.length) out.push({ level: "CAUTION", text: `wallets from operator cluster${bad.length > 1 ? "s" : ""} ${bad.join(", ")} traded it; those farms sell into buyers on every play we have measured.` });
 } else if (inGap) {
-  console.log("  AT LAUNCH — not observed");
+  console.log("  AT LAUNCH - not observed");
   console.log(`    It launched at ${new Date(t.created_at).toISOString().slice(0, 16).replace("T", " ")} UTC, while the collector was down.`);
   console.log("    We hold partial rows for it, but they are not provenance and are not reported here.");
 } else if (t) {
-  console.log("  AT LAUNCH — not observed");
+  console.log("  AT LAUNCH - not observed");
   console.log(`    This token was added to our records only after we found it trading (${new Date(t.created_at).toISOString().slice(0, 16).replace("T", " ")} UTC).`);
   console.log("    Its creation is outside what we watched, so creator share and outside-buyer count are unknown.");
 } else {
-  console.log("  AT LAUNCH — not observed");
+  console.log("  AT LAUNCH - not observed");
   console.log("    We have no record of this token. It launched outside our coverage window, or on another venue.");
 }
 
@@ -119,7 +119,7 @@ if (!pool) {
     if (r.ok) { const j: any = await r.json(); if (typeof j?.pump_swap_pool === "string") pool = j.pump_swap_pool; }
   } catch {}
 }
-console.log("\n  NOW — read from the chain just now");
+console.log("\n  NOW - read from the chain just now");
 if (!pool) {
   console.log("    no PumpSwap pool found; nothing about a displayed price can be verified.");
 } else {
@@ -137,7 +137,7 @@ if (!pool) {
   const supplyRes = await rpc("getTokenSupply", [mint]).catch((e) => { notRun.push(`supply (${(e as Error).message})`); return null; });
   if (!r || !supplyRes) {
     notRun.push("pool reserves");
-    console.log(`    pool ${pool} — could not read balances.`);
+    console.log(`    pool ${pool} - could not read balances.`);
   } else {
     const supply = Number(supplyRes.value.uiAmount);
     const capSol = r.priceSol * supply;
@@ -157,13 +157,13 @@ if (!pool) {
 // ---------- verdict ----------
 console.log("");
 if (notRun.length) {
-  console.log(`  [UNKNOWN] could not complete: ${notRun.join("; ")}. This is not a clean result — re-run.`);
+  console.log(`  [UNKNOWN] could not complete: ${notRun.join("; ")}. This is not a clean result - re-run.`);
 }
 if (!watched && !out.length && !notRun.length) {
   console.log("  [UNKNOWN] present-tense checks pass, but we did not watch this token launch.");
   console.log("            A manufactured token looks exactly like this once its float has been spread.");
 }
 if (watched && !out.length && !notRun.length)
-  console.log("  no warning — watched from creation, the creator did not take the supply, real buyers existed, and the pool supports the price.");
+  console.log("  no warning - watched from creation, the creator did not take the supply, real buyers existed, and the pool supports the price.");
 for (const l of out) console.log(`  [${l.level}] ${l.text}`);
 console.log("");

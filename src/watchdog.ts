@@ -3,16 +3,16 @@
  *
  * Until now every check that could notice this product had stopped ran on one personal machine: `run-freshness.sh`
  * under launchd, hourly, against the live URL. It could not fire during the failure it exists to catch, because the
- * commonest cause of the site freezing IS the laptop being asleep — and a sleeping machine runs no timers and sends
+ * commonest cause of the site freezing IS the laptop being asleep - and a sleeping machine runs no timers and sends
  * no alerts. On 2026-09-08 it went five hours between runs without anyone knowing, which is exactly the seven-hour
  * frozen archive of the day before, one level up: the watcher itself had the failure mode of the thing it watched.
  *
  * So the watch moves into the two processes that are always up, and it is deliberately TWO watches asking the same
  * question from different places:
  *
- *   web       — how old is the record I am serving? Catches a pull that stopped working, a collector that stopped
+ *   web - how old is the record I am serving? Catches a pull that stopped working, a collector that stopped
  *               building, an archive frozen while every route still answers 200. Cannot report its own death.
- *   collector — is the public site reachable, and is the record it serves advancing? Runs in a different service,
+ *   collector - is the public site reachable, and is the record it serves advancing? Runs in a different service,
  *               different container, and reaches the site the way a visitor does. This is the one that survives the
  *               web service being dead, which is the case the self-check structurally cannot cover.
  *
@@ -21,7 +21,7 @@
  * infrastructure this project does not run.
  *
  * The state machine below exists because an alert channel that cries wolf gets muted, and a muted channel is worse
- * than none — it manufactures the belief that someone is watching. Hence: N consecutive failures before alarming,
+ * than none - it manufactures the belief that someone is watching. Hence: N consecutive failures before alarming,
  * one alarm then a repeat only every `repeatMs`, and an explicit recovery notice so that silence-after-an-alarm can
  * be told apart from an alarm that stopped working.
  */
@@ -55,7 +55,7 @@ export function startWatchdog(o: WatchdogOptions): void {
 
   /**
    * A message that could not be delivered is logged at full volume rather than swallowed. The logs are not a
-   * notification channel — nobody is reading them at 3am, which is the whole reason this file exists — but an
+   * notification channel - nobody is reading them at 3am, which is the whole reason this file exists - but an
    * undelivered alert that leaves no trace at all is how you discover months later that the channel was never wired.
    */
   const announce = async (text: string) => {
@@ -68,7 +68,7 @@ export function startWatchdog(o: WatchdogOptions): void {
     let r: ProbeResult;
     /**
      * A probe that throws is a failed probe, never a skipped one. The tempting `catch { return }` turns every
-     * unexpected error — a DNS failure, a JSON shape change, a bug in the probe itself — into silence, and silence
+     * unexpected error - a DNS failure, a JSON shape change, a bug in the probe itself - into silence, and silence
      * here reads as health. Absence of data reading as absence of problems is the shape of every serious bug in
      * this codebase.
      */
@@ -79,13 +79,13 @@ export function startWatchdog(o: WatchdogOptions): void {
       const wasAlarmed = alarmed;
       consecutive = 0;
       alarmed = false;
-      log(`[watch:${o.name}] ok — ${r.detail}`);
-      if (wasAlarmed) await announce(`RECOVERED — ${o.name}: ${r.detail}`);
+      log(`[watch:${o.name}] ok - ${r.detail}`);
+      if (wasAlarmed) await announce(`RECOVERED - ${o.name}: ${r.detail}`);
       return;
     }
 
     consecutive++;
-    log(`[watch:${o.name}] FAIL (${consecutive}) — ${r.detail}`);
+    log(`[watch:${o.name}] FAIL (${consecutive}) - ${r.detail}`);
     if (consecutive < o.failuresBeforeAlarm) return;
     if (alarmed && Date.now() - lastAlarmAt < o.repeatMs) return;
     alarmed = true;
@@ -98,12 +98,12 @@ export function startWatchdog(o: WatchdogOptions): void {
 }
 
 /**
- * Ping an external dead-man switch (healthchecks.io, Better Stack, cron-monitor — anything that alerts on a ping
+ * Ping an external dead-man switch (healthchecks.io, Better Stack, cron-monitor - anything that alerts on a ping
  * that does not arrive).
  *
  * Every check in this file runs inside the system it watches, so all of them go quiet together if Railway drops the
  * project, the account lapses, or a deploy crash-loops both services. That silence is indistinguishable from
- * everything being fine. Inverting it — where the ABSENCE of a signal is the alarm, judged by a third party — is the
+ * everything being fine. Inverting it - where the ABSENCE of a signal is the alarm, judged by a third party - is the
  * only construction that survives its own subject dying, and it is four lines.
  */
 export function startHeartbeat(url: string, everyMs: number, name: string): void {

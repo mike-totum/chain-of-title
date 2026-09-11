@@ -6,7 +6,7 @@
  * pump.fun holds facts about a token that exist nowhere on chain and nowhere in the metadata document: whether the
  * platform has BANNED it, whether it was marked nsfw, whether it ever went live on stream, its all-time-high market
  * cap and when, how many replies it drew. None of that can be rebuilt from an archival node, because none of it was
- * ever on the chain — it is the platform's own judgement about its own listing, and the platform can revise or delete
+ * ever on the chain - it is the platform's own judgement about its own listing, and the platform can revise or delete
  * it without notice or trace.
  *
  * `is_banned` is the one that justifies the job on its own. A launchpad banning a token is the closest thing to an
@@ -34,7 +34,7 @@ const MAX_BYTES = 64 * 1024;
 export type PlatformStats = { attempted: number; kept: number; unchanged: number; failed: number; changed: number };
 
 /**
- * Fields lifted out of the document for querying. The document itself is stored whole either way — these are an
+ * Fields lifted out of the document for querying. The document itself is stored whole either way - these are an
  * index into it, never a replacement for it, so a field pump.fun adds next month is still captured on the day it
  * appears rather than from the day we notice.
  */

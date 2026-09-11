@@ -15,7 +15,7 @@ export interface TokenState {
   createdAt: number; // ms, receipt time
   createdSlot: number;
   /**
-   * The signature of the transaction this launch was decoded from — the one that carries the creator's initial buy,
+   * The signature of the transaction this launch was decoded from - the one that carries the creator's initial buy,
    * and therefore the one `devPct` is computed from. Empty for a token we found late, where no such observation
    * exists. Kept because a number the reader cannot trace back to a transaction is an assertion, not a record.
    */
@@ -24,7 +24,7 @@ export interface TokenState {
   venue?: string;
   /**
    * How we know the curve completed: "pool" or "curve_complete". Left undefined when `graduated` was inferred from
-   * decoded trade events reaching the threshold, which is not proof — see `graduated_confirmed_by` in db.ts.
+   * decoded trade events reaching the threshold, which is not proof - see `graduated_confirmed_by` in db.ts.
    */
   graduatedConfirmedBy?: string;
   /** per-token override of the max watch window (operator-cluster tokens get 24 h) */
@@ -42,7 +42,7 @@ export interface TokenState {
    * Where the peak came from: a decoded on-chain trade, or a third-party price quote.
    *
    * 'curve' and 'amm' mean we decoded a transaction that executed at that price. 'external' means a price feed told
-   * us, and no trade was witnessed — a different kind of claim, and the one that produced every peak this archive
+   * us, and no trade was witnessed - a different kind of claim, and the one that produced every peak this archive
    * cannot corroborate. Two of the four largest peaks on file hold a pool, zero decoded AMM trades, and an implied
    * market cap over 2.9 million SOL; the two beside them are backed by 122 and 211 trades and reconcile exactly.
    *
@@ -113,7 +113,7 @@ export interface TokenState {
 export interface TokenMeta {
   /**
    * The metadata document exactly as served, when it fits. The extracted fields below are a reading of it; this is
-   * the thing itself, and it is in the same unrecoverable class as the image — behind a URI the creator controls.
+   * the thing itself, and it is in the same unrecoverable class as the image - behind a URI the creator controls.
    */
   raw?: string;
   /** Size of that document as served, recorded even when `raw` was too big to keep. */
@@ -564,7 +564,7 @@ const MAX_CONFIRMED_JUMP = 100;
 const MAX_META_BYTES = 16 * 1024;
 
 /**
- * The outcome of asking for a launch's metadata document: what we got, and — when we got nothing — why.
+ * The outcome of asking for a launch's metadata document: what we got, and - when we got nothing - why.
  *
  * The two failures are not the same fact and this project exists to keep such things apart. `http 404` from a
  * gateway that answered means the pin is gone and no later pass will recover it. `ipfs.filebase.io 429` means we
@@ -585,7 +585,7 @@ export interface MetaResult {
  *
  * Was a single request to the URL as declared, with a 4-second timeout. Every pump.fun launch declares `ipfs.io`,
  * `ipfs.io` returns 429 to us in about 50 ms, and one refused request meant the launch's own account of itself was
- * lost — 27% captured out of a day's 28,488, with a URI in hand for 99.5%. It reads as "we never looked" because
+ * lost - 27% captured out of a day's 28,488, with a URI in hand for 99.5%. It reads as "we never looked" because
  * nothing was written down either way.
  *
  * Now goes through `fetchContent`, which asks the same CID of whichever gateway will serve it. The image and the
@@ -597,7 +597,7 @@ export async function fetchMetaResult(uri: string): Promise<MetaResult> {
   if (!res) return { meta: null, via, error: error ?? "unreachable" };
 
   /**
-   * Read the text and keep it, then parse. It used to call `res.json()`, which parses and discards the document —
+   * Read the text and keep it, then parse. It used to call `res.json()`, which parses and discards the document -
    * five fields kept out of however many the operator wrote, at the one moment the file is retrievable. The URI is
    * the creator's to repoint and the pin is theirs to drop, so every key we did not think to name was being thrown
    * away permanently: the off-chain name (which can differ from the on-chain one), creator handles, and whatever
@@ -639,7 +639,7 @@ export async function fetchMetaResult(uri: string): Promise<MetaResult> {
     /**
      * A document that was served and would not parse is still a document, and it is retrievable exactly once. The
      * old code returned null here, which discarded bytes we had already been given and then recorded the launch as
-     * unreachable — the one failure mode an archive must never have, because it destroys evidence in hand and
+     * unreachable - the one failure mode an archive must never have, because it destroys evidence in hand and
      * misfiles the reason. Keep what was served; report that it did not parse.
      */
     return { meta: { raw, bytes }, via, error: "served but not json" };

@@ -72,7 +72,7 @@ for (const t of toks) {
   });
 }
 const nVer = rows.filter((r) => r.verified).length, nReal = rows.filter((r) => r.real).length;
-console.log(`\n=== post-graduation analysis — ${rows.length} graduated tokens with PumpSwap data (last ${hours}h); ${nVer} verified on-chain, ${nReal} real runners (>=2x graduation mcap and >=40 SOL in pool) ===`);
+console.log(`\n=== post-graduation analysis - ${rows.length} graduated tokens with PumpSwap data (last ${hours}h); ${nVer} verified on-chain, ${nReal} real runners (>=2x graduation mcap and >=40 SOL in pool) ===`);
 console.log(`base rates: held >=1.5x graduation price at +60m: ${pct(rows.filter((r) => r.held60).length, rows.length)}   verified real: ${pct(nReal, nVer)}\n`);
 
 function feature(name: string, fn: (r: Row) => string | null, order?: string[]) {
@@ -109,7 +109,7 @@ function ripcord(r: Row): number | null {
   if (exitPx === null) exitPx = r.path[r.path.length - 1].price;
   return banked + tokensLeft * (exitPx / e) * (1 - FEE) - 0.02;
 }
-console.log(`RULE SEARCH — enter ${ENTRY / 1000}s after graduation when the first ${WIN / 1000}s flow passes the rule; rip-cord exits simulated on the AMM path`);
+console.log(`RULE SEARCH - enter ${ENTRY / 1000}s after graduation when the first ${WIN / 1000}s flow passes the rule; rip-cord exits simulated on the AMM path`);
 console.log("  rule".padEnd(64) + "n".padStart(5) + "  held@60m" + "  real/ver" + "  mean exit" + "  win%" + "  median peak");
 const rules: [string, (r: Row) => boolean][] = [
   ["all graduated (baseline)", () => true],

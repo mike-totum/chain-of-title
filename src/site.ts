@@ -1,5 +1,5 @@
 /**
- * Static site generator. Reads the archive and writes flat HTML + JSON — no backend, no database server, no uptime
+ * Static site generator. Reads the archive and writes flat HTML + JSON - no backend, no database server, no uptime
  * obligation. If generation fails, yesterday's pages are still up and still correct.
  *   npm run site -- [--out site] [--days 7]
  *
@@ -28,7 +28,7 @@ const OUT = arg("--out", "site");
 const DAYS = Number(arg("--days", "7"));
 /**
  * Per-token and per-wallet pages are rendered on request by `serve.ts` from the same code, so pre-rendering them is
- * redundant — and it does not scale: ~24,000 launches and ~1,465 graduations a day means 8.8 M pages a year, or
+ * redundant - and it does not scale: ~24,000 launches and ~1,465 graduations a day means 8.8 M pages a year, or
  * 535 k for graduations alone. Seven days of graduations already came to 19,104 files, past Cloudflare Pages'
  * 20,000-file deployment cap. `--pages` still writes them, for a portable offline copy of a bounded window.
  */
@@ -36,7 +36,7 @@ const PAGES = process.argv.includes("--pages");
 
 /**
  * Opened without migrating. The next line declares this process read-only, and a generator that only reads has no
- * business writing the collector's schema into whatever it is pointed at — which is precisely what happened when it
+ * business writing the collector's schema into whatever it is pointed at - which is precisely what happened when it
  * was pointed at the record: `npm run site` put all nine collector-only tables back into data/record.db seconds
  * after servicedb had stripped them. Same bug as the web service, one caller further along.
  */
@@ -88,7 +88,7 @@ const look = (t: any): Assessment => assess(db, t, covered);
  * A pool balance is the one number on this site that decays. HOOD and HCAT held 2,677 and 2,050 SOL when the collector
  * last read them and $21 and $19 hours later, so a stored balance cannot support a present-tense claim about whether a
  * position can be sold. Every token we are about to certify gets its pool re-read from chain at generation time, and a
- * read that fails or comes back thin means no certificate — the answer to "we could not check" is never "clean".
+ * read that fails or comes back thin means no certificate - the answer to "we could not check" is never "clean".
  *
  * `fresh` records which kind of number this is. A stored reading may still be shown, always with its age attached; only
  * a reading taken during this run can support a certificate.
@@ -98,7 +98,7 @@ const reading = (t: any): Reading | null =>
     : { sol: t.vault_sol, at: t.vault_at, fresh: now - t.vault_at <= MAX_READING_AGE_MS };
 /**
  * Clean is a claim about the launch, and nothing else. It used to also require a pool reading under five minutes old
- * showing MIN_POOL_SOL, which made a permanent finding about the first blocks contingent on our present RPC luck —
+ * showing MIN_POOL_SOL, which made a permanent finding about the first blocks contingent on our present RPC luck -
  * over seven days that gate removed 413 of 423 clean launches from the list. Liquidity is still read and still shown,
  * beside the claim and with the age of the reading, but it no longer retracts a statement about the past.
  * `serve.ts` makes the same split; if these two ever disagree the offline tree becomes a second API.
@@ -119,7 +119,7 @@ const assessed = toks.map((t) => ({ t, a: look(t) }));
  * This generator used to re-read every candidate's pool so it could certify one; that made a page build depend on
  * hundreds of RPC calls, took over an hour when the endpoints were throttled, and produced a page that was true at
  * build time and drifted from then on. Certification now reads a stored balance and asks how old it is
- * (MAX_READING_AGE_MS), and the front page is rendered per request by `serve.ts` rather than written here — so the
+ * (MAX_READING_AGE_MS), and the front page is rendered per request by `serve.ts` rather than written here - so the
  * numbers move with the chain instead of with the build.
  *
  * What is left in this file is the part that genuinely does not move: method, data, 404 and the API page. None of
@@ -132,7 +132,7 @@ for (const { t, a } of assessed) {
   const r = reading(t);
   // Settle the birth claim BEFORE the pool reading is allowed to add a flag, and tag that flag with the kind it is.
   // `cleanAtBirth` refuses anything carrying a DANGER flag and does not ask which kind, so pushing an untagged
-  // liquidity flag first let a balance read seconds ago decide what the record said about the first block — the same
+  // liquidity flag first let a balance read seconds ago decide what the record said about the first block - the same
   // contradiction serve.ts:705 was fixed for, left behind here. The comment on `isClean` above promises these two
   // files make the same split; until this line they did not.
   const cleanTok = isClean(t, a);
@@ -168,7 +168,7 @@ for (const [w] of wallets) {
 // ---------- front page ----------
 const day = toks.filter((t) => t.created_at >= now - 86400_000);
 const dayClean = clean.filter((t) => t.created_at >= now - 86400_000);
-// Passed every birth test but carries no reading fresh enough to certify. Not a warning — an absence of one.
+// Passed every birth test but carries no reading fresh enough to certify. Not a warning - an absence of one.
 const unverified = assessed.filter(({ t, a }) => cleanAtBirth(t, a) && !readingCertifies(t.vault_at, t.vault_sol, now)).map(({ t }) => t);
 const dayUnverified = unverified.filter((t) => t.created_at >= now - 86400_000);
 // The page's central claim, counted rather than asserted: how many of yesterday's graduations carry a danger flag.
@@ -178,10 +178,10 @@ const dayDanger = dayAssessed.filter(({ a }) => a.flags.some((f) => f.level === 
 // snapshot: the creator takes the supply with nobody else buying, the operator then funds the pool with real SOL so
 // that everything measurable looks ordinary, and later takes it back out. A scanner run during the middle window sees
 // nothing wrong; one run afterwards reports thin liquidity, correctly and far too late. Only the birth record was
-// true throughout. Both pool figures are read rather than assumed — the "now" one live, here.
+// true throughout. Both pool figures are read rather than assumed - the "now" one live, here.
 /**
  * The worked example moved with the page that showed it. It needed a pool read to prove the "now" column, which was
- * the last network call in this generator — leaving it here would have kept a build that cannot fail on RPC
+ * the last network call in this generator - leaving it here would have kept a build that cannot fail on RPC
  * depending on RPC anyway, for a section nothing in this file renders.
  */
 
@@ -198,7 +198,7 @@ writeFileSync(join(OUT, "404.html"), page("No record", notFoundBody(chrome), chr
 // ---------- method ----------
 // The page a sceptic and a grant reviewer both need: how a claim on this site is decided, and what was done to check
 // it. Every figure here is computed at build time from the same code the site runs, so the page cannot describe rules
-// the site does not apply — which is the failure mode of every "methodology" page written once and left alone.
+// the site does not apply - which is the failure mode of every "methodology" page written once and left alone.
 
 writeFileSync(join(OUT, "method.html"), page("How this is decided", methodBody(FACTS, chrome), chrome, 0,
   `How Chain of Title decides what to say about a token launch: what is recorded live, what "checked, no markers found" means, the labelled-set test behind it, and the four situations where we refuse to answer.`, "/method.html"));
@@ -209,12 +209,12 @@ writeFileSync(join(OUT, "method.html"), page("How this is decided", methodBody(F
 /**
  * Count the file being offered, not the one this build happens to be reading.
  *
- * The download link points at `data/record.db` and the count beside it came from `config.dbPath` — the collector's
+ * The download link points at `data/record.db` and the count beside it came from `config.dbPath` - the collector's
  * working database, a different file that is always ahead of the published one by however long ago the last publish
  * was. It told a downloader 166,273 and handed them 164,998.
  *
  * And it used the wrong definition under the right word. `serve.ts` distinguishes `observed` (watched from the
- * creation transaction — the population every claim on this site is about) from `held` (every row in the file, which
+ * creation transaction - the population every claim on this site is about) from `held` (every row in the file, which
  * also counts launches a detector restored afterwards and the few rebuilt from chain history). Commit "Make
  * launches mean one thing on every surface" settled that for the service and missed this page, which reported `held`
  * as "Launches". Both counts are honest; publishing one under the other's name is not.
@@ -230,7 +230,7 @@ writeFileSync(join(OUT, "data.html"), page("The data", dataBody(FACTS, db, chrom
   `The whole Chain of Title archive as one CC0 SQLite file: ${FACTS.recCounts ? `${fmt(FACTS.recCounts.held)} ` : ""}Solana launch records, one row each, no key or sign-up.`, "/data.html"));
 
 /**
- * The API page. It documents one thing above everything else — that a null is not a clean result — because the whole
+ * The API page. It documents one thing above everything else - that a null is not a clean result - because the whole
  * value of an integration is that someone else's users see our UNKNOWN as an UNKNOWN, and the integrator's code is
  * the only place we cannot inspect.
  */
@@ -269,7 +269,7 @@ mkdirSync(join(OUT, "reports"), { recursive: true });
  * Reports are RENDERED here and COMPUTED nowhere here.
  *
  * This block used to hold the query. It ran on every build, and `scripts/daily.sh` runs a build once a day, so the
- * one report we had was silently recomputed and re-dated daily — beneath its own opening sentence promising the
+ * one report we had was silently recomputed and re-dated daily - beneath its own opening sentence promising the
  * reader that its figures "are not updated afterwards". The date on the live page was the record's build time, not
  * a publication date, and it moved every night.
  *
@@ -282,7 +282,7 @@ const REPORTS = loadReports();
 
 for (const r of REPORTS) {
   const body = reportBody(r);
-  if (!body) { console.error(`  !! no template for report "${r.slug}" — not rendered`); continue; }
+  if (!body) { console.error(`  !! no template for report "${r.slug}" - not rendered`); continue; }
   writeFileSync(join(OUT, "reports", `${r.slug}.html`), page(r.title, body, chrome, 1, r.summary, `/reports/${r.slug}.html`));
 }
 writeFileSync(join(OUT, "reports.html"), page("Reports", reportsIndexBody(REPORTS), chrome, 0,
@@ -309,4 +309,6 @@ console.log(PAGES
   ? `  ${toks.length.toLocaleString()} token pages + ${wallets.size} wallet pages written (--pages)`
   : `  ${toks.length.toLocaleString()} graduations and ${wallets.size} curve-taking wallets assessed; their pages are rendered on request by \`npm run serve\` (pass --pages to write them)`);
 console.log(`  ${clean.length} checked with no markers found; ${dayClean.length} in the last 24 h of ${day.length} graduations`);
-console.log(`  reports.html, reports/ticker-factories.html, findings.html, method.html, data.html, 404.html, api.html, pledge.html, corrections.html` + (PAGES ? `, api/${API_VERSION}/token/<mint>.json, api/${API_VERSION}/wallet/<wallet>.json` : ""));
+// Named from what was actually written, not from a list typed once. The hardcoded version said
+// "reports/ticker-factories.html" and kept saying it after a second report was published.
+console.log(`  reports.html, ${REPORTS.map((r) => `reports/${r.slug}.html`).join(", ")}, findings.html, method.html, data.html, 404.html, api.html, pledge.html, corrections.html` + (PAGES ? `, api/${API_VERSION}/token/<mint>.json, api/${API_VERSION}/wallet/<wallet>.json` : ""));

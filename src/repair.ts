@@ -21,7 +21,7 @@ const rows = db.prepare(`
 const fixable = rows.filter((r) => r.real_buyers > 0);
 console.log(`${rows.length.toLocaleString()} tokens record zero buyers; ${fixable.length.toLocaleString()} have trade rows proving otherwise\n`);
 for (const r of fixable.slice(0, 12)) console.log(`  ${(r.symbol ?? "?").padEnd(14)} ${r.mint.slice(0, 6)}  stored ${r.stored ?? 0} → ${r.real_buyers} buyers, ${r.buys} buys, ${r.buyvol.toFixed(1)} SOL`);
-if (!APPLY) { console.log(`\ndry run — re-run with --apply to restore these counters.`); process.exit(0); }
+if (!APPLY) { console.log(`\ndry run - re-run with --apply to restore these counters.`); process.exit(0); }
 
 const up = db.prepare(`UPDATE tokens SET unique_buyers=?, buys=MAX(COALESCE(buys,0),?), buy_vol_sol=MAX(COALESCE(buy_vol_sol,0),?) WHERE mint=?`);
 db.exec("BEGIN");

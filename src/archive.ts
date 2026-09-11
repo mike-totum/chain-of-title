@@ -1,5 +1,5 @@
 /**
- * Build the portable provenance archive — the product asset, separated from the research database.
+ * Build the portable provenance archive - the product asset, separated from the research database.
  *   npm run archive -- [--out data/archive.db] [--verify]
  *
  * The research DB is ~5.3 GB, almost all of it `trades` and `wallet_token_stats`, which the product never reads.
@@ -112,14 +112,14 @@ const iso = (ms: number) => new Date(ms).toISOString().slice(0, 16).replace("T",
 const totalCovered = windows.reduce((a, w) => a + (w.end_at - w.start_at), 0);
 const span = windows.length ? windows[windows.length - 1].end_at - windows[0].start_at : 0;
 
-console.log(`\nwrote ${OUT} — ${size.toFixed(1)} MB`);
+console.log(`\nwrote ${OUT} - ${size.toFixed(1)} MB`);
 console.log(`  launches            ${rows.length.toLocaleString()} (${observed.toLocaleString()} observed at launch, ${(rows.length - observed).toLocaleString()} provenance unknown)`);
 console.log(`  operator wallets    ${nOps.toLocaleString()} in ${nPol} scored clusters`);
 console.log(`  pools               ${nPools.toLocaleString()}`);
-console.log(`\nCOVERAGE — ${windows.length} continuous window(s), ${(100 * totalCovered / Math.max(span, 1)).toFixed(2)}% of the span`);
+console.log(`\nCOVERAGE - ${windows.length} continuous window(s), ${(100 * totalCovered / Math.max(span, 1)).toFixed(2)}% of the span`);
 for (const w of windows) console.log(`  ${iso(w.start_at)} → ${iso(w.end_at)}  (${((w.end_at - w.start_at) / 3600_000).toFixed(1)} h)`);
 const gaps = windows.slice(1).map((w, i) => ({ from: windows[i].end_at, to: w.start_at })).filter((g) => g.to - g.from > GAP_TOLERANCE_MS);
 if (gaps.length) {
-  console.log(`\nGAPS — launches in these windows have no provenance and must not be answered confidently`);
+  console.log(`\nGAPS - launches in these windows have no provenance and must not be answered confidently`);
   for (const g of gaps) console.log(`  ${iso(g.from)} → ${iso(g.to)}  (${((g.to - g.from) / 60_000).toFixed(0)} min)`);
 } else console.log("\nno gaps recorded");

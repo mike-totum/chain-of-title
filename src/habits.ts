@@ -1,5 +1,5 @@
 /**
- * Habit persistence test — the honest version of "operators repeat the same play".
+ * Habit persistence test - the honest version of "operators repeat the same play".
  *
  *   npm run habits -- [--hours 72]
  *
@@ -120,7 +120,7 @@ class Bucket {
 }
 const bin = (x: number | null, edges: number[], labels: string[]) => { if (x === null) return null; let i = 0; while (i < edges.length && x >= edges[i]) i++; return labels[i]; };
 
-console.log(`\n=== habit persistence — ${toks.length} finalized launches (last ${hours}h), evaluated strictly in time order ===`);
+console.log(`\n=== habit persistence - ${toks.length} finalized launches (last ${hours}h), evaluated strictly in time order ===`);
 console.log("Each launch is bucketed by its creator's record from launches whose watch window had ENDED before this launch. Outcomes are the launch's own.\n");
 
 // ---------- 1. creators ----------
@@ -171,7 +171,7 @@ const show = (title: string, m: Map<string, Bucket>, order: string[]) => {
 console.log("1. CREATORS\n");
 console.log(`  base (every launch): ${JSON.stringify(base.row("all", base))}\n`);
 show("BY NUMBER OF PRIOR (FINISHED) LAUNCHES", byCount, COUNT_L);
-show("CREATORS WITH 3+ PRIOR LAUNCHES — BY THEIR PRIOR AVERAGE 15-MIN OUTSIDER RETURN", byAvg, AVG_L);
+show("CREATORS WITH 3+ PRIOR LAUNCHES - BY THEIR PRIOR AVERAGE 15-MIN OUTSIDER RETURN", byAvg, AVG_L);
 show("… BY PRIOR SHARE OF LAUNCHES THAT PAID AN OUTSIDER AT 15 MIN", byWin, WIN_L);
 show("… BY PRIOR BASELINE PAPER RESULT (entry 2 s, default exits)", byPaper, PAPER_L);
 show("… BY PRIOR TRADEABLE-GRADUATION RATE (graduation took >= 60 s)", byGrad, GRAD_L);
@@ -238,13 +238,13 @@ for (const r of wrows) {
 }
 console.log(`  base (every early buy >= 0.05 SOL): ${JSON.stringify(wbase.row("all", wbase))}\n`);
 show("BY NUMBER OF PRIOR (FINISHED) TOKENS THE WALLET BOUGHT EARLY", wByCount, COUNT_L);
-show("WALLETS WITH 3+ PRIOR (not mostly same-block) — BY THE WALLET'S OWN PRIOR RETURN ON ITS BUYS", wByOwn, OWN_L);
+show("WALLETS WITH 3+ PRIOR (not mostly same-block) - BY THE WALLET'S OWN PRIOR RETURN ON ITS BUYS", wByOwn, OWN_L);
 show("… BY THE PRIOR AVERAGE 15-MIN OUTSIDER RETURN OF THE TOKENS IT BOUGHT", wByTok, AVG_L);
 show("… BY THE PRIOR SHARE OF ITS TOKENS THAT PAID AN OUTSIDER AT 15 MIN", wByWin, WIN_L);
 console.log(`REALISTIC FILL (entry = first stored trade >= 1.5 s after the wallet's buy; ${wbaseReal.n} of the 3+-prior rows had one)`);
 console.log(`  base with realistic fill: ${JSON.stringify(wbaseReal.row("all", wbaseReal))}\n`);
-show("… BY THE PRIOR AVERAGE 15-MIN OUTSIDER RETURN OF THE TOKENS IT BOUGHT — realistic fill", wByTokReal, AVG_L);
-show("… BY THE PRIOR SHARE OF ITS TOKENS THAT PAID AN OUTSIDER AT 15 MIN — realistic fill", wByWinReal, WIN_L);
+show("… BY THE PRIOR AVERAGE 15-MIN OUTSIDER RETURN OF THE TOKENS IT BOUGHT - realistic fill", wByTokReal, AVG_L);
+show("… BY THE PRIOR SHARE OF ITS TOKENS THAT PAID AN OUTSIDER AT 15 MIN - realistic fill", wByWinReal, WIN_L);
 console.log(`FOLLOWER RULE, realistic fill: copy a wallet whose prior tokens paid outsiders >= 50 % of the time and >= 1.2x on average; hold 15 min`);
 console.log(`  ${wfollowerReal.n} entries → ${wfollowerReal.sol >= 0 ? "+" : ""}${f(wfollowerReal.sol, 2)} SOL (avg ${wfollowerReal.n ? f(wfollowerReal.sol / wfollowerReal.n / 0.1 + 1, 2) : "-"}x, win ${pct(wfollowerReal.wins, wfollowerReal.n)}, >=2x on ${pct(wfollowerReal.big, wfollowerReal.n)})\n`);
 console.log(`FOLLOWER RULE (prospective, optimistic: assumes entry at launch price): copy a wallet whose own prior return >= +50 % and whose tokens paid outsiders >= 1.2x on average; hold 15 min`);

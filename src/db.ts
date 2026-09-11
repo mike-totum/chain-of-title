@@ -7,14 +7,14 @@ import type { TokenState } from "./tracker.ts";
 /**
  * Open the collector's database, migrating it to the current schema.
  *
- * `migrate: false` opens a database and changes NOTHING about it — no CREATE, no ALTER, and no journal_mode, which
+ * `migrate: false` opens a database and changes NOTHING about it - no CREATE, no ALTER, and no journal_mode, which
  * is itself a write to the file header. That option exists because this function was being pointed at the PUBLISHED
  * RECORD by both `site.ts` and `serve.ts`, and it did exactly what it is written to do: it migrated the artifact.
  *
  * The columns it added were trivial. What it meant was not. The web service was schema-migrating the file it hands
  * to the public, so the bytes a reader downloads were not the bytes `servicedb` built, and the hash of the published
  * record changed after publication without anyone touching the data. For an archive whose own data page says its DOI
- * cannot be renamed, withdrawn or made private — and which is meant to be usable as evidence — a file that cannot be
+ * cannot be renamed, withdrawn or made private - and which is meant to be usable as evidence - a file that cannot be
  * hash-matched to what was published is a file an opposing party gets to argue about.
  *
  * Found 2026-09-08 by the schema page: a DROP COLUMN kept "silently not working", because every `npm run site` put
@@ -31,7 +31,7 @@ export function openDb(path: string, opts: { migrate?: boolean } = {}): Database
   /**
    * Refuse to migrate a published record, whoever asked.
    *
-   * Three callers were found doing it in one evening — serve.ts, site.ts twice — and the third was one line above a
+   * Three callers were found doing it in one evening - serve.ts, site.ts twice - and the third was one line above a
    * `PRAGMA query_only = 1`, a generator that declares itself read-only while rewriting what it was handed. Roughly
    * forty tools in this repo open `config.dbPath`, every one of them honours a DB_PATH override, and two take a
    * `--db` flag: so any of them can be pointed at the record by someone who has no idea this function migrates.
@@ -40,7 +40,7 @@ export function openDb(path: string, opts: { migrate?: boolean } = {}): Database
    * it where the knowledge lives. A record is unmistakable: it carries a `meta` table with `built_at`, which the
    * collector's own database has never had.
    *
-   * Throws rather than quietly opening read-only, because a caller that wanted the record needs to say so — the
+   * Throws rather than quietly opening read-only, because a caller that wanted the record needs to say so - the
    * whole failure was code doing something reasonable-looking to a file it did not own, silently.
    */
   const looksLikeRecord = (() => {
@@ -53,7 +53,7 @@ export function openDb(path: string, opts: { migrate?: boolean } = {}): Database
   })();
   if (looksLikeRecord) {
     db.close();
-    throw new Error(`${path} is a published record (it carries meta.built_at), and openDb() would migrate it — ` +
+    throw new Error(`${path} is a published record (it carries meta.built_at), and openDb() would migrate it - ` +
       `adding tables and columns, and changing its hash after publication. Open it with openDb(path, { migrate: false }).`);
   }
   db.exec(`
@@ -148,7 +148,7 @@ export function openDb(path: string, opts: { migrate?: boolean } = {}): Database
     -- pool -> mint, learned from PumpSwap CreatePoolEvent. Every graduation emits one; recording them all (not only
     -- for tokens tracked at that moment) is what lets a token restored hours later be priced from its first AMM print.
     -- Operator farms. Created here rather than only in clusters.ts so a collector that has never run the tracer still
-    -- has the tables to read, and so a seed export carries the map — it is the least reproducible thing we hold.
+    -- has the tables to read, and so a seed export carries the map - it is the least reproducible thing we hold.
     CREATE TABLE IF NOT EXISTS operator_funders (
       funder TEXT PRIMARY KEY, first_seen INTEGER, last_seen INTEGER, txs INTEGER, wallets INTEGER, seeds INTEGER,
       sampled_at INTEGER, note TEXT, parent TEXT, hops INTEGER DEFAULT 0
@@ -166,8 +166,8 @@ export function openDb(path: string, opts: { migrate?: boolean } = {}): Database
     );
     CREATE INDEX IF NOT EXISTS pool_map_mint ON pool_map(mint);
     -- The launchpad's own record of a launch, versioned. pump.fun holds facts that exist nowhere on chain and
-    -- nowhere in the metadata document — whether it BANNED the token, whether it was flagged nsfw, its all-time-high
-    -- market cap, how many replies it drew — and can revise or delete any of them without notice or trace. A ban is
+    -- nowhere in the metadata document - whether it BANNED the token, whether it was flagged nsfw, its all-time-high
+    -- market cap, how many replies it drew - and can revise or delete any of them without notice or trace. A ban is
     -- the closest thing to an admission this market produces and it is never announced.
     --
     -- Keyed on (mint, sha256) so an unchanged document writes nothing and a changed one is kept BESIDE its
@@ -185,7 +185,7 @@ export function openDb(path: string, opts: { migrate?: boolean } = {}): Database
     --
     -- The watcher already read every one of these and threw away any that did not name a token, because it was built
     -- to generate trading signals and that thesis is dead. What it was discarding is the promotion layer: what was
-    -- said about a launch, by whom, and when — which is unrecoverable the moment it is deleted, and deletion is
+    -- said about a launch, by whom, and when - which is unrecoverable the moment it is deleted, and deletion is
     -- itself the event most worth having recorded.
     --
     -- THIS TABLE IS NEVER PUBLISHED. It is not in servicedb and must not be added to it. The published record is the
@@ -222,7 +222,7 @@ export function openDb(path: string, opts: { migrate?: boolean } = {}): Database
   `);
   // `updated_at` is written on every token row update, but vault_sol is only replaced when a pool read actually
   // succeeded (COALESCE below). Reporting updated_at as the measurement time therefore advanced the timestamp while
-  // the number stayed put — the site claimed a two-minute-old reading for a figure hours out of date. vault_at is
+  // the number stayed put - the site claimed a two-minute-old reading for a figure hours out of date. vault_at is
   // written only at the moment a balance is read. Existing rows get NULL: an unknown measurement time must read as
   // unknown, never as fresh.
   try { db.exec("ALTER TABLE tokens ADD COLUMN vault_at INTEGER"); } catch {}
@@ -238,7 +238,7 @@ export function openDb(path: string, opts: { migrate?: boolean } = {}): Database
   try { db.exec("ALTER TABLE tokens ADD COLUMN curve_buyers INTEGER"); } catch {}
   /**
    * The launchpad a token was launched on. Every row written before this column existed is pump.fun, so the default
-   * backfills them correctly — and that is a *recorded* fact, not an inference: the collector has only ever subscribed
+   * backfills them correctly - and that is a *recorded* fact, not an inference: the collector has only ever subscribed
    * to the pump.fun program, so "we watched pump.fun" is a statement about what we did, not a guess about the data.
    *
    * Added while the archive was still small enough for that to be true of all of it. The record is append-only and
@@ -249,11 +249,11 @@ export function openDb(path: string, opts: { migrate?: boolean } = {}): Database
   /**
    * How we know a curve completed: 'pool', 'curve_complete', or NULL.
    *
-   * `graduated` is set by inference — decoded curve trade events reaching the graduation threshold in vSOL — and was
+   * `graduated` is set by inference - decoded curve trade events reaching the graduation threshold in vSOL - and was
    * never checked against anything. Measured on 2026-09-07 over the days when pool discovery was working, that
    * inference is confirmed by an actual pool 87% of the time for curves that took 10-60 minutes to fill and only 38%
    * of the time for curves flagged as completing within 60 seconds. Detection quality cannot explain a gradient that
-   * tracks fill speed, so the threshold is firing spuriously on fast curves — and `instant-graduation` is the largest
+   * tracks fill speed, so the threshold is firing spuriously on fast curves - and `instant-graduation` is the largest
    * DANGER category on the site. Of 628 recent fast-flagged launches with no pool, exactly one had a creator holding
    * 50% or more: we were accusing launches whose creators kept nothing.
    *
@@ -263,19 +263,19 @@ export function openDb(path: string, opts: { migrate?: boolean } = {}): Database
    * reads as "we checked and it did not graduate", which is the exact substitution this project exists to refuse.
    *
    * Confirmation is monotonic, like the provenance counters below: NULL may become a source when evidence arrives
-   * later — a pool discovered hours afterwards is still proof — and a source is never cleared.
+   * later - a pool discovered hours afterwards is still proof - and a source is never cleared.
    */
   try { db.exec("ALTER TABLE tokens ADD COLUMN graduated_confirmed_by TEXT"); } catch {}
   /**
    * The creation transaction, added 2026-09-09. NULL means we did not record one, and that has three innocent
-   * causes — the launch predates this column, we found the token late and never saw its creation, or the row was
+   * causes - the launch predates this column, we found the token late and never saw its creation, or the row was
    * rebuilt from chain history rather than watched. **NULL never means the token has no creation transaction.**
    * The paired backfill is `npm run backfillsig`, which recovers it for older rows from the dev's first-block trade
    * while those rows survive retention; what retention has already taken is recoverable only from an archival node.
    */
   try { db.exec("ALTER TABLE tokens ADD COLUMN create_sig TEXT"); } catch {}
   /**
-   * Where a peak came from. NULL on every row written before 2026-09-10, which means we did not record it — never
+   * Where a peak came from. NULL on every row written before 2026-09-10, which means we did not record it - never
    * that the peak was unsourced. Deliberately not backfilled: the source is only knowable at the moment the price
    * arrived, and inferring it afterwards from what trade rows survived retention would be manufacturing provenance.
    */
@@ -284,7 +284,7 @@ export function openDb(path: string, opts: { migrate?: boolean } = {}): Database
   /**
    * What the token claimed to be at launch: its image, its description, and when we read them.
    *
-   * `uri`, `twitter`, `telegram` and `website` were already stored. The image never was — `fetchMeta` did not read the
+   * `uri`, `twitter`, `telegram` and `website` were already stored. The image never was - `fetchMeta` did not read the
    * field, so the most recognisable thing about a launch was fetched and thrown away 154,000 times. The description was
    * read and then dropped on the floor for want of a column.
    *
@@ -306,7 +306,7 @@ export function openDb(path: string, opts: { migrate?: boolean } = {}): Database
   /**
    * The picture itself, or rather the proof of it. These existed only on the laptop, added by `images.ts` outside
    * `openDb`, which meant no cloud collector had them and no record built in the cloud could ever carry image
-   * evidence — the one thing this project collects that cannot be rebuilt from chain at any price. Declared here so
+   * evidence - the one thing this project collects that cannot be rebuilt from chain at any price. Declared here so
    * every database that `openDb` touches has the same shape.
    *
    * `image_sha256` present means we hold those bytes. `image_error` present means we tried and could not, which is a
@@ -321,7 +321,7 @@ export function openDb(path: string, opts: { migrate?: boolean } = {}): Database
    * The same three states for the metadata document, and it belongs HERE rather than in the tool that first needed
    * it. `backfillmeta` created this column itself, so it existed on any database that tool had run against and
    * nowhere else. The moment the collector's own sweep started recording a cause, it referenced a column its schema
-   * had never been given and every sweep failed with "no such column: meta_error" — recovery stopped dead while
+   * had never been given and every sweep failed with "no such column: meta_error" - recovery stopped dead while
    * ingestion carried on and the process looked entirely healthy.
    *
    * That is the third time this shape has bitten: a writer that provisions its own storage privately, and a second
@@ -332,8 +332,8 @@ export function openDb(path: string, opts: { migrate?: boolean } = {}): Database
   /**
    * The metadata document itself, not our reading of it.
    *
-   * `fetchMeta` extracted five fields and dropped the file. Everything else an operator wrote there — the off-chain
-   * name, creator handles, whatever a launch platform stamps in — was fetched and discarded at the one moment it was
+   * `fetchMeta` extracted five fields and dropped the file. Everything else an operator wrote there - the off-chain
+   * name, creator handles, whatever a launch platform stamps in - was fetched and discarded at the one moment it was
    * retrievable, because the URI is the creator's to repoint. This is the same unrecoverable class as the image and
    * costs about a kilobyte a launch.
    *
@@ -344,14 +344,14 @@ export function openDb(path: string, opts: { migrate?: boolean } = {}): Database
   /**
    * The commitment to the document, stored where the document is read rather than computed when the record is built.
    *
-   * It existed only in `record.db`, produced by `servicedb` as `sha256(meta_json)` — and `TOKEN_COLUMNS` names it.
+   * It existed only in `record.db`, produced by `servicedb` as `sha256(meta_json)` - and `TOKEN_COLUMNS` names it.
    * So every query built from TOKEN_COLUMNS threw `no such column: meta_sha256` against the collector, which is the
    * database the collector queries. That took out `/launch/<mint>` with an HTTP 500 and, with it, the live lookup
    * the web service depends on to answer about a token launched moments ago.
    *
    * The cost of that was the exact failure the endpoint was written to fix, and its own comment describes it as
    * "the worst failure this product has": a launch we watched from its creation transaction, answered with
-   * `UNKNOWN — Launch not observed` for the first hours of its life, during the only window when anyone is asking.
+   * `UNKNOWN - Launch not observed` for the first hours of its life, during the only window when anyone is asking.
    * It was reintroduced silently by adding a column to a shared column list that only one of the two databases had.
    *
    * A column list shared by two schemas is a claim that both schemas satisfy it. Nothing checked that claim.
@@ -362,12 +362,12 @@ export function openDb(path: string, opts: { migrate?: boolean } = {}): Database
     db.function("sha256", (v: unknown) => (v == null ? null : createHash("sha256").update(String(v), "utf8").digest("hex")));
   } catch {}
   // Paired backfill: a column added without one leaves every existing row NULL while the value sits in the source,
-  // which is this codebase's most repeated bug. Cheap and self-terminating — it touches only rows holding a document.
+  // which is this codebase's most repeated bug. Cheap and self-terminating - it touches only rows holding a document.
   try { db.exec("UPDATE tokens SET meta_sha256 = sha256(meta_json) WHERE meta_sha256 IS NULL AND meta_json IS NOT NULL"); } catch {}
   try { db.exec("ALTER TABLE tokens ADD COLUMN meta_bytes INTEGER"); } catch {}
   /**
    * Backfill from evidence already on the row. This is not a guess about history: every one of these rows has a pool
-   * address we observed, and that observation is what confirmation means. Rows without one stay NULL — unconfirmed,
+   * address we observed, and that observation is what confirmation means. Rows without one stay NULL - unconfirmed,
    * which is the honest state and the one the flag logic must now require against.
    */
   try { db.exec("UPDATE tokens SET graduated_confirmed_by = 'pool' WHERE graduated = 1 AND pool IS NOT NULL AND graduated_confirmed_by IS NULL"); } catch {}
@@ -377,7 +377,7 @@ export function openDb(path: string, opts: { migrate?: boolean } = {}): Database
 /**
  * Mints that are not launches and must never become rows.
  *
- * Wrapped SOL reached the tokens table as a launch — symbol "?", graduated, with a pool address attached — and the
+ * Wrapped SOL reached the tokens table as a launch - symbol "?", graduated, with a pool address attached - and the
  * service then served it as a record, under a DANGER flag about liquidity. A detector that mistakes the quote asset
  * for the asset being traded is an easy mistake to make repeatedly, so the exclusion lives here, at the only door
  * into the table, rather than in whichever detector made it this time.
@@ -443,7 +443,7 @@ export function upsertToken(db: DatabaseSync, t: TokenState): void {
       -- moment it was read. 1,255 rows in the collector and 1,198 in the published archive are in that state.
       --
       -- The sentence above this was already here and was already right. It was a comment where it needed to be a
-      -- constraint — the same failure this codebase keeps producing, in the line describing it.
+      -- constraint - the same failure this codebase keeps producing, in the line describing it.
       --
       -- Now a half-reading is ignored entirely rather than half-applied, so the stored pair can only ever be one the
       -- collector actually observed together.
@@ -573,7 +573,7 @@ export function recoverOrphans(db: DatabaseSync, olderThanMs = 10 * 60_000): num
     /**
      * The recorded peak time, not the creation time.
      *
-     * This was `peakAt = r.created_at`, and `peak_at` was not even selected — so a recovery that found no higher
+     * This was `peakAt = r.created_at`, and `peak_at` was not even selected - so a recovery that found no higher
      * price still overwrote a real peak timestamp with the moment the token was created, silently, on every restart.
      * The peak survived and the answer to "when" was replaced by a different question's answer.
      */
@@ -596,7 +596,7 @@ export function recoverOrphans(db: DatabaseSync, olderThanMs = 10 * 60_000): num
      * `peak_source` travels with the pair it describes.
      *
      * This statement wrote `peak_price` and `peak_at` and left `peak_source` alone, which split the triple the
-     * ON CONFLICT clause in `upsertToken` is careful to keep together — a row whose source said `curve` kept a
+     * ON CONFLICT clause in `upsertToken` is careful to keep together - a row whose source said `curve` kept a
      * source describing a peak that no longer existed. The ON CONFLICT pairing was right; this is a different
      * statement and inherited none of it.
      *

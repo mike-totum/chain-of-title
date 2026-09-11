@@ -1,5 +1,5 @@
 /**
- * Is the collector actually collecting? Exits 0 healthy, 1 unhealthy — usable as a deploy gate or a cron check.
+ * Is the collector actually collecting? Exits 0 healthy, 1 unhealthy - usable as a deploy gate or a cron check.
  *   npm run health            # human readable
  *   npm run health -- --json  # machine readable
  *
@@ -16,8 +16,8 @@ const now = Date.now();
 const q = (sql: string, ...p: unknown[]) => db.prepare(sql).get(...p as any) as any;
 
 // The current run is the one that started most recently, which is not the same as the one with the highest id.
-// `runs.id` is AUTOINCREMENT, so it means insertion order, and any path that writes a run out of order — a seed
-// merge appending the laptop's history, a repair, a restore — gives an old `started_at` the highest id. Health would
+// `runs.id` is AUTOINCREMENT, so it means insertion order, and any path that writes a run out of order - a seed
+// merge appending the laptop's history, a repair, a restore - gives an old `started_at` the highest id. Health would
 // then measure the heartbeat against a run that ended days ago and report a live collector as dead. Nothing inserts
 // out of order today; ordering by id to mean "most recent in time" is wrong regardless, and it is wrong in the
 // direction this project cares about, so it is fixed before something exploits it. `provenance.ts` already orders
@@ -38,14 +38,14 @@ const priced1h = q("SELECT COUNT(*) c FROM tokens WHERE graduated=1 AND vault_so
 type Check = { name: string; ok: boolean; detail: string };
 const checks: Check[] = [
   // Since the heartbeat is stamped with the last launch that actually arrived rather than with the wall clock
-  // (`index.ts`), this now measures ingestion, not liveness — a collector that is up and deaf fails it. That is the
+  // (`index.ts`), this now measures ingestion, not liveness - a collector that is up and deaf fails it. That is the
   // whole point: the check that used to pass hardest during the failure it was meant to catch.
   { name: "coverage advancing", ok: heartbeatAgeS < 180,
-    detail: heartbeatAgeS === Infinity ? "never written — collector has not completed a minute of runtime" : `last observed launch ${heartbeatAgeS.toFixed(0)}s ago (expected < 180s)` },
+    detail: heartbeatAgeS === Infinity ? "never written - collector has not completed a minute of runtime" : `last observed launch ${heartbeatAgeS.toFixed(0)}s ago (expected < 180s)` },
   { name: "launches arriving", ok: launchAgeS < 300,
     detail: `last launch ${launchAgeS.toFixed(0)}s ago, ${launches1h} in the last hour (pump.fun runs ~900-1100/h)` },
   { name: "launch rate sane", ok: launches1h >= 100,
-    detail: `${launches1h}/h — below 100 means the feed is degraded, not that the market is quiet` },
+    detail: `${launches1h}/h - below 100 means the feed is degraded, not that the market is quiet` },
   { name: "trades decoding", ok: trades5m > 0, detail: `${trades5m} trades stored in the last 5 min` },
   { name: "pool map growing", ok: pools > 0, detail: `${pools} pools known` },
   { name: "graduated tokens priced", ok: priced1h > 0, detail: `${priced1h} graduated tokens had vault balances read in the last hour` },

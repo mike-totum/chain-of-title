@@ -2,12 +2,12 @@
  * Recover the creation transaction for launches recorded before `create_sig` existed.
  *
  * `tokens.create_sig` is written live from the create event as of 2026-09-09. Every launch before that carries the
- * claim — "the creator took 79.31% of supply in the first block" — with no transaction a reader can check it
+ * claim - "the creator took 79.31% of supply in the first block" - with no transaction a reader can check it
  * against. This fills them in from the rows we still hold.
  *
  * The source is the dev's own first-block trade in `trades`: `is_dev = 1 AND age_ms = 0`, which is the creator's
  * initial buy, decoded from the same transaction the create event was decoded from. Its signature therefore IS the
- * creation transaction's signature, not a nearby one — that is the whole reason this backfill is sound, and it is
+ * creation transaction's signature, not a nearby one - that is the whole reason this backfill is sound, and it is
  * why nothing looser is accepted here. A `is_dev` trade at age_ms > 0 is a later purchase by the creator and proves
  * nothing about the first block; taking it would attach a citation that does not support the claim beside it.
  *
@@ -34,7 +34,7 @@ export interface SigBackfillStats { wrote: number; batches: number }
  * Fill `create_sig`/`create_slot` from the creator's first-block trade, in bounded batches.
  *
  * `updated_at` moves with the write. `servicedb` copies incrementally on that column, so a row filled without
- * touching it stays in the collector and never reaches the published record — which happened twice on 2026-09-09,
+ * touching it stays in the collector and never reaches the published record - which happened twice on 2026-09-09,
  * once losing 940 confirmations and once losing 180,951 signatures. The paired-backfill list in servicedb.ts is the
  * belt to this brace; neither is sufficient alone, because a crashed build can leave the watermark ahead of writes
  * that already happened.

@@ -4,7 +4,7 @@
  *   npm run xevidence -- [--limit 25] [--days 3] [--dry-run] [--mint <mint>]
  *
  * This is deliberately NOT the listener that used to run here. That one polled six broad queries every two minutes
- * and thirty-seven accounts every sixty seconds — about 57,000 requests a day, roughly $390 a month, to generate a
+ * and thirty-seven accounts every sixty seconds - about 57,000 requests a day, roughly $390 a month, to generate a
  * signal that returned -13.8% over 543 entries. It was switched off for good reasons and this does not turn it back
  * on. DEPLOY.md already reached the conclusion this file implements: aim at already-flagged tokens, not at the market.
  *
@@ -16,7 +16,7 @@
  *
  * Everything here lands in the collector's database and nowhere else. It is a dark archive: collected, retained,
  * unpublished, and produced if it is ever lawfully asked for. It must never reach record.db, because that file is
- * CC0 and carries a DOI that cannot be withdrawn, and the people in these rows are mostly not the operators — they
+ * CC0 and carries a DOI that cannot be withdrawn, and the people in these rows are mostly not the operators - they
  * are people who were fooled by a launch and said so in public. Publishing them beside a manufactured-launch verdict
  * would imply a complicity we have no evidence for, permanently, with no way to take it back.
  *
@@ -82,7 +82,7 @@ if (!provider?.search) {
 /**
  * The mint address, not the ticker.
  *
- * Tickers collide constantly — that is half of what this project reports — so a `$TICKER` search returns other
+ * Tickers collide constantly - that is half of what this project reports - so a `$TICKER` search returns other
  * people's launches and would attribute a stranger's post to the wrong token. The contract address is how a launch
  * is actually passed around, it is unique, and a post carrying it is unambiguously about this launch. Precision over
  * recall: a promotion we miss is a gap, a promotion we misattribute is a false accusation about a person.
@@ -101,7 +101,7 @@ function flagged(): { mint: string; symbol: string | null; created_at: number }[
     .filter((t) => assess(db, t, covered).flags.some((f) => f.level === "DANGER"))
     /*
      * Skip only launches we have SUCCESSFULLY searched. A failed search is stored, deliberately, so that "we could
-     * not look" is on the record — but it must not also mean "and we never will". The first real run of this hit
+     * not look" is on the record - but it must not also mean "and we never will". The first real run of this hit
      * six 402s for want of credits, and counting those as searched would have retired six launches permanently on
      * the strength of a billing problem. Absence of evidence, manufactured by our own bookkeeping.
      *
@@ -155,4 +155,4 @@ for (const t of targets) {
 }
 
 console.log(`\n${found} with promotion, ${empty} with none, ${failed} failed.`);
-console.log("Stored in the collector only. This never enters record.db — see the note at the top of this file.");
+console.log("Stored in the collector only. This never enters record.db - see the note at the top of this file.");

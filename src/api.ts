@@ -1,16 +1,16 @@
 /**
- * The machine-readable record — `/api/v1/…`, served live by `serve.ts` and mirrored into the offline tree by
+ * The machine-readable record - `/api/v1/…`, served live by `serve.ts` and mirrored into the offline tree by
  * `site.ts --pages`.
  *
  * Why this is its own module and not a `JSON.stringify` at each call site: a record page and its JSON must never be
  * able to say different things about the same launch. `render.ts` exists for exactly that reason on the HTML side,
- * and the same argument applies with more force here — an integrator's users never see our page, so a JSON shape that
+ * and the same argument applies with more force here - an integrator's users never see our page, so a JSON shape that
  * quietly diverged would be wrong in public and invisible to us. Both surfaces are handed the *same* `Assessment`
  * (from `provenance.ts`) and the same `Reading`, and both render the same `verdict()`.
  *
  * The one invariant worth stating twice, because an integrator will write `if (!clean) warn()` and we have to make
  * that safe: **absence of evidence is never a clean result.** A launch we did not watch returns
- * `cleanAtBirth: null` and `verdict.level: "UNKNOWN"` — never `false` (which reads as a finding we did not make) and
+ * `cleanAtBirth: null` and `verdict.level: "UNKNOWN"` - never `false` (which reads as a finding we did not make) and
  * never `true`. Any consumer that treats null as clean is doing so against the documented contract.
  */
 import type { Assessment } from "./provenance.ts";
@@ -22,7 +22,7 @@ export const LICENSE = "CC0-1.0";
 
 /**
  * The published limits. They live here, with the rest of the contract, rather than in the server that enforces them,
- * because the API page states these numbers to strangers — and a documented limit that no longer matches the enforced
+ * because the API page states these numbers to strangers - and a documented limit that no longer matches the enforced
  * one is a promise we are quietly breaking.
  *
  * Reads are deliberately absent: they are unmetered, and that is the product. Only reconstruction is bounded, because
@@ -61,7 +61,7 @@ const envelope = (cov: Coverage, path: string) => ({
 });
 
 /**
- * One launch record. `origin` says how we know: "observed" — watched live from creation; "rebuilt" — reconstructed
+ * One launch record. `origin` says how we know: "observed" - watched live from creation; "rebuilt" - reconstructed
  * from the bonding curve's complete transaction history, which is the same on-chain events read later.
  */
 export function tokenRecord(
@@ -75,8 +75,8 @@ export function tokenRecord(
     symbol: t.symbol ?? null,
     name: t.name ?? null,
     /**
-     * The launchpad this token was launched on. Always "pumpfun" today — the collector has only ever watched that one
-     * program — but it is published from the day the column exists rather than the day a second venue arrives, so a
+     * The launchpad this token was launched on. Always "pumpfun" today - the collector has only ever watched that one
+     * program - but it is published from the day the column exists rather than the day a second venue arrives, so a
      * consumer can branch on it without ever having to assume that an absent field meant pump.fun.
      */
     venue: t.venue ?? null,
@@ -87,7 +87,7 @@ export function tokenRecord(
     cleanAtBirth: a.watched ? clean : null,
     observedAtLaunch: a.watched,
     origin: a.watched ? origin : null,
-    // Facts about the first blocks of this token's life. Once true, always true — which is why they can be cached
+    // Facts about the first blocks of this token's life. Once true, always true - which is why they can be cached
     // hard, and why they are the only thing here an operator cannot buy back later.
     launch: a.watched ? {
       createdAt: at(t.created_at),
@@ -116,7 +116,7 @@ export function tokenRecord(
       },
       /**
        * How we know the curve completed: "pool", "curve_complete", or null. **Null does not mean it did not
-       * graduate** — it means we inferred graduation from decoded trade events reaching the threshold and never
+       * graduate** - it means we inferred graduation from decoded trade events reaching the threshold and never
        * confirmed it. A PumpSwap pool cannot exist unless the curve completed, so a pool is proof; its absence is
        * only the absence of proof. Measured on the days our pool discovery was working, the inference is confirmed
        * 87% of the time for curves that took 10-60 minutes and 38% of the time for curves flagged as completing
@@ -126,7 +126,7 @@ export function tokenRecord(
       graduatedAt: at(t.graduated_at),
       secondsToGraduate: gradMs === null ? null : Math.round(gradMs / 1000),
       /**
-       * The transaction every field above was decoded from — the one carrying the creator's initial buy, and so the
+       * The transaction every field above was decoded from - the one carrying the creator's initial buy, and so the
        * one `creatorSupplyPct` is computed from. Present for 88% of launches. **null means we did not record one**
        * (the launch predates the field, or we found it late, or its trade rows aged out before we backfilled): it is
        * never a claim that the launch has no creation transaction, and it must not be rendered as one.
@@ -156,7 +156,7 @@ export function tokenRecord(
  * A wallet's priors: every bonding curve it has bought outright, and what it did with the tokens afterwards.
  *
  * A wallet we have never seen is the dangerous case. Rendered naively it comes back as `curveBuyouts: 0,
- * marketSold: 0` — a row of zeros that reads, to any consumer, as a wallet with a clean history, when what we
+ * marketSold: 0` - a row of zeros that reads, to any consumer, as a wallet with a clean history, when what we
  * actually mean is that it does not appear in this archive at all. This is the project's recurring failure shape
  * (a record database carrying only buyouts once reported "sold 0 SOL" about a wallet that had sold 3,512), so an
  * absent wallet reports `inArchive: false` and **nulls, never zeros**. Zeros here are measurements.
@@ -184,7 +184,7 @@ export function walletRecord(w: string, p: Profile, line: string | null, cov: Co
       /**
        * A gap of zero is not a measurement, and 1,692 of 1,736 buyouts on record have one.
        *
-       * Trade timestamps are wall-clock at ingest, taken once per batch of websocket events — so an exact match with
+       * Trade timestamps are wall-clock at ingest, taken once per batch of websocket events - so an exact match with
        * the launch time means the two events arrived in the same batch. That is almost certainly the same block, but
        * the archive cannot prove it, because it carries no creation slot to check against. Publishing `0` would let
        * an integrator render "bought the curve 0 hours after launch" in their own UI, reintroducing precisely the
@@ -213,8 +213,8 @@ export function statusRecord(cov: Coverage, launches: number, extra: Record<stri
 }
 
 /**
- * The honest answer for a launch we hold no record of. Deliberately the same shape as a real record — same `verdict`
- * and `cleanAtBirth` fields — so a consumer that only reads those two cannot accidentally treat "we did not see it"
+ * The honest answer for a launch we hold no record of. Deliberately the same shape as a real record - same `verdict`
+ * and `cleanAtBirth` fields - so a consumer that only reads those two cannot accidentally treat "we did not see it"
  * as "nothing was found". `cleanAtBirth` is null here, never false.
  */
 export function unknownRecord(mint: string, why: string, cov: Coverage): object {
@@ -244,8 +244,8 @@ export function unknownRecord(mint: string, why: string, cov: Coverage): object 
  * JavaScript is falsy and therefore reads as "no danger". A rate-limited RPC call once rendered as "no warning" on a
  * wash token; the shape of every failure here is chosen so that cannot happen in someone else's code either.
  *
- * A caller must also be able to tell "this address is not a pump.fun launch" — a finding — from "we could not read the
- * chain just now" — our failure. `code` keeps those apart.
+ * A caller must also be able to tell "this address is not a pump.fun launch" - a finding - from "we could not read the
+ * chain just now" - our failure. `code` keeps those apart.
  */
 export function errorRecord(code: string, message: string, cov: Coverage, path = "/"): object {
   return {

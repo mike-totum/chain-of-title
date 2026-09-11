@@ -7,7 +7,7 @@
  *   1. Universe of wallets: how many, how concentrated, how many "buy everything" bots.
  *   2. Bundlers: wallets that repeatedly buy in the creation block; their graduation rate vs the rest.
  *   3. Smart wallets: early buyers with a graduation rate several times the base rate, positive PnL,
- *      and enough distinct tokens to matter — written to smart_wallets (used live by the smart-wallet strategy).
+ *      and enough distinct tokens to matter - written to smart_wallets (used live by the smart-wallet strategy).
  *   4. Creators: dev wallets with multiple launches and their graduation record.
  *   5. Graduated-token anatomy: who the first 10 buyers of graduations were, and whether they were repeat winners.
  */
@@ -38,7 +38,7 @@ const table = (rows: Record<string, string | number>[]) => {
   for (const r of rows) console.log("  " + cols.map((c, i) => String(r[c]).padEnd(w[i])).join("  "));
 };
 
-console.log(`\n=== wallet analysis — tokens finalized in the last ${hours}h ===\n`);
+console.log(`\n=== wallet analysis - tokens finalized in the last ${hours}h ===\n`);
 
 const u = one(
   `SELECT COUNT(DISTINCT mint) tokens, COUNT(DISTINCT wallet) wallets, COUNT(*) pairs,
@@ -93,7 +93,7 @@ console.log(`  graduation rate of tokens where a wallet bought in the creation b
 
 // ---------- smart wallets ----------
 console.log(`\n3. SMART WALLETS (>= ${minTokens} tokens, bought ON THE CURVE within 10 min, not the creator, not a same-block bundler on most of them)`);
-console.log("   graduation credit only when the token took >= 60 s to graduate — instant graduations are operator-funded and cannot be entered from outside");
+console.log("   graduation credit only when the token took >= 60 s to graduate - instant graduations are operator-funded and cannot be entered from outside");
 // first_buy_age_s is NULL for wallets whose only buys were on the PumpSwap AMM (post-graduation snipers), so the
 // age filter also excludes them. Graduations that happened within 60 s of creation are not credited: those are
 // dev-bundled operator launches whose AMM buyers looked like "100% graduation rate insiders" on 2026-09-03.

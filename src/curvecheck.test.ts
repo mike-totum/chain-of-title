@@ -17,7 +17,7 @@ import { graduationDisproved } from "./provenance.ts";
 test("only an explicit incomplete reading disproves a graduation", () => {
   const at = 1789000000000;
 
-  // 1. no reading at all — we never looked, or the call failed and deliberately wrote nothing
+  // 1. no reading at all - we never looked, or the call failed and deliberately wrote nothing
   assert.equal(graduationDisproved({ curve_checked_at: null, curve_complete: null }), false,
     "a launch we never read must not be treated as disproved");
   assert.equal(graduationDisproved({}), false, "a row missing the columns entirely is not a finding");
@@ -35,7 +35,7 @@ test("only an explicit incomplete reading disproves a graduation", () => {
 
 test("undefined is not a disconfirmation either", () => {
   // optionalColumns() omits these columns on a database that lacks them, so every consumer sees undefined rather
-  // than null. That must read as "we do not know", exactly like a missing reading — never as a finding.
+  // than null. That must read as "we do not know", exactly like a missing reading - never as a finding.
   assert.equal(graduationDisproved({ curve_checked_at: 1789000000000, curve_complete: undefined }), false);
   assert.equal(graduationDisproved({ curve_checked_at: undefined, curve_complete: undefined }), false);
 });
