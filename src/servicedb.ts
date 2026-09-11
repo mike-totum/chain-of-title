@@ -557,7 +557,7 @@ try {
    *
    * These rows are reconstructions, and `backfill.ts` states the rule they are meant to follow: a rebuild that could
    * not read every transaction "is partial, however many it did read" and certifies nothing. That rule was enforced
-   * in `hist_tokens` — which `history.ts` only ever wrote on a laptop, and which the seed never carried. So the
+   * in `hist_tokens` - which `history.ts` only ever wrote on a laptop, and which the seed never carried. So the
    * evidence reached the record through a merge and the qualifier did not: 1,072 buyout rows published with no way
    * to tell a rebuild that read a whole curve from one that read 2.5% of it. Measured on the laptop, 188 of 2,729
    * rebuilds were truncated, averaging 38.7% of their own history.
@@ -581,7 +581,7 @@ try {
       const unknown = (db.prepare("SELECT COUNT(*) c FROM rec.hist_trades WHERE rebuild_complete IS NULL").get() as any).c as number;
       log(`  hist_trades ${total.toLocaleString()} buyout rows, ${soft.toLocaleString()} from truncated rebuilds, ${unknown.toLocaleString()} unattributable`);
     } else {
-      log(`  hist_trades ${total.toLocaleString()} buyout rows published WITHOUT a completeness qualifier — ` +
+      log(`  hist_trades ${total.toLocaleString()} buyout rows published WITHOUT a completeness qualifier - ` +
           `hist_tokens is not in this source, so the record cannot say which rebuilds read a whole curve`);
     }
   } else
