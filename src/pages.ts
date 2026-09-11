@@ -21,6 +21,7 @@ import { assess, cleanAtBirth, TOKEN_COLUMNS, optionalColumns,
   BUYOUT_SOL, MAX_DEV_PCT, MIN_BUYERS, MIN_GRAD_MS } from "./provenance.ts";
 import { API_VERSION, PER_IP_PER_HOUR, type Coverage } from "./api.ts";
 import { renderSchema, renderSamples } from "./schema-doc.ts";
+import { reportDate } from "./reports.ts";
 import { CANONICAL_HOST, CONTACT, SEARCH, esc, fmt, when, type Chrome } from "./render.ts";
 
 /** The site's own origin, for the copy-and-paste examples on the API page. */
@@ -34,6 +35,16 @@ export interface PageFacts {
   recCounts: { held: number; observed: number } | null;
   nameRefs: { handles: number; links: number; described: number };
   F: Record<string, number>;
+  /**
+   * The corrections register, read from the record rather than retyped onto the page.
+   *
+   * corrections.html listed them as hand-written prose while servicedb wrote the same corrections into the record
+   * as rows, so the two drifted the moment one was added: on 2026-09-11 the file carried five and the page
+   * described one. A register whose own corrections page understates its corrections is the least affordable
+   * divergence on the site.
+   */
+  corrections: { id: string; issued_at: number; scope: string; subject: string | null;
+    finding: string; effect: string; remedy: string; supersedes: string | null }[];
   COV: Coverage;
 }
 
@@ -117,7 +128,13 @@ export function buildFacts(db: any, covered: (ts: number) => boolean, COV: Cover
       curveGone: q("curve_checked_at IS NOT NULL AND curve_complete IS NULL"),
     };
   })();
-  return { labelled, recStat, recCounts, nameRefs, F, COV };
+  const corrections = (() => {
+    try {
+      return db.prepare(`SELECT id, issued_at, scope, subject, finding, effect, remedy, supersedes
+        FROM corrections ORDER BY issued_at DESC, id`).all() as PageFacts["corrections"];
+    } catch { return []; }
+  })();
+  return { labelled, recStat, recCounts, nameRefs, F, corrections, COV };
 }
 
 export function notFoundBody(chrome: Chrome): string {
@@ -174,7 +191,7 @@ export function methodBody(f: PageFacts, chrome: Chrome): string {
   <p class="lede">Yes, and the test is one-sided on purpose. A missed warning costs a reader nothing; a wrong
   all-clear costs them everything. So the gate is that <b>no known-manufactured token may be certified clean</b>.
   Failing to flag one is reported and tolerated.</p>
-  <p class="lede">The f.labelled set cannot be built from the rules being tested, or it proves nothing. It comes from
+  <p class="lede">The labelled set cannot be built from the rules being tested, or it proves nothing. It comes from
   creator-wallet reuse instead, an axis none of the criteria above read: a ticker relaunched at least 15 times, each
   time from a fresh creator wallet. No project relaunches its own ticker under a new wallet a hundred times; an
   operation burning identities does.</p>
@@ -208,8 +225,8 @@ export function methodBody(f: PageFacts, chrome: Chrome): string {
   <div class="sec"><h2>Known limits</h2></div>
   <p class="lede">Stated because a method page that lists no weaknesses is marketing.</p>
   <table>
-    <tr><td>The f.labelled set is drawn from this archive, so it cannot contain a factory that uses a fresh ticker every time. It is a precision test, not a census.</td></tr>
-    <tr><td>Thresholds are judgements. They are set where the f.labelled set shows no false certification, not where some theory says they belong.</td></tr>
+    <tr><td>The labelled set is drawn from this archive, so it cannot contain a factory that uses a fresh ticker every time. It is a precision test, not a census.</td></tr>
+    <tr><td>Thresholds are judgements. They are set where the labelled set shows no false certification, not where some theory says they belong.</td></tr>
     <tr><td>Operator attribution describes wallets' behaviour inside this archive only, and says nothing about intent or identity.</td></tr>
     <tr><td>A trade is timestamped when we decode it, not by block time, so the interval between a launch and the buy that completed its curve is only as fine as the batch both arrived in. Where that interval reads as zero we say the events arrived together, rather than quoting a duration. The slot is published in <span class="mono">trades</span> for anyone who wants to settle it exactly.</td></tr>
     <tr><td>Coverage of pump.fun begins ${chrome.coverageFrom}. Other launchpads are not yet recorded at all.</td></tr>
@@ -471,7 +488,7 @@ export function findingsBody(f: PageFacts, builtAt: number | null): string {
   the headline. A token that a detector restored <i>after</i> its launch carries a zero buyer count because nobody
   was watching it, not because nobody bought — there are <b>${fmt(f.F.excludedLate)}</b> such rows and counting them
   would inflate this finding by nearly half. A launch rebuilt from chain history is not an observation either.
-  Both are excluded here and both are f.labelled in the file.</p>
+  Both are excluded here and both are labelled in the file.</p>
   <p class="lede">None of this says a token was a fraud, and none of it is advice about anything. It says what the
   chain recorded in the first blocks, which is a narrower claim and the only one we can support.</p>
 
@@ -521,29 +538,25 @@ export function correctionsBody(f: PageFacts): string {
     we do not delete pages.</td></tr>
   </table>
 
-  <div class="sec"><h2>Corrections issued</h2><span class="cnt">1</span></div>
-
-  <h3>7 September 2026: we f.labelled launches as manufactured that were not</h3>
-  <p class="lede">Until 7 September 2026, a launch that never completed its bonding curve could be shown on its own
-  record page as though it had. The page said the token "completed its bonding curve with zero outside buyers" and
-  that "the graduation was funded by the creator, not by demand." For a launch that never completed a curve the first
-  statement is false, and the second asserts something about a person's conduct that our record does not establish.</p>
-  <p class="lede"><b>How many.</b> Up to 34,242 launch records were in a state where that text could be shown. Most
-  launches end exactly this way, dying without a buyer, which is why the error mattered: it treated the ordinary end
-  of a token as evidence of manufacture.</p>
-  <p class="lede"><b>Why it happened.</b> The rule that fires on "no outside buyers" was never made conditional on the
-  curve having completed. It was written for launches that graduated and applied to every launch.</p>
-  <p class="lede"><b>A second, related error.</b> We also recorded a curve as having graduated on the strength of our
-  own feed reaching the graduation threshold, without confirming it against the curve account or the existence of a
-  market for the token. Records now say which of those we have, and where a graduation is unconfirmed we no longer
-  describe how the curve filled.</p>
-  <p class="lede"><b>What changed.</b> No statement that a curve completed is made unless completion is confirmed. The
-  number of launches carrying a danger flag fell from 866 to 457 as a result.</p>
-  <p class="callout">That fall is a correction, not an improvement in the market. Nothing about pump.fun changed on
-  7 September. What changed is that we stopped saying something we could not support.</p>
-  <p class="lede"><b>What was not affected.</b> No launch was certified clean because of this. Certification fails
-  closed and separately requires a pool balance read within the previous five minutes, so an unconfirmed launch could
-  not have been certified. Certification is now gated on confirmed completion as well, so this cannot become a route
-  to a false all-clear.</p>
+  ${/*
+      Rendered from the record's own corrections table, not retyped here.
+      
+      This section was hand-written prose describing one correction while servicedb was writing every correction
+      into the record as a row. By 2026-09-11 the file carried five and this page still described one, so the page
+      a reader visits to find out what we got wrong was itself understating what we got wrong. Now there is one
+      source: add a row in servicedb and it appears here, in the bulk file, and in any mirror of it, together.
+    */ ""}
+  <div class="sec"><h2>Corrections issued</h2><span class="cnt">${fmt(f.corrections.length)}</span></div>
+  ${f.corrections.length ? f.corrections.map((c) => `
+  <h3>${esc(reportDate(new Date(c.issued_at).toISOString().slice(0, 10)))} &mdash; ${esc(c.id)}</h3>
+  <p class="sub" style="margin:-2px 0 10px">${esc(c.scope)}${c.subject ? ` &middot; <span class="mono">${esc(c.subject)}</span>` : ""}${
+    c.supersedes ? ` &middot; supersedes <span class="mono">${esc(c.supersedes)}</span>` : ""}</p>
+  <p class="lede"><b>What was wrong.</b> ${esc(c.finding)}</p>
+  <p class="lede"><b>What a reader who trusted it would have concluded.</b> ${esc(c.effect)}</p>
+  <p class="lede"><b>What was done.</b> ${esc(c.remedy)}</p>`).join("")
+    : `<p class="callout">None recorded in this copy of the archive.</p>`}
+  <p class="callout">Every one of these is a row in <a href="data.html">record.db</a> under its own citable id, so a
+  mirror of the file carries the corrections with it. Amending one means adding a row that names it; nothing here is
+  ever silently reworded.</p>
 `;
 }
