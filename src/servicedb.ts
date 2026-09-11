@@ -930,6 +930,25 @@ try {
     + "are permanently unbacked here; they are recoverable only from an archival node. A NULL means we did not record "
     + "a signature. It never means the launch has no creation transaction, and it is not a statement about the launch "
     + "at all. The assurance above still overstates the position for those rows.");
+  ins.run("reconstructions-published-unqualified", at("2026-09-11"), "column", "rebuild_complete",
+    "hist_trades carries buyout evidence reconstructed from chain history rather than watched live, and backfill.ts "
+    + "states the rule those rebuilds follow: one that could not read every transaction is partial, however many it "
+    + "did read, and certifies nothing. That rule was enforced in hist_tokens, a table history.ts only ever wrote on "
+    + "a laptop and which the seed never exported. So the reconstructions reached this file through a merge and the "
+    + "qualifier that says whether to trust them did not.",
+    "1,072 reconstructed buyout rows were published with nothing distinguishing a rebuild that read a whole curve "
+    + "from one that read a fortieth of it. Measured on the source database: 188 of 2,729 rebuilds were truncated, "
+    + "reading on average 38.7% of their own history and at worst 2.5%, and 24 of the published rows come from "
+    + "those. Operator figures derived from them, including the curves taken and the SOL spent shown on wallet and "
+    + "operator pages, are floors rather than counts. The bias understates an operator rather than overstating one, "
+    + "which is the harmless direction and still leaves a figure a reader cannot audit.",
+    "hist_trades now carries rebuild_complete: 1 where the rebuild read the whole curve, 0 where it did not, NULL "
+    + "where this file cannot say. meta.hist_trades_qualified distinguishes a file that knows from one that cannot, "
+    + "because a column of NULLs means different things in each and looks identical. The seed now exports "
+    + "hist_tokens and the merge imports it, so the qualifier travels with the evidence. Rebuilds mis-stored as "
+    + "complete were re-marked partial and are eligible for another pass. As of this build the record carries 1,048 "
+    + "complete, 24 truncated and 0 unattributable. No trade row was added, removed or altered: what changed is that "
+    + "each one now states how much of its curve was read.");
 }
 
 const RECORD_TABLES = new Set(["tokens", "trades", "hist_trades", "operator_wallets", "operator_policy",
