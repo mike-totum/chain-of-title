@@ -152,7 +152,18 @@ export type Assessment = {
  * had not completed. Applied in JavaScript rather than SQL because the collector's schema has no such column, and a
  * WHERE clause naming it would throw there. Undefined columns read as "not checked", which is the safe direction.
  */
-export const graduationDisproved = (t: any) => t.curve_checked_at != null && !t.curve_complete;
+/**
+ * A graduation we read the curve for and found incomplete. An explicit 0, never a falsy one.
+ *
+ * This was `!t.curve_complete`, and `!null` is true, so the third of the four states this column encodes — read it,
+ * the account was gone, learned nothing — was being counted as a disconfirmation. 191 launches were excluded from
+ * every graduation count on the site because our RPC read found nothing, which is our failure published as a
+ * finding about someone else's token: this project's recurring fault with the sign flipped, and the exact thing
+ * the schema comment beside the column was written to prevent.
+ *
+ * Not read and read-but-gone are both "we do not know", and we do not know is never a finding.
+ */
+export const graduationDisproved = (t: any) => t.curve_checked_at != null && t.curve_complete === 0;
 
 export const OPTIONAL_TOKEN_COLUMNS = ["curve_checked_at", "curve_complete"];
 

@@ -135,6 +135,18 @@ const DOCS: Record<string, Record<string, Doc>> = {
     source_mint: { kind: "ours", desc: "The launch that first brought this wallet to our attention." },
     added_at: { kind: "ours", desc: "When we added the row, epoch ms." },
   },
+  operator_funders: {
+    funder: { kind: "chain", desc: "An address that has funded wallets we associate with a cluster. The cluster label used across this site is the first six characters of this address — it is a name of ours, not an identity." },
+    first_seen: { kind: "chain", desc: "The earliest funding transaction we observed from it, epoch ms." },
+    last_seen: { kind: "chain", desc: "The most recent, epoch ms. Not an assertion that it has stopped." },
+    txs: { kind: "chain", desc: "Funding transactions observed from this address, within our coverage only." },
+    wallets: { kind: "chain", desc: "Distinct wallets it has sent SOL to. A large number is equally consistent with a wallet farm and with a trading terminal serving many customers; see note." },
+    seeds: { kind: "chain", desc: "Fundings that opened a wallet with no prior balance, as distinct from topping one up." },
+    sampled_at: { kind: "ours", desc: "When we last walked this funder's history, epoch ms. The counts above describe what we had seen at that moment and are floors, never totals." },
+    note: { kind: "ours", desc: "Where a funder has been identified as something other than a wallet farm — a trading terminal funding its users, most often — this says so. Read it before drawing anything from the counts: it is the column that withdraws the inference the others invite." },
+    parent: { kind: "chain", desc: "The address that funded this funder, where we traced one. NULL means we did not trace one, never that none exists." },
+    hops: { kind: "ours", desc: "How many funding steps from the cluster's wallets we walked to reach this address. 0 is the direct funder." },
+  },
   corrections: {
     id: { kind: "ours", desc: "Stable slug, so a correction can be cited by name." },
     issued_at: { kind: "ours", desc: "When the correction was published, epoch ms." },
@@ -161,6 +173,9 @@ const DOCS: Record<string, Record<string, Doc>> = {
 };
 
 const TABLE_NOTE: Record<string, string> = {
+  operator_funders: "One row per funding address behind a cluster. operator_wallets carries the wallet-to-cluster "
+    + "edge; this carries the node it points at, which is the half of the attribution that takes continuous "
+    + "observation to build. A shared funder is a lead and not a finding, and `note` is where we say so.",
   tokens: "One row per launch. This is the record.",
   wallet_flow: "One row per wallet that has bought a curve outright.",
   trades: "Curve buys large enough to count as a buyout. Not every trade on every token.",

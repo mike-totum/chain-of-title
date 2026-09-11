@@ -913,6 +913,30 @@ export function tokenBody(
     <tr><td class="k">Creator took</td><td><b>${t.dev_pct?.toFixed(1) ?? "?"}%</b> of supply in the first block</td></tr>
     <tr><td class="k">Outside buyers</td><td><b>${a.curveBuyers === null ? "unknown" : fmt(a.curveBuyers)}</b> distinct wallets, not counting the creator, bought on the bonding curve before it graduated${origin === "observed" ? `: ${fmt(t.snap30_buyers ?? 0)} within the first 30s, ${fmt(t.bundled_buyers ?? 0)} bundled into the creation block.` : "."}</td></tr>
     <tr><td class="k">Graduated</td><td>${t.graduated_at ? `${curveAge(t.graduated_at - t.created_at)} after launch` : "yes"}</td></tr>
+    ${/*
+        Whether we went and read the curve account ourselves, and what it said.
+        
+        The feed emits a threshold event; that event is not the curve. We read the account on chain and 5,218 of the
+        8,095 curves we have checked turned out to be incomplete — the event fired and the curve had not finished.
+        The check was written into the record, published in the bulk file, and exposed in the API as
+        `graduationCheck`, and then appeared on no page a human reads. Every consumer that could reach it was a
+        machine. That is this codebase's own recurring fault wearing a product's clothes.
+        
+        Stated as a reading with the moment it was taken, never as a verdict. A launch we have not checked says so:
+        an unchecked curve is not a disproved one, and the difference is the whole point of writing it down.
+      */ ""}
+    <tr><td class="k">Curve, read on chain</td><td>${t.curve_checked_at == null
+      ? `<span class="sub">Not read. We have the feed's graduation event and have not confirmed it against the curve account itself. That is a gap in our checking, not a finding about this launch.</span>`
+      : t.curve_complete == null
+        ? `<b>Read, and the account had gone.</b> We went to the bonding curve account
+           ${ago(Date.now() - Number(t.curve_checked_at))} and it no longer existed, so the reading settles nothing
+           either way. <span class="sub">Read ${when(Number(t.curve_checked_at))}.</span>`
+      : t.curve_complete
+        ? `<b>Complete.</b> We read the bonding curve account ${ago(Date.now() - Number(t.curve_checked_at))} and it
+           was finished. <span class="sub">Checked ${when(Number(t.curve_checked_at))}.</span>`
+        : `<b>Incomplete.</b> We read the bonding curve account ${ago(Date.now() - Number(t.curve_checked_at))} and it
+           had <b>not</b> finished, though a graduation event was recorded for it. This launch is not counted as a
+           graduation anywhere on this site. <span class="sub">Checked ${when(Number(t.curve_checked_at))}.</span>`}</td></tr>
     <tr><td class="k">Creator sold</td><td>${t.dev_sold ? "yes" : origin === "observed" ? "not while we watched" : "no"}</td></tr>
     ${/*
         The transaction every figure above was decoded from. Absence is stated as ours, not the launch's: a launch

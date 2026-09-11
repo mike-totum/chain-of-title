@@ -82,7 +82,7 @@ if (!READ_ONLY) {
 // ---------- 2. build the record ----------
 db.exec(`ATTACH DATABASE '${OUT.replace(/'/g, "''")}' AS rec`);
 if (FULL) {
-  for (const t of ["tokens", "trades", "hist_trades", "operator_wallets", "operator_policy", "pool_map", "runs", "meta", "corrections"])
+  for (const t of ["tokens", "trades", "hist_trades", "operator_wallets", "operator_policy", "operator_funders", "pool_map", "runs", "meta", "corrections"])
     db.exec(`DROP TABLE IF EXISTS rec.${t}`);
 }
 db.exec(`
@@ -184,6 +184,19 @@ db.exec(`
   );
   CREATE TABLE IF NOT EXISTS rec.operator_policy (
     cluster TEXT PRIMARY KEY, policy TEXT, hold_plays INTEGER, dist_plays INTEGER, plays INTEGER, note TEXT, updated_at INTEGER
+  );
+  -- The funders themselves, which every cluster label on this site is named after and which the record did not
+  -- carry. operator_wallets published the wallet-to-cluster edge and nothing about the node it points at, so a
+  -- reader could see that six wallets shared a funder and could not see how many wallets that funder has opened in
+  -- total, when it was first and last seen, or that it was itself funded by another address one hop up. That is the
+  -- half of the attribution that is hard to reproduce, and it was the half being withheld.
+  --
+  -- The note column is carried deliberately: it is where a funder identified as a trading terminal rather than a
+  -- wallet farm is recorded, and publishing the clusters without publishing that distinction would hand every
+  -- reader the lead and withhold the correction.
+  CREATE TABLE IF NOT EXISTS rec.operator_funders (
+    funder TEXT PRIMARY KEY, first_seen INTEGER, last_seen INTEGER, txs INTEGER, wallets INTEGER,
+    seeds INTEGER, sampled_at INTEGER, note TEXT, parent TEXT, hops INTEGER
   );
   CREATE TABLE IF NOT EXISTS rec.pool_map (pool TEXT PRIMARY KEY, mint TEXT NOT NULL, created_at INTEGER);
   CREATE INDEX IF NOT EXISTS rec.pool_map_mint ON pool_map(mint);
@@ -526,6 +539,7 @@ try {
   for (const [t, cols] of [
     ["operator_wallets", "wallet, funder, cluster, role, seeded_at, source_mint, added_at"],
     ["operator_policy", "cluster, policy, hold_plays, dist_plays, plays, note, updated_at"],
+    ["operator_funders", "funder, first_seen, last_seen, txs, wallets, seeds, sampled_at, note, parent, hops"],
     ["pool_map", "pool, mint, created_at"],
     ["runs", "id, started_at, stopped_at, note"],
   ] as const) {
@@ -787,6 +801,19 @@ try {
     + "`launch.graduationCheck`. The stored column is still left exactly as recorded, for the reason given above. "
     + "Site counts exclude disproved graduations. Integrators reading `graduated` before 2026-09-10 were getting "
     + "the observation; they are now getting the finding.");
+  ins.run("disproved-conflated-with-unreadable", at("2026-09-11"), "column", "curve_complete",
+    "curve_complete encodes four states and the pair with curve_checked_at is what tells them apart: no reading, "
+    + "read and the account was already gone (NULL), read and incomplete (0), read and complete (1). The predicate "
+    + "that excluded disproved graduations from every count on the site was written `curve_checked_at != null && "
+    + "!curve_complete`, and in JavaScript `!null` is true, so the second state was folded into the third.",
+    "191 launches were excluded from every graduation count, page and total on the site because our own read found "
+    + "the curve account gone - our RPC result published as a finding about someone else's token. It is the same "
+    + "fault this archive reports in others, with the sign flipped, and the schema comment beside the column had "
+    + "been written specifically to prevent it.",
+    "The predicate now requires an explicit 0. A reading that settled nothing is counted as neither disproved nor "
+    + "confirmed, record pages say so in those words, and findings.html publishes all three counts. Graduation "
+    + "totals rise by 191 against any figure taken before 2026-09-11; that is a correction and not a change in the "
+    + "market.");
   ins.run("uncheckable-figures", at("2026-09-09"), "record", null,
     "Every record page carried the sentence \"Everything here is read from the Solana chain and can be checked "
     + "against it\", and until 2026-09-09 the record withheld what was needed to check it. No launch row cited the "
@@ -804,7 +831,7 @@ try {
 }
 
 const RECORD_TABLES = new Set(["tokens", "trades", "hist_trades", "operator_wallets", "operator_policy",
-  "pool_map", "runs", "wallet_flow", "meta", "corrections", "sqlite_sequence"]);
+  "operator_funders", "pool_map", "runs", "wallet_flow", "meta", "corrections", "sqlite_sequence"]);
 for (const r of db.prepare("SELECT name FROM rec.sqlite_master WHERE type='table'").all() as { name: string }[]) {
   if (RECORD_TABLES.has(r.name)) continue;
   const rows = (db.prepare(`SELECT COUNT(*) c FROM rec.${r.name}`).get() as any).c as number;

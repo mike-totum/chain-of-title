@@ -101,6 +101,20 @@ export function buildFacts(db: any, covered: (ts: number) => boolean, COV: Cover
       both: q(`${LIVE} AND dev_pct >= 50 AND curve_buyers = 0`),
       fastFill: q(`${LIVE} AND (graduated_at - created_at) < 60000`),
       excludedLate: q("graduated_confirmed_by IS NOT NULL AND late_discovery = 1 AND curve_buyers = 0"),
+      /**
+       * The archive checking its own claims, and how often it has had to withdraw one.
+       *
+       * The feed emits a threshold event; that event is not the curve. Where we have gone and read the bonding
+       * curve account ourselves, a large share of those events turn out to have fired on a curve that had not
+       * finished. Counted here because a register that corrects itself and does not publish the correction rate
+       * is asking to be taken on trust — and because the size of the correction is the best available evidence
+       * that the checking is real.
+       */
+      curveChecked: q("curve_checked_at IS NOT NULL"),
+      // An explicit 0. COALESCE(curve_complete,0) would fold in the rows we read and found the account already
+      // gone, which is "we looked and learned nothing" and not a disconfirmation — see the column's schema note.
+      curveDisproved: q("curve_checked_at IS NOT NULL AND curve_complete = 0"),
+      curveGone: q("curve_checked_at IS NOT NULL AND curve_complete IS NULL"),
     };
   })();
   return { labelled, recStat, recCounts, nameRefs, F, COV };
@@ -426,6 +440,24 @@ export function findingsBody(f: PageFacts, builtAt: number | null): string {
   predicts for its market cap, and its largest holder was 4% of supply. Nothing you could measure that afternoon
   would have told you what it was that morning. That is not a gap in after-the-fact analysis. It is a property of
   after-the-fact analysis.</p>
+
+  ${/*
+      Our own error rate, published. The check is written into every record and exposed in the API, and until now
+      it appeared on no page a human reads - so the one number that shows this archive audits itself was reachable
+      only by a machine.
+    */ ""}
+  ${f.F.curveChecked ? `<div class="sec"><h2>What we found when we checked our own claims</h2>
+    <span class="cnt">${fmt(f.F.curveChecked)} curves read on chain</span></div>
+  <p class="lede">A graduation reaches us as an event on a feed, and an event is not a curve. Where we have gone and
+  read the bonding curve account itself, <b>${fmt(f.F.curveDisproved)} of ${fmt(f.F.curveChecked)}</b>
+  (${pct(f.F.curveDisproved, f.F.curveChecked)}) had <b>not</b> finished. Those launches are not counted as
+  graduations anywhere on this site, and each one says so on its own page with the moment we read it.</p>
+  <p class="lede">We publish this rate because a register that corrects itself and will not say how often is asking
+  to be taken on trust. It is a statement about the feed and about our checking, not about the tokens: an unchecked
+  curve is not a disproved one, and the ${fmt(Math.max(0, f.F.confirmed - f.F.curveChecked))} we have not yet read
+  are recorded as unchecked rather than assumed either way.${f.F.curveGone
+    ? ` A further <b>${fmt(f.F.curveGone)}</b> were read after the account had already gone: we looked and learned
+       nothing, which is counted as neither.` : ""}</p>` : ""}
 
   <div class="sec"><h2>What this does not say</h2></div>
   <p class="lede"><b>These figures were computed on ${builtAt ? when(builtAt) : "an unrecorded date"}</b>, from the record this page was built
