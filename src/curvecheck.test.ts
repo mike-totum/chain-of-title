@@ -53,13 +53,24 @@ test("undefined is not a disconfirmation either", () => {
  */
 import { readFileSync } from "node:fs";
 
+/**
+ * Correction prose is allowed to quote the broken predicate, and has to be.
+ *
+ * `disproved-fix-did-not-travel` states the exact spelling that was wrong, because a correction that will not say
+ * what the fault was is not a correction. The corrections table is append-only by design, so this string can never
+ * be reworded out of it later - which means the guard has to know about it rather than the text having to bend.
+ * Anything else matching the pattern is the bug returning.
+ */
+const QUOTED_IN_CORRECTIONS = "curve_checked_at != null && !curve_complete";
+
 test("no caller open-codes the disproof predicate instead of calling the helper", () => {
   // The literal that was wrong in both copies. Any reappearance is the same bug returning, whatever file it is in.
   const longhand = /curve_checked_at\s*!=\s*null\s*&&\s*!\s*t?\.?curve_complete\b/;
   for (const f of ["provenance.ts", "api.ts", "serve.ts", "render.ts", "pages.ts", "servicedb.ts"]) {
     const src = readFileSync(new URL(f, import.meta.url), "utf8");
     // Comments are allowed to quote the broken spelling; code is not. Strip block comments before testing.
-    const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")
+      .split(QUOTED_IN_CORRECTIONS).join("");
     assert.ok(!longhand.test(code),
       `${f} spells the disproof predicate out longhand. Call graduationDisproved(t): !null is true, so this form ` +
       `reports an unreadable curve account as a disproved graduation.`);
