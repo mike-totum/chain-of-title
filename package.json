@@ -7,7 +7,7 @@
   "scripts": {
     "start": "tsx --no-warnings=ExperimentalWarning src/index.ts",
     "report": "tsx --no-warnings=ExperimentalWarning src/report.ts",
-    "test": "tsx --no-warnings=ExperimentalWarning --test src/*.test.ts",
+    "test": "tsx --no-warnings=ExperimentalWarning --test 'src/**/*.test.ts'",
     "typecheck": "tsc --noEmit",
     "discover": "tsx --no-warnings=ExperimentalWarning src/discover.ts",
     "twitter:test": "tsx --no-warnings=ExperimentalWarning src/twitter-test.ts",
