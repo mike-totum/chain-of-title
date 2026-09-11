@@ -34,6 +34,9 @@ export const fmt = (n: number, d = 0) => n.toLocaleString(undefined, { maximumFr
 export const when = (ms: number) => new Date(ms).toISOString().slice(0, 16).replace("T", " ") + " UTC";
 export const dur = (ms: number) => ms < 3600_000 ? `${Math.round(ms / 60_000)} min` : ms < 86400_000 ? `${(ms / 3600_000).toFixed(1)} h` : `${(ms / 86400_000).toFixed(1)} days`;
 export const ago = (ms: number) => ms < 90_000 ? "just now" : `${dur(ms)} ago`;
+/** Same UTC calendar day, so a headline can say "10:51 UTC today" instead of repeating today's date back at us. */
+export const sameUtcDay = (a: number, b: number) =>
+  new Date(a).toISOString().slice(0, 10) === new Date(b).toISOString().slice(0, 10);
 
 export const CSS = `
 :root{--bg:#fbfbfa;--fg:#1a1a19;--mut:#6b6b68;--line:#e4e4e1;--bad:#a4342a;--warn:#8a6a1f;--ok:#2f6b46;--card:#fff}
@@ -148,7 +151,10 @@ form.find button{padding:11px 18px;font:600 13px/1.4 inherit;color:var(--bg);bac
   font-size:clamp(27px,4.2vw,37px);line-height:1.14;letter-spacing:-.015em;font-weight:600;margin:0 0 14px;text-wrap:balance}
 .headline b{font-weight:600;border-bottom:3px solid var(--bad);padding-bottom:1px}
 .lede{font-size:16px;line-height:1.62;color:var(--fg);margin:0 0 6px}
-.lede + .lede{margin-top:12px;color:var(--mut);font-size:14.5px}
+/* The second paragraph of a lede is still the argument, not a footnote. It was set in --mut, and so was the
+   verdict line under the proof panel, and so is every sub-note and callout - which left most of the page's prose
+   deliberately de-emphasised and the whole thing reading dim. Grey now means apparatus: ages, counts, caveats. */
+.lede + .lede{margin-top:12px;font-size:14.5px}
 .sec{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin:44px 0 6px;
   padding-bottom:8px;border-bottom:1.5px solid var(--fg)}
 .sec h2{margin:0;border:0;padding:0}
@@ -171,7 +177,7 @@ form.find button{padding:11px 18px;font:600 13px/1.4 inherit;color:var(--bg);bac
 .proof h3{color:var(--mut)}
 .proof b{font-variant-numeric:tabular-nums}
 .verdictline{margin:0;padding:14px 20px;border:1px solid var(--line);border-top:0;background:var(--card);
-  font-size:14px;color:var(--mut)}
+  font-size:14px}
 /* Three narrow columns stop being readable well before the phone breakpoint. */
 @media(max-width:820px){.proof{grid-template-columns:1fr}.proof > div + div{border-left:0;border-top:1px solid var(--line)}}
 /* Prose and data do not want the same width. Tables used to buy their extra width with equal negative margins,
@@ -196,7 +202,12 @@ main.page > .lane{grid-column:wide-start/wide-end}
    than body text does, so the headline holds the edge and the paragraphs below it stay readable. */
 .hero{padding:6px 0 0}
 .hero:not(.split) .headline{max-width:900px}
-.hero:not(.split) > :not(.headline){max-width:700px}
+/* A stepped measure, not one ragged column. The headline takes a display line, the prose and the search box take a
+   reading one, and the record list takes the whole width - it is a table of three rows, not prose, and at full
+   width it sits flush with the findings band directly beneath it instead of leaving a quarter of a wide screen
+   empty for the height of the hero. */
+.hero:not(.split) > :not(.headline):not(.live){max-width:700px}
+.hero:not(.split) > .live{max-width:none}
 
 /* The two-column hero the front page gave up, kept for the pages that still earn it.
    A siblings page, an operator page and the live wall each open with a short lede and three or four counters, and
@@ -331,6 +342,33 @@ td.mut,.mut{color:var(--mut)}
 .k-reading{color:var(--warn)}
 .k-ours{color:var(--mut)}
 .k-opaque{color:var(--bad)}
+/* The live block on the front page.
+   The wall reuses .wall/.wrow wholesale - same grid, same fade-in, same colouring of the creator's share - so the
+   front page and /live.html cannot drift into two different renderings of one feed. Only the chrome is new. */
+.livehead{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;padding:10px 14px;
+  border:1px solid var(--line);border-bottom:0;background:var(--card);
+  font-size:11px;text-transform:uppercase;letter-spacing:.09em;color:var(--mut);font-weight:700}
+/* The status, not a rate counter. "3.1 a minute" is a number about how busy the feed is, which is a fairground
+   claim; what a reader of an archive needs to know is whether what they are looking at is current, and if it is
+   not, that we know it. */
+.livehead .lr{margin-left:auto;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:0;
+  font-weight:400;font-size:12px;text-transform:none}
+.livefoot{display:flex;gap:12px;flex-wrap:wrap;padding:9px 14px;border:1px solid var(--line);border-top:0;
+  background:var(--card);color:var(--mut);font-size:12.5px;line-height:1.5}
+.livefoot a{font-weight:600;margin-left:auto;white-space:nowrap}
+.live{margin:24px 0 0}
+/* The fallback the server renders inside the wall: real records, shown until the feed answers, and left alone if
+   it never does. An empty box that says "connecting" is worse than three records a reader can open. */
+.wall .fb{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:baseline;padding:9px 14px;
+  border-bottom:1px solid var(--line);text-decoration:none;font-size:14px}
+.wall .fb:last-child{border-bottom:0}
+.wall .fb:hover{background:var(--bg)}
+.wall .fb .ss{font-weight:600;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;
+  max-width:14ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wall .fb .sl.DANGER{color:var(--bad)}.wall .fb .sl.OK{color:var(--ok)}
+.wall .fb .sl.CAUTION{color:var(--warn)}.wall .fb .sl.UNKNOWN{color:var(--mut)}
+.wall .fb .sa{color:var(--mut);font-size:12px;font-variant-numeric:tabular-nums}
+
 /* Three records to open, for the visitor who has nothing to paste - which is most of them. */
 .starts{margin:24px 0 0;border:1px solid var(--line);background:var(--card)}
 .starts .sh{display:block;padding:10px 16px;font-size:11px;text-transform:uppercase;letter-spacing:.09em;
@@ -948,7 +986,22 @@ export function homeBody(h: Home): string {
   const clusters = h.clusterRows.slice(0, HOME_PREVIEW).map((c) => clusterRowHtml(c, h.now)).join("");
   return `
   <div class="hero">
-    <h1 class="headline">${h.windowEnd && h.now - h.windowEnd > 3600_000 ? `In the 24 hours to ${when(h.windowEnd)}` : "In the last 24 hours"} ${fmt(h.graduated24h)} tokens finished their bonding curve.
+    ${/*
+        The count leads; the window qualifies it.
+        
+        This opened with the qualifier - "In the 24 hours to 2026-09-11 10:51 UTC 802 tokens finished..." - which
+        put a machine timestamp in the first four words of a 37px display serif and delayed the sentence past its
+        own subject. Worse, that branch was written as the exception and is the normal case: it fires above an hour
+        of staleness, and the record is designed to run up to six hours behind (a three-hour build interval plus a
+        three-hour pull), so almost every visitor saw the ugly half.
+        
+        The window still has to be stated - a figure anchored to the archive's build rather than to the clock is
+        the whole reason this does not read as a collapsing market when the archive freezes - so it is stated, at
+        the end of the clause where a qualifier belongs, and the date is dropped when it is today's.
+      */ ""}
+    <h1 class="headline">${fmt(h.graduated24h)} tokens finished their bonding curve${h.windowEnd && h.now - h.windowEnd > 3600_000
+      ? ` in the 24 hours to ${sameUtcDay(h.now, h.windowEnd) ? `${when(h.windowEnd).slice(11)} today` : when(h.windowEnd)}`
+      : " in the last 24 hours"}.
     ${/*
         Say what was found, not that something was found.
 
@@ -982,30 +1035,22 @@ export function homeBody(h: Home): string {
         appear.
       */ ""}
     ${SEARCH}
-    <p class="watch"><a href="live.html">Or watch them arrive &rarr;</a>
-      <span>Every launch, the moment we decode its creation transaction.</span></p>
+    ${/* "Or watch them arrive" stood here and pointed at /live.html, one line above a panel whose own footer says
+         the same thing and links to the same page. The panel showing the launches beats a sentence promising it. */ ""}
     ${/*
-        One sample device, not two.
+        One sample device, not two, and it shows the archive being written rather than describing it.
 
         A visitor who has never seen a record has no idea what pasting a mint gets them, so the page showed them a
-        rendered verdict - and then, directly beneath it, three more rendered verdicts in a box of almost identical
-        weight. Two bordered cards, two uppercase micro-labels, the same red, one above the other, making the same
-        offer. Three real records beat one, so the single card went and its framing came here as the heading.
+        rendered verdict - and then, directly beneath it, three more in a box of almost identical weight. Two
+        bordered cards, two uppercase micro-labels, the same red, one above the other, making the same offer. The
+        single card went and the three records stayed.
 
-        Uncurated on purpose - the newest three that finished a curve, whatever they turned out to be. Picking the
-        three most damning would make a better advertisement and a worse instrument, and the base rate is already
-        stated in the headline above by something that counted rather than chose.
+        Then those three shipped showing the same sentence three times, because the newest three flagged launches
+        usually carry the most common finding; `startHere` now takes distinct verdicts (see serve.ts). And the
+        panel updates, because the most useful thing an archive can show on its front page is that it is still
+        being added to - not as a ticker, but as the shelf of what came in most recently.
       */ ""}
-    ${h.startHere.length ? `<div class="starts">
-      <span class="sh">What a record says &mdash; three we hold, one click each</span>
-      ${h.startHere.map((r) => `<a href="t/${esc(r.mint)}.html">
-        <span class="ss">${esc(r.symbol ?? "?")}</span>
-        <span class="sl ${r.level}">${esc(r.label)}</span>
-        <span class="sa">${ago(h.now - r.at)}</span></a>`).join("")}
-      <span class="sf">Read from the launch record. What it means is the reader's to decide; we record what
-      happened, not why. If we do not hold a launch you paste, we rebuild it from the chain, and if we cannot do
-      that we say so rather than guess.</span>
-    </div>` : ""}
+    ${h.startHere.length ? liveBody(h.startHere, h.now) : ""}
   </div>
 
   ${/*
@@ -1178,6 +1223,91 @@ export function homeBody(h: Home): string {
   not expire. <b>Liquidity</b> is one balance read at one moment, shown with its age. ${h.unread
     ? `<b>${fmt(h.unread)}</b> of these have no reading under ${Math.round(h.maxReadingAgeMs / 60000)} minutes old and say <i>not read</i> — a gap in our pool coverage, never a finding about the token. `
     : `Every row here carries a reading under ${Math.round(h.maxReadingAgeMs / 60000)} minutes old. `}A balance shown in red is one we did read, and it is under ${h.minPoolSol} SOL. We never quote a balance we could not confirm.</p>`;
+}
+
+/**
+ * The most recently recorded launches, on the front page.
+ *
+ * An archive's "recently added" shelf, not a ticker. The rows come from the same collector feed /live.html reads
+ * and reuse its markup and CSS wholesale, so the two cannot drift into different renderings of one feed — only the
+ * framing differs, and deliberately: no rate counter, no "arriving now". A number about how busy the feed is tells
+ * a reader nothing they came for; whether what they are reading is current tells them everything, so that is what
+ * the header carries.
+ *
+ * The server renders three real records inside the box before any script runs. A visitor with scripting off, or a
+ * collector that never answers, gets those and a line saying so — never an empty panel captioned "connecting",
+ * which is the one outcome that makes an archive look broken rather than quiet.
+ */
+export function liveBody(startHere: Home["startHere"], now: number): string {
+  return `<div class="live">
+  <div class="livehead">Most recently recorded<span class="lr" id="hstat">the latest we hold</span></div>
+  <div class="wall" id="hwall">${startHere.map((r) => `<a class="fb" href="t/${esc(r.mint)}.html">
+    <span class="ss">${esc(r.symbol ?? "?")}</span>
+    <span class="sl ${r.level}">${esc(r.label)}</span>
+    <span class="sa">${ago(now - r.at)}</span></a>`).join("")}</div>
+  <div class="livefoot">Every launch is recorded the moment its creation transaction is decoded. The creator's share
+    is read from that same transaction, so it is known at the instant of creation; everything else needs time to
+    happen. <a href="live.html">The full feed &rarr;</a></div>
+</div>
+${/*
+    Upgrades the panel to the live feed, and leaves it alone if it cannot.
+    
+    Rows are built to the same shape /live.html uses. On the first successful poll the server-rendered records are
+    cleared and replaced by launches as they are decoded; if the collector never answers, or answers that it is
+    unavailable, the records stay and the header says why. It never empties the panel to report a problem.
+  */ ""}
+<script>(function(){
+  var wall=document.getElementById('hwall'),st=document.getElementById('hstat');
+  if(!wall||!window.fetch)return;
+  var since=0,MAX=6,live=false,fails=0,stop=false;
+  function esc(x){var d=document.createElement('div');d.textContent=x==null?'':String(x);return d.innerHTML;}
+  function row(l){
+    var a=document.createElement('a');a.className='wrow';a.href='t/'+encodeURIComponent(l.mint)+'.html';
+    var pct=(typeof l.devPct==='number')?l.devPct:0;
+    a.innerHTML='<span class="sym">'+esc(l.symbol||'?')+'</span>'+
+      '<span class="nm">'+esc(l.name||'')+'</span>'+
+      '<span class="dv'+(pct>=20?' hi':'')+'">'+pct.toFixed(1)+'%</span>'+
+      '<span class="ago">just now</span>';
+    a.setAttribute('data-at',String(l.at));
+    return a;
+  }
+  function age(){
+    var now=Date.now(),rows=wall.querySelectorAll('.wrow');
+    for(var i=0;i<rows.length;i++){
+      var s=Math.round((now-Number(rows[i].getAttribute('data-at')))/1000),e=rows[i].querySelector('.ago');
+      if(e)e.textContent=s<2?'just now':(s<90?s+'s ago':Math.round(s/60)+'m ago');
+    }
+  }
+  function pull(){
+    if(stop)return;
+    fetch('api/live/recent?since='+since,{cache:'no-store'}).then(function(r){return r.json()}).then(function(d){
+      fails=0;
+      if(d.unavailable){st.textContent='collector unreachable; showing the latest we hold';return}
+      var ls=d.launches||[];
+      // The first poll asks since=0 and the collector answers with its whole ring - 120 rows on a normal day. The
+      // feed is oldest-first and each row is prepended, so only the tail can survive the trim below: taking it up
+      // front saves building 114 elements to destroy them. Later polls carry only what is new and are unaffected.
+      if(ls.length>MAX)ls=ls.slice(ls.length-MAX);
+      if(ls.length){
+        // The server-rendered records are the fallback, not the first page of the feed. They go the moment there
+        // is something live to replace them with, and not one poll earlier.
+        if(!live){while(wall.firstChild)wall.removeChild(wall.firstChild);live=true}
+        for(var i=0;i<ls.length;i++){
+          if(ls[i].at>since)since=ls[i].at;
+          wall.insertBefore(row(ls[i]),wall.firstChild);
+        }
+        while(wall.childElementCount>MAX)wall.removeChild(wall.lastElementChild);
+      }
+      if(live)st.textContent='recorded live';
+      age();
+    }).catch(function(){
+      // Say it, never fake it: a panel that silently stops updating is indistinguishable from a chain that stopped.
+      fails++; if(fails>2)st.textContent='feed interrupted, retrying';
+      if(fails>20){stop=true;st.textContent='feed stopped \u2014 reload to reconnect'}
+    });
+  }
+  pull();setInterval(pull,2500);setInterval(age,1000);
+})()</script>`;
 }
 
 /** A wallet's record: every curve it bought outright, and what it did with the tokens afterwards. */

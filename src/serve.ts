@@ -1205,22 +1205,39 @@ function buildHome(now: number): Home {
      * through that one launch in detail; offering it here as well would spend the opening on a record the reader
      * is about to be shown anyway.
      */
-    startHere: day
+    startHere: (() => {
       /**
-       * Chosen on the danger flag, which is a permanent finding about the launch record, and not on recency alone.
-       * Recency alone offered three launches all reading "Not certified" - which is a statement about whether we
-       * have a fresh pool balance, not about the token - so the one door into the archive taught a first-time
-       * visitor that the tool has nothing to say. These are three of the flagged count in the headline above, so
-       * they are representative of the majority rather than picked for effect.
+       * Three records to open, and they have to be three DIFFERENT findings.
+       *
+       * Chosen on the danger flag rather than on recency alone, because recency alone offered three launches all
+       * reading "Not certified" — a statement about whether we hold a fresh pool balance, not about the token — so
+       * the one door into the archive taught a first-time visitor that the tool has nothing to say.
+       *
+       * Then it did the same thing again for a different reason. Newest-three-flagged shipped on 2026-09-11
+       * showing "The curve completed in the same batch of events as the launch" three times, one under another,
+       * because that finding is far and away the most common and the newest three therefore usually collide. A box
+       * whose whole job is to show a stranger what a record says was demonstrating that we have one thing to say.
+       *
+       * So: newest first, but skip a launch whose verdict repeats one already taken. This is a curation and it is
+       * worth being honest about which kind — it selects for the RANGE of what we look for, never for severity,
+       * and the band directly below still reports how often each one actually occurs. A reader is not misled about
+       * frequency by a sample that shows variety, because the frequencies are printed underneath it.
+       *
+       * Falls back to filling from the remainder if fewer than three distinct verdicts exist in the window, so a
+       * quiet day shows three records rather than one.
        */
-      .filter(({ t, a }) => t.mint !== proofRow?.t.mint && t.graduated_at &&
-        a.flags.some((f) => f.level === "DANGER"))
-      .sort((x, y) => (y.t.graduated_at ?? 0) - (x.t.graduated_at ?? 0))
-      .slice(0, 3)
-      .map(({ t, a }) => {
-        const v = verdict(t, a, false);
-        return { mint: t.mint, symbol: t.symbol, label: v.label, level: v.level, at: t.graduated_at as number };
-      }),
+      const flagged = day
+        .filter(({ t, a }) => t.mint !== proofRow?.t.mint && t.graduated_at &&
+          a.flags.some((f) => f.level === "DANGER"))
+        .sort((x, y) => (y.t.graduated_at ?? 0) - (x.t.graduated_at ?? 0))
+        .map(({ t, a }) => {
+          const v = verdict(t, a, false);
+          return { mint: t.mint, symbol: t.symbol, label: v.label, level: v.level, at: t.graduated_at as number };
+        });
+      const seen = new Set<string>();
+      const distinct = flagged.filter((r) => !seen.has(r.label) && seen.add(r.label));
+      return [...distinct, ...flagged.filter((r) => !distinct.includes(r))].slice(0, 3);
+    })(),
     /**
       * `fundedSol` used to be here, hardcoded to 0, and the front page printed "pool funded to 0 SOL of real
       * liquidity" as step 2 of an argument whose whole point is that the pool looked funded before it was drained.
