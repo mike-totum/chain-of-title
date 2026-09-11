@@ -13,7 +13,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { VENUES, venueById } from "./venues.ts";
+import { VENUES, venueById, venuePhrase as venuePhraseValue } from "./venues.ts";
 
 /** Widen this only together with the feed. It is the whole point that these two move at the same time. */
 const CHANNELS_THE_FEED_READS = new Set(["logs"]);
@@ -48,4 +48,49 @@ test("every venue names a program, and no two venues share one", () => {
   assert.equal(new Set(progs).size, progs.length,
     "two venues subscribe to the same program; a launch would be attributed to whichever matched first");
   for (const v of VENUES) assert.match(v.program, /^[1-9A-HJ-NP-Za-km-z]{32,44}$/, `venue "${v.id}" program id looks wrong`);
+});
+
+/**
+ * The site must not name one venue where it means "the venues we cover".
+ *
+ * Every scope sentence on the site said "pump.fun" because pump.fun was the only venue, and each one becomes a
+ * false statement of scope the day a second venue starts arriving - silently, with nothing failing, on an archive
+ * whose entire claim is about what it did and did not watch. Coverage is already recorded per venue; the prose was
+ * the part still hard-coded.
+ *
+ * A sentence genuinely ABOUT pump.fun is different and must stay written out, because generalising it would make it
+ * wrong: pump.fun renounces mint authority on every token it creates, and that is a fact about pump.fun, not about
+ * launch venues. So this holds the line between the two rather than banning the word.
+ *
+ * Adding to ALLOWED is allowed. Doing it without reading the sentence first is the thing this prevents.
+ */
+const ALLOWED: [string, string][] = [
+  ["which pump.fun does to every token it creates",
+    "a fact about pump.fun's own behaviour, in a worked example about a pump.fun token"],
+  ["no pump.fun bonding curve exists for this address. A finding, not a failure.",
+    "documents the published API error code not_a_pump_launch, which is a contract with existing consumers"],
+  ["No pump.fun bonding curve exists for this address, so there is no launch of ours to rebuild.",
+    "the rebuild path genuinely only reconstructs pump.fun curves; widen this when backfill.ts learns another venue"],
+];
+
+test("published prose names a venue only where it means that venue", () => {
+  for (const f of ["render.ts", "pages.ts", "serve.ts"]) {
+    let code = readFileSync(new URL(f, import.meta.url), "utf8")
+      // Comments are not published. Only what reaches a reader is in scope here.
+      .replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    for (const [phrase] of ALLOWED) code = code.split(phrase).join("");
+    const hit = code.match(/.{0,90}pump\.fun.{0,90}/s);
+    assert.equal(hit, null,
+      `${f} names pump.fun in published prose:\n\n  ...${hit?.[0].replace(/\s+/g, " ")}...\n\n` +
+      `If it means "the venues we cover", call venuePhrase() or aLaunchHere() from venues.ts. If it is genuinely ` +
+      `about pump.fun specifically, add it to ALLOWED in this test with the reason.`);
+  }
+});
+
+test("the scope phrase actually reflects the registry", () => {
+  // Guards the other direction: a helper that hard-codes its answer would pass the test above and still be wrong.
+  const labels = VENUES.map((v) => v.label);
+  for (const l of labels) assert.ok(venuePhraseValue().includes(l), `venuePhrase() omits the venue "${l}"`);
+  assert.equal(venuePhraseValue().includes(" and "), labels.length > 1,
+    "venuePhrase() should join with 'and' only when there is more than one venue");
 });

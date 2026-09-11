@@ -131,3 +131,40 @@ export const pumpfun: LaunchVenue = {
 export const VENUES: readonly LaunchVenue[] = [pumpfun];
 
 export const venueById = (id: string): LaunchVenue | undefined => VENUES.find((v) => v.id === id);
+
+/**
+ * What the site is allowed to say about which venues it covers.
+ *
+ * `src/site.ts` keeps BRAND as the single place the product's name appears, for the same reason this exists: a name
+ * written in forty places is forty places to be wrong. The site currently says "pump.fun" in its prose because
+ * pump.fun is currently the only venue, and every one of those sentences becomes a false statement of scope on the
+ * day a second one starts arriving. A reader cannot tell a claim that means "this venue" from one that means "every
+ * venue we watch", and the archive's whole claim is about scope.
+ *
+ * So scope sentences ask here. A sentence genuinely ABOUT pump.fun - that it renounces mint authority on every
+ * token, that its curve completes near 411 SOL - is not a scope sentence and stays written out, because it would be
+ * wrong to generalise it. `venues.test.ts` holds the line between the two.
+ */
+export const venueLabels = (): string[] => VENUES.map((v) => v.label);
+
+/** "pump.fun", or "pump.fun and Raydium LaunchLab", or "pump.fun, Raydium LaunchLab and Meteora DBC". */
+export function venuePhrase(): string {
+  const l = venueLabels();
+  if (l.length === 1) return l[0];
+  return `${l.slice(0, -1).join(", ")} and ${l[l.length - 1]}`;
+}
+
+/**
+ * "a pump.fun launch" / "a launch on any venue we cover". Used where the singular reads badly once there are
+ * several, so the sentence does not have to be rewritten when the second venue lands.
+ */
+export const aLaunchHere = (): string =>
+  VENUES.length === 1 ? `a ${VENUES[0].label} launch` : `a launch on any venue we cover`;
+
+/** Where a reader can see this launch on the venue's own site. Null when the venue has no such page. */
+export function venueLink(venueId: string | null | undefined, mint: string): { href: string; label: string } | null {
+  const v = venueById(venueId ?? "pumpfun");
+  if (!v) return null;
+  const href = v.id === "pumpfun" ? `https://pump.fun/coin/${mint}` : null;
+  return href ? { href, label: v.label } : null;
+}

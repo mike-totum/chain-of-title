@@ -9,6 +9,7 @@
 import type { Assessment } from "./provenance.ts";
 import { reportDate, type Report } from "./reports.ts";
 import { MIN_POOL_SOL, MAX_DEV_PCT } from "./provenance.ts";
+import { venuePhrase, venueLink } from "./venues.ts";
 
 /** In property law, the unbroken documented history of ownership from origin. */
 export const BRAND = "Chain of Title";
@@ -1096,7 +1097,7 @@ export function tokenBody(
       <span class="mono" id="mint">${esc(t.mint)}</span>
       <button type="button" onclick="cp()" id="cpb">Copy</button>
       <a href="https://solscan.io/token/${esc(t.mint)}" rel="noopener nofollow">Solscan</a>
-      <a href="https://pump.fun/coin/${esc(t.mint)}" rel="noopener nofollow">pump.fun</a>
+      ${(() => { const L = venueLink(t.venue, t.mint); return L ? `<a href="${esc(L.href)}" rel="noopener nofollow">${esc(L.label)}</a>` : ""; })()}
     </div>
     <script>function cp(){navigator.clipboard&&navigator.clipboard.writeText(document.getElementById('mint').textContent).then(function(){
       var b=document.getElementById('cpb'),o=b.textContent;b.textContent='Copied';setTimeout(function(){b.textContent=o},1200)})}</script>
@@ -2134,7 +2135,7 @@ export function wallBody(): string {
   return `
   <div class="hero split"><div class="col-a">
     <h1 class="headline">Launches, as they happen</h1>
-    <p class="lede">Every pump.fun token, the moment our collector decodes its creation transaction. The creator's
+    <p class="lede">Every launch on ${venuePhrase()}, the moment our collector decodes its creation transaction. The creator's
     share of supply is read from that same transaction, so it appears with the launch rather than after it.</p>
     <p class="lede">This is the archive being written. Click any row for its record.</p>
   </div>

@@ -19,6 +19,7 @@ import { join, normalize } from "node:path";
 import { config } from "./config.ts";
 import { openDb } from "./db.ts";
 import * as usage from "./usage.ts";
+import { venuePhrase } from "./venues.ts";
 import { DatabaseSync } from "node:sqlite";
 import { type Assessment, assess, cleanAtBirth, coverageWindows, TOKEN_COLUMNS, optionalColumns, graduationDisproved, MIN_POOL_SOL,
   readingCertifies, readingIsFresh, MAX_READING_AGE_MS, MAX_DEV_PCT, MIN_BUYERS, BUYOUT_SOL , coverageFor} from "./provenance.ts";
@@ -1492,7 +1493,7 @@ const server = createServer(async (req, res) => {
     }
     if (safe === "/live.html") {
       return send(200, page("Launches, as they happen", wallBody(), chrome, 0,
-        "Every pump.fun launch the moment its creation transaction is decoded, with the creator's share of supply.",
+        `Every launch on ${venuePhrase()} the moment its creation transaction is decoded, with the creator's share of supply.`,
         "/live.html"), "text/html; charset=utf-8", "none");
     }
 

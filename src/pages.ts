@@ -22,6 +22,7 @@ import { assess, cleanAtBirth, TOKEN_COLUMNS, optionalColumns,
 import { API_VERSION, PER_IP_PER_HOUR, type Coverage } from "./api.ts";
 import { renderSchema, renderSamples } from "./schema-doc.ts";
 import { reportDate } from "./reports.ts";
+import { venuePhrase, aLaunchHere } from "./venues.ts";
 import { CANONICAL_HOST, CONTACT, SEARCH, esc, fmt, when, type Chrome } from "./render.ts";
 
 /** The site's own origin, for the copy-and-paste examples on the API page. */
@@ -156,7 +157,7 @@ export function buildFacts(db: any, covered: (ts: number) => boolean, COV: Cover
 export function notFoundBody(chrome: Chrome): string {
   return `
   <h1>We have no record of this launch</h1>
-  <div class="sub">Either it launched outside our coverage, or it is not a pump.fun token.
+  <div class="sub">Either it launched outside our coverage, or it is not ${aLaunchHere()}.
   Coverage begins ${chrome.coverageFrom}.</div>
   <div class="flag UNKNOWN"><span class="tag UNKNOWN">not established</span>An absence from this archive is <b>not</b> a
   finding about the token. Once a float has been spread across wallets, a launch that was assembled and one that was
@@ -174,7 +175,7 @@ export function methodBody(f: PageFacts, chrome: Chrome): string {
   judgement we make is defined, what was done to test it, and, the part that matters most, what we refuse to say.</p>
 
   <div class="sec"><h2>What is recorded, and when</h2></div>
-  <p class="lede">A collector decodes the pump.fun program's own events as they happen and writes down, for every
+  <p class="lede">A collector decodes the launch program's own events as they happen, on ${venuePhrase()}, and writes down, for every
   launch: the creator, the share of supply the creator took in the creation transaction, every distinct wallet that
   bought on the bonding curve, how long the curve took to fill, whether a single buy completed it, and whether the
   creator sold. These are facts about a moment. They stop being observable once the float is spread across wallets,
@@ -228,7 +229,7 @@ export function methodBody(f: PageFacts, chrome: Chrome): string {
     <tr><td>The launch happened before coverage, or while the collector was down</td><td>UNKNOWN, with an offer to rebuild the record from chain history</td></tr>
     <tr><td>A rebuild could not read every transaction</td><td>UNKNOWN, because a truncated history looks exactly like a quiet launch</td></tr>
     <tr><td>The pool balance could not be read</td><td>no liquidity figure quoted, and the row says <i>not read</i>. The launch record is unaffected</td></tr>
-    <tr><td>We hold no record and the address has no pump.fun bonding curve</td><td>we say so, rather than guess</td></tr>
+    <tr><td>We hold no record and the address has no bonding curve on ${venuePhrase()}</td><td>we say so, rather than guess</td></tr>
   </table>
 
   <div class="sec"><h2>Rebuilt records</h2></div>
@@ -245,7 +246,7 @@ export function methodBody(f: PageFacts, chrome: Chrome): string {
     <tr><td>Thresholds are judgements. They are set where the labelled set shows no false certification, not where some theory says they belong.</td></tr>
     <tr><td>Operator attribution describes wallets' behaviour inside this archive only, and says nothing about intent or identity.</td></tr>
     <tr><td>A trade is timestamped when we decode it, not by block time, so the interval between a launch and the buy that completed its curve is only as fine as the batch both arrived in. Where that interval reads as zero we say the events arrived together, rather than quoting a duration. The slot is published in <span class="mono">trades</span> for anyone who wants to settle it exactly.</td></tr>
-    <tr><td>Coverage of pump.fun begins ${chrome.coverageFrom}. Other launchpads are not yet recorded at all.</td></tr>
+    <tr><td>Coverage of ${venuePhrase()} begins ${chrome.coverageFrom}. Launch venues other than ${venuePhrase()} are not recorded at all, and a launch on one of them reads as unwatched rather than as clean.</td></tr>
   </table>`;
 }
 
@@ -450,7 +451,7 @@ export function pledgeBody(): string {
 export function findingsBody(f: PageFacts, builtAt: number | null): string {
   return `
   <h1 class="headline">Nearly half of the graduations we watched had no outside buyer</h1>
-  <p class="lede">Of <b>${fmt(f.F.watched)}</b> tokens that completed a pump.fun bonding curve, which this archive
+  <p class="lede">Of <b>${fmt(f.F.watched)}</b> tokens that completed a bonding curve on ${venuePhrase()}, which this archive
   watched from the creation transaction and confirmed against the curve account itself,
   <b>${fmt(f.F.noBuyer)}</b> (<b>${pct(f.F.noBuyer, f.F.watched)}</b>) had no outside buyer at all. Not one wallet
   other than the creator ever bought on the curve. The creator funded the entire graduation.</p>
