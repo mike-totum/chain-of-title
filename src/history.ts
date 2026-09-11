@@ -47,6 +47,29 @@ db.exec(`CREATE TABLE IF NOT EXISTS hist_activity (mint TEXT NOT NULL, hour INTE
 db.exec(`CREATE TABLE IF NOT EXISTS hist_trades (mint TEXT NOT NULL, sig TEXT NOT NULL, idx INTEGER NOT NULL, ts INTEGER, slot INTEGER, wallet TEXT, side TEXT, sol REAL, tokens REAL, vsol REAL, vtok REAL, is_dev INTEGER, PRIMARY KEY (mint, sig, idx))`);
 db.exec(`CREATE INDEX IF NOT EXISTS hist_trades_mint ON hist_trades(mint, ts)`);
 
+/**
+ * Rows stored as complete on an incomplete fetch, re-marked for what they are.
+ *
+ * The status rule now writes `partial` when fewer transactions came back than were asked for, but rows written
+ * before that fix carry `done` and nothing revisits them — `done` is not in the pending set, by design, because a
+ * finished rebuild should not be redone. So the mistake was self-sealing: the rows most in need of another pass were
+ * the ones marked as needing none.
+ *
+ * Measured on this database: 188 of 2,729 `done` rows read fewer transactions than their own signature list had
+ * successes, averaging 38.7% of the history, the worst 2.5% — WYNX at 5 of 204 reporting 4 buyers, WENDY 3 of 89,
+ * BAYLA 19 of 275. A buyer count from 2.5% of a curve is not a low number, it is not a number.
+ *
+ * Idempotent: it only matches rows whose own recorded counts contradict their status, so it does nothing on a clean
+ * database and nothing on a second run. It changes no figure — it changes what the figures claim to be.
+ */
+{
+  const r = db.prepare(`UPDATE hist_tokens SET status = 'partial'
+    WHERE status = 'done' AND txs_fetched IS NOT NULL AND sigs IS NOT NULL
+      AND txs_fetched < (sigs - COALESCE(sigs_failed, 0))`).run();
+  if (Number(r.changes ?? 0) > 0)
+    console.log(`[history] re-marked ${Number(r.changes).toLocaleString()} rebuilds as partial: they read fewer transactions than they fetched signatures for`);
+}
+
 const upsert = db.prepare(`INSERT INTO hist_tokens (mint, name, symbol, creator, curve, created_at, complete, mcap_sol, mcap_usd, ath_usd, ath_at, sol_usd, source, updated_at)
   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   ON CONFLICT(mint) DO UPDATE SET name = COALESCE(excluded.name, name), symbol = COALESCE(excluded.symbol, symbol), creator = COALESCE(excluded.creator, creator),
@@ -240,10 +263,27 @@ function report(): void {
 }
 
 // ---- main ----
-const pendingStmt = db.prepare(`SELECT * FROM hist_tokens WHERE status IN ('new', 'sigs') AND (error IS NULL OR updated_at < ?) ORDER BY CASE source WHEN 'db-late-grad' THEN 1 ELSE 0 END, created_at DESC LIMIT ?`);
+/**
+ * What still needs work — and `partial` belongs here, which it did not.
+ *
+ * The status rule was fixed so an incomplete fetch stores `partial` rather than `done`, but this query only ever
+ * reconsidered `new` and `sigs`. So every rebuild that had already been mis-stored, and every honest `partial`
+ * written since, was frozen: never retried, and still feeding the record. 188 rows sit in that state having read an
+ * average of 38.7% of their own history, the worst of them 2.5%, each one reporting a buyer count and a dev share
+ * computed from the fraction it managed to fetch.
+ *
+ * Capped rebuilds are excluded because they cannot be completed: `sigs_capped` means the curve has more successful
+ * signatures than MAX_TXS, so another pass reads the same ceiling. None of the 188 are capped — all of them failed
+ * on fetch, which is the kind that a retry against a working endpoint can finish.
+ */
+const pendingStmt = db.prepare(`SELECT * FROM hist_tokens
+  WHERE (status IN ('new', 'sigs') OR (status = 'partial' AND COALESCE(sigs_capped, 0) = 0))
+    AND (error IS NULL OR updated_at < ?)
+  ORDER BY CASE source WHEN 'db-late-grad' THEN 1 ELSE 0 END, created_at DESC LIMIT ?`);
 async function runBatch(limit: number): Promise<number> {
   const todo = pendingStmt.all(Date.now() - 6 * 3600_000, limit) as any[];
-  const pending = (db.prepare(`SELECT COUNT(*) n FROM hist_tokens WHERE status IN ('new', 'sigs')`).get() as any).n;
+  const pending = (db.prepare(`SELECT COUNT(*) n FROM hist_tokens
+    WHERE status IN ('new', 'sigs') OR (status = 'partial' AND COALESCE(sigs_capped, 0) = 0)`).get() as any).n;
   log(`[history] ${pending} candidates pending; reconstructing ${todo.length} this run (max ${MAX_TXS} successful txs each, newest first)`);
   for (const row of todo) {
     try { await reconstruct(row); } catch (e) { db.prepare(`UPDATE hist_tokens SET error = ?, updated_at = ? WHERE mint = ?`).run((e as Error).message, Date.now(), row.mint); log(`[history] ${row.symbol ?? row.mint}: ${(e as Error).message}`); }
