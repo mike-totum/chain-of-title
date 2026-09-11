@@ -441,6 +441,7 @@ const covered = (ts: number) => win.some((w) => ts >= w.a && ts <= w.b);
 let chrome: Chrome = {
   coverageFrom: win.length ? when(win[0].a) : "unknown",
   gapMin: win.slice(1).reduce((a, w, i) => a + Math.max(0, w.a - win[i].b), 0) / 60_000,
+  onFile: observed, builtAt: null,   // builtAt filled in below, once readBuiltAt() has been declared
 };
 /** The same coverage statement the page footer makes, in the shape the JSON records carry. */
 /**
@@ -457,6 +458,8 @@ const readBuiltAt = () => {
   try { return (db.prepare("SELECT MAX(updated_at) m FROM tokens").get() as any)?.m ?? null; } catch { return null; }
 };
 let recordBuiltAt = readBuiltAt();
+// The status bar under the masthead states the age of the record being served, so chrome carries it from boot.
+chrome.builtAt = recordBuiltAt;
 console.log(`[record] built ${recordBuiltAt ? new Date(recordBuiltAt).toISOString() : "unknown"}`);
 let COV: Coverage = { from: win.length ? win[0].a : null, downtimeMinutes: chrome.gapMin, builtAt: recordBuiltAt };
 
@@ -485,11 +488,15 @@ function reloadRecord(): void {
     held = n;
     observed = count("SELECT COUNT(*) c FROM tokens WHERE COALESCE(late_discovery,0)=0");
     win = coverageWindows(db);
+    recordBuiltAt = readBuiltAt();
+    // Rebuilt AFTER recordBuiltAt is re-read, not before: the status bar states the age of the record this
+    // process is serving, and adopting a new one while still advertising the old one's build time is exactly the
+    // stale-figure-under-a-fresh-label fault this codebase keeps finding.
     chrome = {
       coverageFrom: win.length ? when(win[0].a) : "unknown",
       gapMin: win.slice(1).reduce((a, w, i) => a + Math.max(0, w.a - win[i].b), 0) / 60_000,
+      onFile: observed, builtAt: recordBuiltAt,
     };
-    recordBuiltAt = readBuiltAt();
     COV = { from: win.length ? win[0].a : null, downtimeMinutes: chrome.gapMin, builtAt: recordBuiltAt };
     tokenQ = db.prepare(`SELECT ${TOKEN_COLUMNS}${optionalColumns(db)} FROM tokens WHERE mint = ?`);
     setReading = db.prepare("UPDATE tokens SET vault_sol = ?, vault_at = ? WHERE mint = ?");

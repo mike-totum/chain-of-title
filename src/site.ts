@@ -49,6 +49,8 @@ const covered = (ts: number) => win.some((w) => ts >= w.a && ts <= w.b);
 const chrome: Chrome = {
   coverageFrom: win.length ? when(win[0].a) : "unknown",
   gapMin: win.slice(1).reduce((a, w, i) => a + Math.max(0, w.a - win[i].b), 0) / 60_000,
+  onFile: (db.prepare("SELECT COUNT(*) c FROM tokens WHERE COALESCE(late_discovery,0)=0").get() as any).c,
+  builtAt: null,
 };
 /**
  * The same coverage statement the page footer makes, in the shape the JSON records carry. `builtAt` is the database's

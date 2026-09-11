@@ -34,13 +34,38 @@ export const fmt = (n: number, d = 0) => n.toLocaleString(undefined, { maximumFr
 export const when = (ms: number) => new Date(ms).toISOString().slice(0, 16).replace("T", " ") + " UTC";
 export const dur = (ms: number) => ms < 3600_000 ? `${Math.round(ms / 60_000)} min` : ms < 86400_000 ? `${(ms / 3600_000).toFixed(1)} h` : `${(ms / 86400_000).toFixed(1)} days`;
 export const ago = (ms: number) => ms < 90_000 ? "just now" : `${dur(ms)} ago`;
+/**
+ * "2 Sep 2026" from "2026-09-02 12:29 UTC".
+ *
+ * The status bar runs five facts across one line and was handed full ISO timestamps, which overflowed every cell
+ * and ellipsised into "COVERAGE FROM 2026-09-02 12:..." — a date truncated mid-value, which is worse than a
+ * coarser date honestly given. A coverage window does not need a minute on it.
+ */
+export const compactDate = (s: string) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+  if (!m) return s;
+  const mon = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][+m[2] - 1];
+  return `${+m[3]} ${mon} ${m[1]}`;
+};
+
 /** Same UTC calendar day, so a headline can say "10:51 UTC today" instead of repeating today's date back at us. */
 export const sameUtcDay = (a: number, b: number) =>
   new Date(a).toISOString().slice(0, 10) === new Date(b).toISOString().slice(0, 10);
 
 export const CSS = `
-:root{--bg:#fbfbfa;--fg:#1a1a19;--mut:#6b6b68;--line:#e4e4e1;--bad:#a4342a;--warn:#8a6a1f;--ok:#2f6b46;--card:#fff}
-@media(prefers-color-scheme:dark){:root{--bg:#141414;--fg:#e8e8e6;--mut:#9a9a96;--line:#2c2c2a;--bad:#e0796d;--warn:#d6b25e;--ok:#7fc39a;--card:#1b1b1a}}
+/* Paper, and only paper.
+   
+   This carried a light palette and a prefers-color-scheme override to near-black, and on a dark-mode machine -
+   which is most of them - the site rendered as white-on-black. An archive of record wants to read like a register:
+   land registries, gazettes, court records, the papers that cite them. Near-black with grey body text
+   reads as terminal, trading desk, crypto-native - the aesthetic of the thing this archive documents, which is the
+   one costume it cannot afford to wear. So the dark override is gone and the ground is committed: a warm off-white
+   with near-black ink, the accent a printer's red rather than a signal red.
+   
+   Deliberately a single look. A register that changes colour with the reader's operating system is a preference;
+   one that always looks the same is a publication. */
+:root{--bg:#fffdf9;--fg:#12110c;--mut:#605d51;--line:#ddd8c8;--hair:#ebe7da;
+  --bad:#a32b19;--warn:#7d6218;--ok:#2c6340;--card:#f8f5ed}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
 /* Prose and tables share one left edge; only the right edge differs. See the grid below. The .wrap element no
    longer lays anything out - it is kept so page() stays one string, and dissolves into the body flex column. */
@@ -187,7 +212,7 @@ form.find button{padding:11px 18px;font:600 13px/1.4 inherit;color:var(--bg);bac
 main.page{flex:1;display:grid;align-content:start;column-gap:60px;padding:38px 28px 0;
   grid-template-columns:[wide-start] minmax(0,700px) [text-end] minmax(0,1fr) [wide-end]}
 main.page > *{grid-column:wide-start/text-end;min-width:0}
-main.page > .hero,main.page > .band,main.page > .total,main.page > .rel,main.page > .sec,main.page > .proof,main.page > .verdict,
+main.page > .front,main.page > .deck,main.page > .hero,main.page > .band,main.page > .total,main.page > .rel,main.page > .sec,main.page > .proof,main.page > .verdict,
 main.page > .verdictline,main.page > table,main.page > .stats,
 main.page > .lane{grid-column:wide-start/wide-end}
 
@@ -388,6 +413,118 @@ td.mut,.mut{color:var(--mut)}
 .vscope{margin:9px 0 20px;color:var(--mut);font-size:13px;line-height:1.55;max-width:70ch}
 /* A wallet page is identified by its address, so the address is the heading rather than a word about it. */
 .addr-h1{font-size:16px;font-weight:600;word-break:break-all;margin:0 0 2px}
+/* ============================================================================
+   The broadsheet front page, and the chrome it shares with every other page.
+   ============================================================================ */
+
+/* --- masthead: wordmark, sections, search, on one line --- */
+.band-top{background:var(--bg);border-bottom:0}
+.mast{display:flex;align-items:center;gap:26px;padding:17px 0;grid-template-columns:none}
+.mast a.brand{font-family:ui-serif,Georgia,"Iowan Old Style","Times New Roman",serif;
+  font-size:25px;font-weight:700;letter-spacing:-.015em;gap:11px}
+.mast .nav{margin-left:auto;display:flex;gap:26px;padding:0;margin-top:0;flex-wrap:nowrap}
+.mfind{display:flex;border:1.5px solid var(--fg);flex:none}
+.mfind input{width:230px;padding:8px 11px;border:0;background:transparent;
+  font:12.5px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--fg);outline:none;border-radius:0}
+.mfind input::placeholder{color:#a5a294}
+.mfind input:focus{outline:2px solid var(--fg);outline-offset:-1px}
+.mfind button{padding:8px 16px;border:0;border-left:1.5px solid var(--fg);background:var(--fg);color:var(--bg);
+  font:600 12px/1.3 inherit;cursor:pointer;white-space:nowrap}
+
+/* --- the status band: what this archive is, on every page --- */
+.statusband{border-top:1px solid var(--hair);border-bottom:1px solid var(--fg);background:var(--bg)}
+.status{display:flex;font-size:11.5px;text-transform:uppercase;letter-spacing:.11em;color:var(--mut)}
+.status div{flex:1;padding:9px 0;text-align:center;border-left:1px solid var(--hair);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.status div:first-child{border-left:0;text-align:left}
+.status b{color:var(--fg);font-weight:600;letter-spacing:.03em;font-variant-numeric:tabular-nums}
+.status a{text-decoration:none;border-bottom:1px solid var(--line)}
+@media(max-width:900px){
+  .mast{flex-wrap:wrap;gap:12px 18px}
+  .mast .nav{margin-left:0;order:3;width:100%;flex-wrap:wrap;gap:0 18px}
+  .mfind{margin-left:auto}
+  .mfind input{width:170px}
+  .status{flex-wrap:wrap}
+  .status div{flex:1 1 46%;text-align:left;border-left:0;padding:5px 0}
+}
+
+/* --- the front: editorial lead + standing rail --- */
+.front{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:0;border-bottom:3px double var(--fg)}
+.front > .lead{padding:34px 40px 36px 0;border-right:1px solid var(--line);min-width:0}
+.kicker{font-size:11.5px;text-transform:uppercase;letter-spacing:.17em;font-weight:700;color:var(--bad);margin:0 0 14px}
+/* A headline is short. The old one was a forty-word sentence set at 40px, which is a standfirst in a headline's
+   clothes - the reader met the subject of the sentence on line three. */
+.front h1{margin:0 0 18px;font-family:ui-serif,Georgia,"Iowan Old Style","Times New Roman",serif;
+  font-size:clamp(34px,4.4vw,56px);line-height:1.04;font-weight:700;letter-spacing:-.026em;max-width:16ch;
+  text-wrap:balance}
+.front h1 em{font-style:normal;color:var(--bad)}
+.stand{margin:0 0 22px;font-size:19px;line-height:1.5;max-width:54ch;
+  font-family:ui-serif,Georgia,"Iowan Old Style","Times New Roman",serif}
+.stand b{font-weight:600}
+/* Two columns of secondary prose, the way a newspaper runs its jump. Only at the measure where it works. */
+.twoup{column-count:2;column-gap:36px;margin:0}
+.twoup p{margin:0 0 12px;font-size:14.5px;line-height:1.6;color:var(--mut)}
+.twoup p strong{color:var(--fg);font-weight:600}
+@media(max-width:900px){.twoup{column-count:1}}
+
+/* the figures, as a rule-separated row of typographic events rather than words inside a paragraph */
+.figs{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));margin:26px 0 0;border-top:1px solid var(--fg)}
+.figs div{padding:15px 14px 15px 0;border-right:1px solid var(--hair);min-width:0}
+.figs div:last-child{border-right:0}
+.figs b{display:block;font-family:ui-serif,Georgia,"Iowan Old Style",serif;font-size:29px;line-height:1;
+  font-weight:600;font-variant-numeric:tabular-nums;color:var(--bad)}
+.figs div.cl b{color:var(--fg)}
+.figs span{display:block;margin-top:7px;font-size:11.5px;line-height:1.4;color:var(--mut)}
+@media(max-width:760px){.figs{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .figs div{border-bottom:1px solid var(--hair)}}
+
+/* --- the rail --- */
+.rail{padding:34px 0 36px 34px;min-width:0}
+/* One line. At 330px "Most recently recorded" plus a status broke over two lines each and the rule under them sat
+   four lines down, which read as a heading that had gone wrong rather than a column head. */
+.railh{font-size:11px;text-transform:uppercase;letter-spacing:.12em;font-weight:700;white-space:nowrap;
+  padding-bottom:9px;border-bottom:1px solid var(--fg);display:flex;align-items:baseline;gap:8px}
+.railh .rs{margin-left:auto;font-weight:400;letter-spacing:.03em;text-transform:none;color:var(--mut);
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10.5px;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;max-width:12ch}
+.rail .rrow{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:10px;align-items:baseline;
+  padding:9px 0;border-bottom:1px solid var(--hair);text-decoration:none;font-size:13.5px;
+  animation:win .45s ease-out}
+.rail .rrow:hover{background:var(--card)}
+.rail .rrow.fb2{grid-template-columns:minmax(0,1fr) auto}
+.rail .rs2{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rail .rd{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;font-variant-numeric:tabular-nums}
+.rail .rd.hi{color:var(--bad);font-weight:700}
+.rail .rt{color:var(--mut);font-size:11.5px;font-variant-numeric:tabular-nums;min-width:5.5ch;text-align:right}
+.rail .rmore{display:block;margin-top:13px;font-size:12px;font-weight:600;color:var(--mut);text-decoration:none}
+.rail .rmore:hover{color:var(--fg)}
+.rail .rnote{margin:12px 0 0;font-size:12.5px;line-height:1.55;color:var(--mut)}
+@media(max-width:1080px){
+  .front{grid-template-columns:minmax(0,1fr)}
+  .front > .lead{border-right:0;padding-right:0}
+  .rail{padding-left:0;border-top:1px solid var(--line);padding-top:26px}
+}
+
+/* --- the deck: three ways in, at the foot of the front --- */
+.deck{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-bottom:1px solid var(--line)}
+.deck > div{padding:28px 30px 32px 0;border-right:1px solid var(--line);min-width:0}
+.deck > div:last-child{border-right:0;padding-right:0}
+.deck > div + div{padding-left:30px}
+.deck .k{font-size:11px;text-transform:uppercase;letter-spacing:.15em;font-weight:700;color:var(--bad);margin:0 0 10px}
+.deck h3{margin:0 0 10px;font-family:ui-serif,Georgia,"Iowan Old Style",serif;font-size:21px;line-height:1.24;
+  font-weight:600}
+.deck p{margin:0;font-size:14px;line-height:1.6;color:var(--mut)}
+.deck p b{color:var(--fg);font-weight:600}
+.deck b.big{display:block;font-family:ui-serif,Georgia,"Iowan Old Style",serif;font-size:42px;line-height:1;
+  font-weight:600;margin:0 0 9px;font-variant-numeric:tabular-nums}
+.deck a.go{display:inline-block;margin-top:11px;font-size:12.5px;font-weight:600;text-underline-offset:3px}
+@media(max-width:900px){
+  .deck{grid-template-columns:1fr}
+  .deck > div{border-right:0;padding-right:0;border-bottom:1px solid var(--hair)}
+  .deck > div + div{padding-left:0}
+  .deck > div:last-child{border-bottom:0}
+}
+
 /* Attribution. A registry that will not say who keeps it is asking for a trust it has not offered. */
 .who{margin-top:14px}
 .who b{font-weight:600;color:var(--fg)}
@@ -434,7 +571,15 @@ export function navCurrent(href: string, path?: string): boolean {
   return stem(href) === stem(seg);
 }
 
-export interface Chrome { coverageFrom: string; gapMin: number }
+/**
+ * The facts every page states about the archive itself, in the status bar under the masthead.
+ *
+ * `onFile` and `builtAt` are new here and were previously reachable only from the front page's body, which meant a
+ * reader who landed on a record page — which is how most people arrive, from a pasted link — had no way to tell how
+ * large the archive was or how current. Both are properties of the record the process is serving, so they belong
+ * with the coverage window rather than with one page's figures.
+ */
+export interface Chrome { coverageFrom: string; gapMin: number; onFile?: number; builtAt?: number | null }
 
 /**
  * A record page is this project's only real distribution. Nobody shares a registry's front page; they paste a link to
@@ -504,24 +649,51 @@ export function page(title: string, body: string, c: Chrome, depth = 0, summary?
 <link rel="icon" href="${root}favicon.svg" type="image/svg+xml">
 ${head}<style>${CSS}</style></head>
 <body><div class="wrap">
-<header class="band-top"><div class="shell"><div class="mast"><a class="brand serif" href="${HOME_HREF}">${MARK}<span>${BRAND}</span></a><span class="tag2">Solana launch records</span><span class="what">In property law, the chain of title is the unbroken documented history of ownership from origin: what you establish before you believe a claim about what something is.</span></div>
+<header class="band-top"><div class="shell">
 ${/*
-    Navigation, on every page, because there was none.
+    One line: wordmark, sections, search.
     
-    Twelve pages were reachable only from a row of twelve 13px grey links in the footer - below, on the front page,
-    four thousand pixels of scrolling. Reports sat sixth in that row, which is how the one thing here that is meant
-    to be cited became the hardest thing here to find.
+    This was three stacked left-aligned rows - a wordmark, a two-line note on what "chain of title" means in
+    property law, then the nav - all small, all grey, all starting at the same x, occupying the left third of a
+    wide screen. Three rows of chrome before the page begins, and the one control anybody came to use was not
+    among them: search lived on the front page only, so a reader on a record page had nowhere to put the next
+    mint. It is in the masthead now, which means it is on every page.
     
-    Six, not twelve. Short labels, because a nav is scanned and not read; the footer keeps the descriptive ones.
-    The three launch lists are not here on purpose - they are reached from the sections that preview them, which is
-    where a reader is already looking, and a nav that lists everything ranks nothing.
+    The property-law gloss moved to the footer. It is a good sentence and it is an explanation of the name, which
+    a returning visitor has read and a new one reads once.
   */ ""}
-<nav class="nav" aria-label="Sections">${NAV.map((n) => `<a href="${root}${n.href}"${navCurrent(n.href, path) ? ` aria-current="page"` : ""}>${n.label}</a>`).join("")}</nav></div></header>
+<div class="mast">
+  <a class="brand serif" href="${HOME_HREF}">${MARK}<span>${BRAND}</span></a>
+  <nav class="nav" aria-label="Sections">${NAV.map((n) => `<a href="${root}${n.href}"${navCurrent(n.href, path) ? ` aria-current="page"` : ""}>${n.label}</a>`).join("")}</nav>
+  <form class="mfind" action="/lookup" method="get" onsubmit="return look(event)">
+    <input id="q" name="mint" placeholder="paste a mint address" spellcheck="false" autocomplete="off"
+      pattern="[1-9A-HJ-NP-Za-km-z]{32,44}" required aria-label="Token mint address">
+    <button type="submit">Look up</button>
+  </form>
+</div></div>
+${/*
+    The status bar: what this archive holds, how current it is, and on what terms.
+    
+    Every one of these facts was on the site already and none of them were together: the record count sat mid-page
+    on the front page only, the coverage window and the licence were in the footer, and how old the data was had
+    to be inferred. They are the first questions anybody asks of an archive, so they are answered above the fold,
+    on every page, in one line.
+  */ ""}
+<div class="statusband"><div class="shell"><div class="status">
+  <div><b id="rec" data-n="${c.onFile ?? 0}">${fmt(c.onFile ?? 0)}</b> launches on record</div>
+  <div>Coverage from <b>${esc(compactDate(c.coverageFrom))}</b></div>
+  <div>Archive read <b id="recnote">${c.builtAt
+    ? (sameUtcDay(Date.now(), c.builtAt) ? `${when(c.builtAt).slice(11)} today` : compactDate(when(c.builtAt)))
+    : "unrecorded"}</b></div>
+  <div>Public domain · <b><a href="${root}data.html">CC0</a></b></div>
+  <div>Free · no account</div>
+</div></div></div></header>
 <main class="page shell">
 ${body}
 </main>
 <footer class="band-bot"><div class="shell"><div class="note"><a href="${root}live.html">Watch launches live</a> · <a href="${root}clean.html">No markers found</a> · <a href="${root}wallets.html">Curve buyers</a> · <a href="${root}operators.html">Operator groups</a> · <a href="${root}findings.html">What the record shows</a> · <a href="${root}reports.html">Reports</a> · <a href="${root}method.html">How this is decided</a> · <a href="${root}corrections.html">Tell us we are wrong</a> · <a href="${root}data.html">Take the data</a> · <a href="${root}api.html">API</a> · <a href="${root}pledge.html">Pledge</a> · <a href="${HOME_HREF}">${BRAND}</a><br>
-The documented history of a token from its first block. Coverage begins ${c.coverageFrom}${c.gapMin >= 1 ? `, with ${fmt(c.gapMin)} min of recorded downtime` : ", no recorded downtime"}.
+In property law, the chain of title is the unbroken documented history of ownership from origin: what you establish
+before you believe a claim about what something is. Coverage begins ${c.coverageFrom}${c.gapMin >= 1 ? `, with ${fmt(c.gapMin)} min of recorded downtime` : ", no recorded downtime"}.
 Everything here is read from the Solana chain. Where we recorded a launch's creation transaction, its page cites it and you can check every figure yourself; where we did not, the page says so. Where we say no markers were found, we checked the launch against every pattern we record and none was present. That is a statement about what we checked, not a prediction and not advice.
 Most tokens lose money regardless: of 19,412 bonding-curve positions measured, none reached 5x.
 <div class="who">Kept by <b>${esc(KEEPER)}</b> · <a href="mailto:${esc(CONTACT)}">${esc(CONTACT)}</a>${SOURCE_URL ? ` · <a href="${esc(SOURCE_URL)}">Source</a>` : ""}<br>
@@ -984,164 +1156,79 @@ export function homeBody(h: Home): string {
   const rows = h.cleanRows.slice(0, HOME_CLEAN_PREVIEW).map((r) => cleanRowHtml(r, h.now)).join("");
   const ops = h.opRows.slice(0, HOME_PREVIEW).map(opRowHtml).join("");
   const clusters = h.clusterRows.slice(0, HOME_PREVIEW).map((c) => clusterRowHtml(c, h.now)).join("");
+  const between = Math.max(0, h.graduated24h - h.danger24h - h.cleanBirth24h);
+  /**
+   * The headline names the single most common finding, with its count.
+   *
+   * It was the whole partition in one forty-word sentence set at 40px — the reader met the subject on line three,
+   * and the two numbers that carry the story were buried mid-clause. A headline is short, and this project's own
+   * rule is to say WHAT was found rather than that something was found, which rules out "476 carry a finding": it
+   * counts a thing the reader has no name for. So the commonest finding leads, by name and by count, and the
+   * sentence that was the headline is now the standfirst under it, where a sentence of that length belongs.
+   *
+   * Generated rather than written, so it stays true as the mix shifts. `findings` is already ordered by frequency.
+   */
+  const top = h.findings[0];
+  const headline = top
+    ? `On <em>${fmt(top.n)}</em> of ${fmt(h.graduated24h)} launches, ${esc(top.label)}.`
+    : `${fmt(h.graduated24h)} launches finished a bonding curve.`;
   return `
-  <div class="hero">
-    ${/*
-        The count leads; the window qualifies it.
-        
-        This opened with the qualifier - "In the 24 hours to 2026-09-11 10:51 UTC 802 tokens finished..." - which
-        put a machine timestamp in the first four words of a 37px display serif and delayed the sentence past its
-        own subject. Worse, that branch was written as the exception and is the normal case: it fires above an hour
-        of staleness, and the record is designed to run up to six hours behind (a three-hour build interval plus a
-        three-hour pull), so almost every visitor saw the ugly half.
-        
-        The window still has to be stated - a figure anchored to the archive's build rather than to the clock is
-        the whole reason this does not read as a collapsing market when the archive freezes - so it is stated, at
-        the end of the clause where a qualifier belongs, and the date is dropped when it is today's.
-      */ ""}
-    <h1 class="headline">${fmt(h.graduated24h)} tokens finished their bonding curve${h.windowEnd && h.now - h.windowEnd > 3600_000
-      ? ` in the 24 hours to ${sameUtcDay(h.now, h.windowEnd) ? `${when(h.windowEnd).slice(11)} today` : when(h.windowEnd)}`
-      : " in the last 24 hours"}.
-    ${/*
-        Say what was found, not that something was found.
-
-        "646 carry a finding" is precise, is the right word for a register, and means nothing to somebody who has
-        just arrived - it counts an undefined thing. The four findings that actually occur are easy to say in plain
-        words, and measured over one window they are evenly spread: creator kept the supply (38), creator bought
-        its own curve (37), curve filled in seconds (31), almost no outside buyers (24). So the headline lists them
-        and the reader learns what we look for by reading what we found.
-
-        The other two counts moved to the lede below. All three in the headline came to eight lines of display
-        serif that pushed the search box off the screen; the partition still has to be stated, and it does not have
-        to be stated in forty-point type.
-      */ ""}
-    On <b>${fmt(h.danger24h)}</b> the creator kept the supply, bought their own curve, or the curve filled in
-    seconds with almost no one outside buying.</h1>
-    ${/* The completeness claim, in prose rather than in the headline, and it still has to add up. */ ""}
-    <p class="lede">We checked all ${fmt(h.graduated24h)}. ${h.cleanBirth24h === 0
-      ? `Not one was free of all four.`
-      : `<b>${fmt(h.cleanBirth24h)}</b> showed none of it.`} The other
-    ${fmt(Math.max(0, h.graduated24h - h.danger24h - h.cleanBirth24h))} fall between: nothing recorded against them,
-    and still short of one of our tests &mdash; most often the creator sold, or fewer than ${h.minBuyers} outside
-    wallets bought the curve. Checked, not unexamined.</p>
-    <p class="lede">All of that is visible for about thirty seconds and unrecoverable afterwards: once the float has
-    been spread across wallets, none of it can be read off the chain any more. So we watch every launch on pump.fun
-    and keep the record. What it means is yours to decide; keeping it is our job.</p>
-    ${/*
-        The third lede paragraph used to stand here - "Paste any mint. If we hold its launch, you get what
-        happened." It described the search box that follows it, to a reader already looking at the search box, and
-        it was the sixth thing stacked in this column. The half of it that was not already obvious from the field
-        and the button is the promise about a miss, which is one line and sits under the box where the miss would
-        appear.
-      */ ""}
-    ${SEARCH}
-    ${/* "Or watch them arrive" stood here and pointed at /live.html, one line above a panel whose own footer says
-         the same thing and links to the same page. The panel showing the launches beats a sentence promising it. */ ""}
-    ${/*
-        One sample device, not two, and it shows the archive being written rather than describing it.
-
-        A visitor who has never seen a record has no idea what pasting a mint gets them, so the page showed them a
-        rendered verdict - and then, directly beneath it, three more in a box of almost identical weight. Two
-        bordered cards, two uppercase micro-labels, the same red, one above the other, making the same offer. The
-        single card went and the three records stayed.
-
-        Then those three shipped showing the same sentence three times, because the newest three flagged launches
-        usually carry the most common finding; `startHere` now takes distinct verdicts (see serve.ts). And the
-        panel updates, because the most useful thing an archive can show on its front page is that it is still
-        being added to - not as a ticker, but as the shelf of what came in most recently.
-      */ ""}
-    ${h.startHere.length ? liveBody(h.startHere, h.now) : ""}
+  <div class="front">
+    <div class="lead">
+      <p class="kicker">${h.windowEnd && h.now - h.windowEnd > 3600_000
+        ? `The 24 hours to ${sameUtcDay(h.now, h.windowEnd) ? `${when(h.windowEnd).slice(11)} today` : when(h.windowEnd)}`
+        : "The last 24 hours"}</p>
+      <h1>${headline}</h1>
+      <p class="stand">${fmt(h.graduated24h)} tokens finished their bonding curve. On <b>${fmt(h.danger24h)}</b> the
+      creator kept the supply, bought their own curve, or the curve filled in seconds with almost no one outside
+      buying.</p>
+      <div class="twoup">
+        <p>We checked all ${fmt(h.graduated24h)}. ${h.cleanBirth24h === 0
+          ? `<strong>Not one was free of all of it.</strong>`
+          : `<strong>${fmt(h.cleanBirth24h)} showed none of it.</strong>`} The other ${fmt(between)} fall between:
+        nothing recorded against them, and still short of one of our tests &mdash; most often the creator sold, or
+        fewer than ${h.minBuyers} outside wallets bought the curve. Checked, not unexamined.</p>
+        <p>All of it is visible for about thirty seconds and unrecoverable afterwards. Once the float has been
+        spread across wallets none of it can be read off the chain any more, which is why the record has to be taken
+        at the moment of creation or not at all.</p>
+      </div>
+      ${/* The findings, as figures. A launch can carry more than one, which the note under the row states. */ ""}
+      <div class="figs">
+        ${h.findings.slice(0, 4).map((f) => `<div><b>${fmt(f.n)}</b><span>${esc(f.label)}</span></div>`).join("")}
+        <div class="cl"><b>${fmt(h.cleanBirth24h)}</b><span>none of these</span></div>
+      </div>
+      <p class="sub" style="margin:12px 0 0">A launch can carry more than one finding, so these add to more than the
+      ${fmt(h.danger24h)} that carry at least one.${h.findings.length > 4
+        ? ` ${fmt(h.findings.length - 4)} further ${h.findings.length - 4 === 1 ? "finding is" : "findings are"} recorded and not shown here.`
+        : ""} Pool balances are read separately and continuously; each carries its own age below.</p>
+    </div>
+    ${liveRail(h.startHere, h.now)}
   </div>
 
-  ${/*
-      What we found, itemised, across the full width.
-
-      This was a seven-row ledger in the hero's right-hand column, under labels made of words that mean something
-      inside this codebase and nothing outside it. Naming each finding needs no vocabulary at all and is strictly
-      more information: a reader learns both what we look for and how often it happens. That much was already
-      right; what was wrong was the gutter. It is the only summary on the page and it now reads as one.
-
-      The counts overlap, because a launch can carry more than one, and that is said rather than left for somebody
-      to discover by adding them up and getting more than the total.
-    */ ""}
-  <div class="band">
-    <div><b>${fmt(h.graduated24h)}</b><span>finished the curve</span></div>
-    ${h.findings.map((f) => `<div><b>${fmt(f.n)}</b><span>${esc(f.label)}</span></div>`).join("")}
-    <div><b>${fmt(h.cleanBirth24h)}</b><span>none of these</span></div>
+  ${/* Three ways in: what we have concluded, what we last published, and how to take the whole thing away. */ ""}
+  <div class="deck">
+    ${h.everWatched > 0 ? `<div>
+      <p class="k">What the record shows</p>
+      <b class="big">${(100 * h.everNoBuyer / h.everWatched).toFixed(1)}%</b>
+      <p>of the ${fmt(h.everWatched)} bonding curves we watched from the creation transaction and confirmed against
+      the curve account itself completed with <b>no outside buyer at all</b>. The creator funded the entire
+      graduation.</p>
+      <a class="go" href="findings.html">The rest of what the record shows &rarr;</a>
+    </div>` : ""}
+    ${h.latestReport ? `<div>
+      <p class="k">Latest report &middot; ${esc(h.latestReport.publishedLong)}</p>
+      <h3>${esc(h.latestReport.title)}</h3>
+      <p>${esc(h.latestReport.summary)}</p>
+      <a class="go" href="reports/${esc(h.latestReport.slug)}.html">Read the report &rarr;</a>
+    </div>` : ""}
+    <div>
+      <p class="k">Take the whole thing</p>
+      <h3>${fmt(h.onFile)} launches, public domain</h3>
+      <p>The complete record as a single SQLite file, free and CC0, with a permanent DOI deposit &mdash; so nothing
+      here depends on trusting us to keep publishing it.</p>
+      <a class="go" href="data.html">Take the data &rarr;</a>
+    </div>
   </div>
-  <p class="sub" style="margin:10px 0 0">A launch can carry more than one of these, so they add to more than the
-  ${fmt(h.danger24h)} that carry at least one. <span id="recnote">Counts as of ${h.builtAt ? `${when(h.builtAt)}, ${ago(h.now - h.builtAt)}` : "an unrecorded time"}, the age of the archive this reads.</span>
-  Pool balances are read separately and continuously; each carries its own age below.</p>
-
-  <div class="total">
-    <b id="rec" data-n="${h.onFile}">${fmt(h.onFile)}</b>
-    <span class="tl">launches on record</span>
-    <span class="tn">Every launch this archive holds, not just the window above. The coverage it starts from is in
-    the footer.</span>
-  </div>
-  <!--
-    The counter climbs because the collector never stops, and this is the one number on the page that is a claim
-    about the archive rather than about the published file. It was read out of the snapshot, so it sat frozen for
-    six hours at a time and understated the record by thousands by the end of each cycle.
-
-    It only ever displays values the collector actually reported. The animation interpolates between two real
-    readings and stops on the second; it never extrapolates forward from a rate, because a number that invents
-    launches it has not seen is precisely the thing this site exists to catch other people doing. If the collector
-    is unreachable or its answer is stale the figure stays exactly as rendered, still labelled with the archive's
-    age, and nothing pretends to be live.
-  -->
-  <script>(function(){
-    var el=document.getElementById('rec'),note=document.getElementById('recnote');
-    if(!el||!window.fetch)return;
-    var shown=+el.getAttribute('data-n')||0,anim=null;
-    function paint(n){el.textContent=n.toLocaleString()}
-    function to(target){
-      if(target===shown)return; if(anim)cancelAnimationFrame(anim);
-      var from=shown,d=target-from,t0=null,ms=Math.min(1200,Math.max(300,Math.abs(d)*12));
-      function step(t){ if(t0===null)t0=t; var k=Math.min(1,(t-t0)/ms);
-        paint(Math.round(from+d*(1-Math.pow(1-k,3))));
-        if(k<1){anim=requestAnimationFrame(step)}else{shown=target;paint(target)} }
-      anim=requestAnimationFrame(step);
-    }
-    function tick(){
-      fetch('/api/v1/live',{cache:'no-store'}).then(function(r){return r.json()}).then(function(d){
-        if(typeof d.observed!=='number')return;           // collector unreachable or stale: leave the rendered figure
-        if(d.observed<shown)return;                        // an archive never shrinks; refuse a lower number rather than animate down
-        to(d.observed);
-        if(note)note.textContent='Recorded live by the collector. The published file holds '+(d.published||0).toLocaleString()+', rebuilt periodically.';
-      }).catch(function(){});
-    }
-    tick(); setInterval(tick,10000);
-    document.addEventListener('visibilitychange',function(){if(!document.hidden)tick()});
-  })()</script>
-
-  ${/*
-      The latest release, placed after the figures and before the argument.
-      
-      It was reachable only from the footer - link six of twelve, below four thousand pixels of page - which for the
-      one artifact here that is meant to be cited is the same as not publishing it. It goes above "what the record
-      shows" on purpose: that section is the live view, and the sentence distinguishing the two reads better when
-      the dated thing came first.
-    */ ""}
-  ${/* The whole block is one link, so the second link lives beside it rather than inside it - an anchor nested in
-       an anchor is not markup a browser keeps, it breaks the outer one open and both behave unpredictably. */ ""}
-  ${h.latestReport ? `<div class="rel">
-    <a class="relmain" href="reports/${esc(h.latestReport.slug)}.html">
-      <span class="rh">Latest report<span class="rd">${esc(h.latestReport.publishedLong)}</span></span>
-      <span class="rt">${esc(h.latestReport.title)}</span>
-      <span class="rs">${esc(h.latestReport.summary)}</span>
-      <span class="rc">Read the report &rarr;</span>
-    </a>
-    <a class="relall" href="reports.html">All reports &rarr;</a>
-  </div>` : ""}
-
-  ${h.everWatched > 0 ? `<div class="sec"><h2>What the record shows</h2><span class="cnt">the whole archive, not the window</span></div>
-  <p class="lede"><b>Of the ${fmt(h.everWatched)} bonding curves we have watched from the creation transaction and
-  confirmed against the curve account itself, ${fmt(h.everNoBuyer)} &mdash;
-  ${(100 * h.everNoBuyer / h.everWatched).toFixed(1)}% &mdash; completed with no outside buyer at all.</b>
-  Not one wallet other than the creator ever bought on the curve. The creator funded the entire graduation.</p>
-  <p class="lede"><a href="findings.html">The rest of what the record shows</a> &mdash; creator supply share, fill
-  times, and the exclusions that make the number defensible, with the queries to check every figure yourself.</p>` : ""}
 
   ${p ? `<div class="sec"><h2>Why a scanner cannot tell you this</h2></div>
   <p class="lede">One launch from this archive, <a href="t/${esc(p.mint)}.html">${esc(p.symbol ?? "?")}</a>, and several hundred like it. Read left to right.</p>
@@ -1238,59 +1325,61 @@ export function homeBody(h: Home): string {
  * collector that never answers, gets those and a line saying so — never an empty panel captioned "connecting",
  * which is the one outcome that makes an archive look broken rather than quiet.
  */
-export function liveBody(startHere: Home["startHere"], now: number): string {
-  return `<div class="live">
-  <div class="livehead">Most recently recorded<span class="lr" id="hstat">the latest we hold</span></div>
-  <div class="wall" id="hwall">${startHere.map((r) => `<a class="fb" href="t/${esc(r.mint)}.html">
-    <span class="ss">${esc(r.symbol ?? "?")}</span>
-    <span class="sl ${r.level}">${esc(r.label)}</span>
-    <span class="sa">${ago(now - r.at)}</span></a>`).join("")}</div>
-  <div class="livefoot">Every launch is recorded the moment its creation transaction is decoded. The creator's share
-    is read from that same transaction, so it is known at the instant of creation; everything else needs time to
-    happen. <a href="live.html">The full feed &rarr;</a></div>
-</div>
+export function liveRail(startHere: Home["startHere"], now: number): string {
+  return `<aside class="rail">
+  <div class="railh">Most recently recorded<span class="rs" id="hstat">latest held</span></div>
+  ${/*
+      The server-rendered fallback. These are graduated records with verdicts, not new launches, so they have no
+      creator share to put in the middle column - rendering an em dash there produced a column of nothing that read
+      as a failed load. Two columns instead, under their own class, replaced wholesale the moment the feed answers.
+    */ ""}
+  <div id="hwall">${startHere.map((r) => `<a class="rrow fb2" href="t/${esc(r.mint)}.html">
+    <span class="rs2">${esc(r.symbol ?? "?")}</span>
+    <span class="rt">${ago(now - r.at)}</span></a>`).join("")}</div>
+  <a class="rmore" href="live.html">The full feed &rarr;</a>
+  <p class="rnote">The creator's share is read from the creation transaction, so it is known at the instant of
+  creation. Everything else needs time to happen.</p>
+</aside>
 ${/*
-    Upgrades the panel to the live feed, and leaves it alone if it cannot.
+    Upgrades the rail to the live feed, and leaves it alone if it cannot.
     
-    Rows are built to the same shape /live.html uses. On the first successful poll the server-rendered records are
-    cleared and replaced by launches as they are decoded; if the collector never answers, or answers that it is
-    unavailable, the records stay and the header says why. It never empties the panel to report a problem.
+    Rows are built to the shape /live.html uses. On the first poll that returns launches the server-rendered
+    records are cleared and replaced; if the collector never answers, or answers that it is unavailable, the
+    records stay and the header says why. It never empties the rail to report a problem — a panel captioned
+    "connecting" is the one outcome that makes an archive look broken rather than quiet.
   */ ""}
 <script>(function(){
   var wall=document.getElementById('hwall'),st=document.getElementById('hstat');
   if(!wall||!window.fetch)return;
-  var since=0,MAX=6,live=false,fails=0,stop=false;
+  var since=0,MAX=8,live=false,fails=0,stop=false;
   function esc(x){var d=document.createElement('div');d.textContent=x==null?'':String(x);return d.innerHTML;}
   function row(l){
-    var a=document.createElement('a');a.className='wrow';a.href='t/'+encodeURIComponent(l.mint)+'.html';
+    var a=document.createElement('a');a.className='rrow';a.href='t/'+encodeURIComponent(l.mint)+'.html';
     var pct=(typeof l.devPct==='number')?l.devPct:0;
-    a.innerHTML='<span class="sym">'+esc(l.symbol||'?')+'</span>'+
-      '<span class="nm">'+esc(l.name||'')+'</span>'+
-      '<span class="dv'+(pct>=20?' hi':'')+'">'+pct.toFixed(1)+'%</span>'+
-      '<span class="ago">just now</span>';
+    a.innerHTML='<span class="rs2">'+esc(l.symbol||'?')+'</span>'+
+      '<span class="rd'+(pct>=20?' hi':'')+'">'+pct.toFixed(1)+'%</span>'+
+      '<span class="rt">just now</span>';
     a.setAttribute('data-at',String(l.at));
     return a;
   }
   function age(){
-    var now=Date.now(),rows=wall.querySelectorAll('.wrow');
+    var now=Date.now(),rows=wall.querySelectorAll('.rrow[data-at]');
     for(var i=0;i<rows.length;i++){
-      var s=Math.round((now-Number(rows[i].getAttribute('data-at')))/1000),e=rows[i].querySelector('.ago');
-      if(e)e.textContent=s<2?'just now':(s<90?s+'s ago':Math.round(s/60)+'m ago');
+      var s=Math.round((now-Number(rows[i].getAttribute('data-at')))/1000),e=rows[i].querySelector('.rt');
+      if(e)e.textContent=s<2?'just now':(s<90?s+'s':Math.round(s/60)+'m');
     }
   }
   function pull(){
     if(stop)return;
     fetch('api/live/recent?since='+since,{cache:'no-store'}).then(function(r){return r.json()}).then(function(d){
       fails=0;
-      if(d.unavailable){st.textContent='collector unreachable; showing the latest we hold';return}
+      if(d.unavailable){st.textContent='unreachable';return}
       var ls=d.launches||[];
-      // The first poll asks since=0 and the collector answers with its whole ring - 120 rows on a normal day. The
-      // feed is oldest-first and each row is prepended, so only the tail can survive the trim below: taking it up
-      // front saves building 114 elements to destroy them. Later polls carry only what is new and are unaffected.
+      // The first poll asks since=0 and the collector answers with its whole ring — 120 rows on a normal day. The
+      // feed is oldest-first and each row is prepended, so only the tail can survive the trim: taking it up front
+      // saves building elements to destroy them. Later polls carry only what is new and are unaffected.
       if(ls.length>MAX)ls=ls.slice(ls.length-MAX);
       if(ls.length){
-        // The server-rendered records are the fallback, not the first page of the feed. They go the moment there
-        // is something live to replace them with, and not one poll earlier.
         if(!live){while(wall.firstChild)wall.removeChild(wall.firstChild);live=true}
         for(var i=0;i<ls.length;i++){
           if(ls[i].at>since)since=ls[i].at;
@@ -1298,12 +1387,12 @@ ${/*
         }
         while(wall.childElementCount>MAX)wall.removeChild(wall.lastElementChild);
       }
-      if(live)st.textContent='recorded live';
+      if(live)st.textContent='live';
       age();
     }).catch(function(){
-      // Say it, never fake it: a panel that silently stops updating is indistinguishable from a chain that stopped.
-      fails++; if(fails>2)st.textContent='feed interrupted, retrying';
-      if(fails>20){stop=true;st.textContent='feed stopped \u2014 reload to reconnect'}
+      // Say it, never fake it: a rail that silently stops updating is indistinguishable from a chain that stopped.
+      fails++; if(fails>2)st.textContent='interrupted';
+      if(fails>20){stop=true;st.textContent='stopped'}
     });
   }
   pull();setInterval(pull,2500);setInterval(age,1000);
