@@ -112,11 +112,25 @@ const totals = def.totals(rows);
  */
 const win = coverageWindows(db);
 const cov = { a: win.length ? win[0].a : null };
-const meta = (() => {
-  try { return (db.prepare("SELECT value FROM meta WHERE key = 'built_at'").get() as any)?.value; }
-  catch { return null; }
+/**
+ * `meta(k, v)`, which is the schema — and no clock if there is no stamp.
+ *
+ * This read `SELECT value FROM meta WHERE key = 'built_at'`, which does not match the table and threw on every
+ * run. The throw was swallowed by the catch and the value fell back to `Date.now()`, so the first published report
+ * recorded the moment the publish COMMAND ran as the build time of the record it was computed from — a wrong
+ * number that looked entirely plausible, in the one field whose job is to say which archive the figures came from.
+ *
+ * A collector database legitimately carries no `built_at`; only a record built by servicedb does. So an absent
+ * stamp is now recorded as absent and the page says "unknown", rather than being quietly filled with a timestamp
+ * that means something else. Substituting the current time for a missing measurement is the shape this codebase
+ * has a whole section about.
+ */
+const builtAt = (() => {
+  try {
+    const m = db.prepare("SELECT v FROM meta WHERE k = 'built_at'").get() as any;
+    return m?.v ? Number(m.v) : null;
+  } catch { return null; }
 })();
-const builtAt = meta ? Number(meta) : Date.now();
 
 /**
  * The publication date is today, and on a revision it stays the day of first publication.
@@ -131,7 +145,7 @@ const report: Report = {
   published: already?.published ?? today,
   summary: def.summary(rows, totals),
   coverageFrom: cov?.a ? new Date(cov.a).toISOString() : "",
-  recordBuiltAt: new Date(builtAt).toISOString(),
+  recordBuiltAt: builtAt ? new Date(builtAt).toISOString() : "",
   totals,
   rows,
   query: def.query,
@@ -148,5 +162,5 @@ console.log(`  ${report.title}`);
 console.log(`  published   ${report.published}${already && revise ? ` (revised ${today}: ${reviseWhy})` : ""}`);
 console.log(`  rows        ${rows.length}`);
 console.log(`  totals      ${Object.entries(totals).map(([k, v]) => `${k}=${v}`).join(", ")}`);
-console.log(`  record      built ${report.recordBuiltAt}, coverage from ${report.coverageFrom}`);
+console.log(`  record      built ${report.recordBuiltAt || "unstamped (this database carries no built_at)"}, coverage from ${report.coverageFrom}`);
 console.log(`\nCommit it. The rendered page is built from this file and cannot recompute it.`);

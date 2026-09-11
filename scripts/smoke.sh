@@ -87,6 +87,9 @@ check "/"                    200 "Chain of Title"
 # link home pointed at; it now 301s. A 200 here means the redirect is gone and the duplicate is back.
 check "/index.html"          301 ""
 check "/method.html"         200 "no markers found"
+# findings.html was never checked and is the page most exposed to a stale build: it states live counts under a
+# heading about what the record shows. Matched on the population figure's label rather than a number, which moves.
+check "/findings.html"       200 "confirmed graduations look like at birth"
 check "/data.html"           200 "record.db"
 check "/favicon.svg"         200 ""
 check "/og.png"              200 ""

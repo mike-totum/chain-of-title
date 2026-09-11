@@ -30,6 +30,8 @@ import { page, tokenBody, walletBody, tokenPreview, SEARCH, when, fmt, homeBody,
   type Priors, type SiblingRow, type SiblingStats, type StripMark,
   type Home, type Chrome, type Reading } from "./render.ts";
 import { loadReports, reportDate } from "./reports.ts";
+import { buildFacts, notFoundBody, methodBody, dataBody, apiBody, pledgeBody, findingsBody, correctionsBody,
+  type PageFacts } from "./pages.ts";
 import { r2Config, getWithType as r2Get } from "./r2.ts";
 import { tokenRecord, walletRecord, statusRecord, unknownRecord, errorRecord,
   API_VERSION, PER_IP_PER_HOUR, GLOBAL_PER_HOUR, GLOBAL_PER_DAY, type Coverage } from "./api.ts";
@@ -497,6 +499,10 @@ function reloadRecord(): void {
       gapMin: win.slice(1).reduce((a, w, i) => a + Math.max(0, w.a - win[i].b), 0) / 60_000,
       onFile: observed, builtAt: recordBuiltAt,
     };
+    // The prose pages state figures about the record; adopting a new one without recomputing them would leave
+    // findings.html describing the file we just replaced, under a masthead advertising the new one.
+    try { facts = buildFacts(db, covered, COV, DB_FILE); }
+    catch (e) { console.log(`[pages] facts not rebuilt: ${(e as Error).message}`); }
     COV = { from: win.length ? win[0].a : null, downtimeMinutes: chrome.gapMin, builtAt: recordBuiltAt };
     tokenQ = db.prepare(`SELECT ${TOKEN_COLUMNS}${optionalColumns(db)} FROM tokens WHERE mint = ?`);
     setReading = db.prepare("UPDATE tokens SET vault_sol = ?, vault_at = ? WHERE mint = ?");
@@ -1047,6 +1053,20 @@ const HOME_DAYS = Number(process.env.HOME_DAYS ?? 7);
  * re-reading them per request would be a filesystem hit for a constant. A newly published report reaches the site
  * the way any other source change does: on the next deploy.
  */
+/**
+ * The prose pages' figures, from the record this process serves.
+ *
+ * They used to be baked into `site/*.html` by whoever last ran `npm run site`, which made every one of them as
+ * current as that laptop — and on 2026-09-11 that laptop's collector had been stopped for forty hours. Built here
+ * instead, and rebuilt in `reloadRecord` the moment a new record is adopted, so these pages describe the archive
+ * the service is actually answering from.
+ *
+ * Computed once rather than per request: `labelled` assesses every labelled mint and `nameRefs` runs three LIKE
+ * scans over the whole tokens table, which is seconds of work against a quarter of a million rows and cannot be
+ * paid on a page load. Nothing in it changes without a new record.
+ */
+let facts: PageFacts = buildFacts(db, covered, COV, DB_FILE);
+
 const REPORTS = loadReports();
 console.log(`[reports] ${REPORTS.length} published${REPORTS.length ? `, latest ${REPORTS[0].published} ${REPORTS[0].slug}` : ""}`);
 
@@ -1478,6 +1498,44 @@ const server = createServer(async (req, res) => {
      * laptop out of one more publish path. These are matched before the static handler, so the older files in
      * `site/reports*` are shadowed rather than served.
      */
+    /**
+     * The prose pages, rendered rather than served from the static tree.
+     *
+     * Matched before the static handler, so the files `npm run site` leaves in `site/` are shadowed. Those files
+     * are still written and still shipped — they are the offline copy `data.html` offers — but nothing the public
+     * reads comes out of them any more.
+     */
+    if (safe === "/findings.html") {
+      return send(200, page("What the record shows", findingsBody(facts, recordBuiltAt), chrome, 0,
+        `Of ${fmt(facts.F.watched)} bonding curves this archive watched from the creation transaction, ${fmt(facts.F.noBuyer)} completed with no outside buyer at all.`,
+        safe), "text/html; charset=utf-8", "short");
+    }
+    if (safe === "/method.html") {
+      return send(200, page("How this is decided", methodBody(facts, chrome), chrome, 0,
+        "How Chain of Title decides what to say about a token launch: what is recorded live, what is read from chain, and what is never inferred.",
+        safe), "text/html; charset=utf-8", "short");
+    }
+    if (safe === "/data.html") {
+      return send(200, page("The data", dataBody(facts, db, chrome), chrome, 0,
+        "The whole Chain of Title archive as one CC0 SQLite file, free and keyless.",
+        safe), "text/html; charset=utf-8", "short");
+    }
+    if (safe === "/api.html") {
+      return send(200, page("The API", apiBody(chrome), chrome, 0,
+        "The Chain of Title launch record as JSON: free, keyless and unmetered, CC0.",
+        safe), "text/html; charset=utf-8", "short");
+    }
+    if (safe === "/pledge.html") {
+      return send(200, page("Our pledge", pledgeBody(), chrome, 0,
+        "How Chain of Title is funded, and the three things its funding will never depend on.",
+        safe), "text/html; charset=utf-8", "short");
+    }
+    if (safe === "/corrections.html") {
+      return send(200, page("Corrections", correctionsBody(facts), chrome, 0,
+        "How to tell us a record is wrong, what we will and will not change, and every correction we have made.",
+        safe), "text/html; charset=utf-8", "short");
+    }
+
     if (safe === "/reports.html") {
       return send(200, page("Reports", reportsIndexBody(REPORTS), chrome, 0,
         "Dated reports computed from the launch record, each with the queries to reproduce it.",
@@ -1973,9 +2031,9 @@ const server = createServer(async (req, res) => {
       return send(d.htmlStatus, noRecord(mint, esc2(d.why)));
     }
 
-    // anything else
-    const custom = join(DIR, "404.html");
-    return send(404, existsSync(custom) ? readFileSync(custom) : "not found");
+    // anything else. Rendered, not read off disk: a 404 states the coverage window, and the copy in `site/` carried
+    // whatever window the last laptop build baked into it.
+    return send(404, page("No record", notFoundBody(chrome), chrome, 0, undefined, "/404.html"));
   } catch (e) {
     console.error(e);
     return send(500, "error");

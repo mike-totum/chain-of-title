@@ -4,7 +4,7 @@
   "published": "2026-09-11",
   "summary": "20 ticker symbols, each used by fifteen or more separate mints with a fresh creator wallet almost every time.",
   "coverageFrom": "2026-09-02T12:29:32.581Z",
-  "recordBuiltAt": "2026-09-11T02:22:20.893Z",
+  "recordBuiltAt": "",
   "totals": {
     "mints": 1208,
     "creators": 1160,
@@ -172,5 +172,11 @@
       "zero": 18
     }
   ],
-  "query": "SELECT symbol, COUNT(*) mints,\n       COUNT(DISTINCT creator) creators,\n       SUM(graduated_confirmed_by IS NOT NULL) grads,\n       AVG(dev_pct) dev, SUM(curve_buyers = 0) zero\nFROM tokens\nWHERE COALESCE(late_discovery,0) = 0\n  AND rebuilt_at IS NULL\n  AND symbol IS NOT NULL AND symbol != ''\nGROUP BY symbol\nHAVING mints >= 15\n   AND creators >= mints * 0.9\n   AND grads >= 5\nORDER BY grads DESC\nLIMIT 20;"
+  "query": "SELECT symbol, COUNT(*) mints,\n       COUNT(DISTINCT creator) creators,\n       SUM(graduated_confirmed_by IS NOT NULL) grads,\n       AVG(dev_pct) dev, SUM(curve_buyers = 0) zero\nFROM tokens\nWHERE COALESCE(late_discovery,0) = 0\n  AND rebuilt_at IS NULL\n  AND symbol IS NOT NULL AND symbol != ''\nGROUP BY symbol\nHAVING mints >= 15\n   AND creators >= mints * 0.9\n   AND grads >= 5\nORDER BY grads DESC\nLIMIT 20;",
+  "revisions": [
+    {
+      "at": "2026-09-11",
+      "what": "recordBuiltAt was the publish command's own clock, not the archive's build time: the query named columns the meta table does not have, threw, and fell back to Date.now(). The collector database carries no build stamp, so the field is now empty and the page says unknown."
+    }
+  ]
 }
