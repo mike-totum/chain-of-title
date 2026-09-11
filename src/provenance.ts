@@ -164,6 +164,19 @@ export type Assessment = {
  * Not read and read-but-gone are both "we do not know", and we do not know is never a finding.
  */
 export const graduationDisproved = (t: any) => t.curve_checked_at != null && t.curve_complete === 0;
+/**
+ * Call this. Never spell it out again.
+ *
+ * The predicate above was corrected once and the correction did not travel: two callers had written
+ * `curve_checked_at != null && !curve_complete` out longhand, and `!null` is true, so both went on folding "we read
+ * it and the account was gone" into "we read it and it had not completed". One was the token page and the other was
+ * `launch.graduated` in api/v1, so the fix that produced correction `disproved-conflated-with-unreadable` was live
+ * in the helper and absent from the two surfaces most people actually read.
+ *
+ * A test pinned the function while the copies drifted, which is the failure this codebase keeps producing in a new
+ * costume: the guard living somewhere the producer never passes through. Removing the possibility beats detecting
+ * the failure, so there is now one spelling and every caller shares it.
+ */
 
 export const OPTIONAL_TOKEN_COLUMNS = ["curve_checked_at", "curve_complete"];
 
@@ -340,7 +353,7 @@ export function assess(db: DatabaseSync, t: any, covered: (ts: number, venue?: s
     if (curveBuyers === 0) flags.push({ level: "DANGER", code: "few_outside_buyers", text: "It completed its bonding curve with zero outside buyers on record." });
     else if (curveBuyers !== null && curveBuyers < 10) flags.push({ level: "DANGER", code: "few_outside_buyers", text: `Only ${curveBuyers} outside buyer${curveBuyers === 1 ? "" : "s"} bought on the bonding curve before it graduated.` });
     if (gradS <= 60) flags.push({ level: "DANGER", code: "filled_in_seconds", text: `It left the curve ${Math.round(gradS)}s after launch.` });
-  } else if (gradS !== null && t.curve_checked_at != null && !t.curve_complete) {
+  } else if (gradS !== null && graduationDisproved(t)) {
     /**
      * Checked and disproved, which is not the same as unchecked and was being reported as if it were. Our feed
      * recorded a threshold event; reading the curve account afterwards showed it was not complete. 3,195 rows in

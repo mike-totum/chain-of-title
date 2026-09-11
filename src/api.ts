@@ -13,7 +13,7 @@
  * `cleanAtBirth: null` and `verdict.level: "UNKNOWN"` - never `false` (which reads as a finding we did not make) and
  * never `true`. Any consumer that treats null as clean is doing so against the documented contract.
  */
-import type { Assessment } from "./provenance.ts";
+import { graduationDisproved, type Assessment } from "./provenance.ts";
 import { verdict, CANONICAL_HOST, type Reading } from "./render.ts";
 import type { Profile } from "./operator.ts";
 
@@ -103,7 +103,7 @@ export function tokenRecord(
        * found incomplete. A field that is knowably wrong is worse than a missing one, because a reader cannot tell
        * which rows to distrust. The raw observation is kept beside it rather than discarded.
        */
-      graduated: !!t.graduated && !(t.curve_checked_at != null && !t.curve_complete),
+      graduated: !!t.graduated && !graduationDisproved(t),
       /** What the feed saw at the time: the curve reached the graduation threshold in our decoded events. */
       graduationObserved: !!t.graduated,
       /**
