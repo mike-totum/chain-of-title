@@ -144,7 +144,16 @@ db.exec(`
     -- A mint we hold no reading for must serialise NULL and must never default to 0. Defaulting would publish our
     -- own RPC failures as findings about someone else's token — this project's recurring failure with the sign
     -- flipped. The sync below is guarded on EXISTS for exactly that reason: rows we hold nothing for are untouched.
-    curve_checked_at INTEGER, curve_complete INTEGER
+    curve_checked_at INTEGER, curve_complete INTEGER,
+    -- The highest price we ever observed for this launch, and when we observed it.
+    --
+    -- A peak is a permanent fact in the same sense as a launch fact: it only ratchets up, so once true it stays
+    -- true. That is what separates it from vault_sol, a balance that decays the moment it is read. peak_at dates
+    -- it, which last_price conspicuously does not -- which is why last_price is not published here.
+    --
+    -- It is what we SAW, not what the token reached. A peak between our observations is not in here, and a launch
+    -- we stopped following has a peak that stops with us. A floor on the truth, never a ceiling.
+    peak_price REAL, peak_at INTEGER
   );
   CREATE INDEX IF NOT EXISTS rec.tokens_created ON tokens(created_at);
   CREATE INDEX IF NOT EXISTS rec.tokens_creator ON tokens(creator);
@@ -258,7 +267,8 @@ try { db.exec("UPDATE rec.tokens SET graduated_confirmed_by = 'pool' WHERE gradu
  */
 for (const c of ["uri TEXT", "image TEXT", "description TEXT", "meta_at INTEGER",
                  "image_sha256 TEXT", "image_bytes INTEGER", "image_at INTEGER", "meta_bytes INTEGER",
-                 "meta_sha256 TEXT", "curve_checked_at INTEGER", "curve_complete INTEGER", "meta_lag_ms INTEGER"])
+                 "meta_sha256 TEXT", "curve_checked_at INTEGER", "curve_complete INTEGER", "meta_lag_ms INTEGER",
+                 "peak_price REAL", "peak_at INTEGER"])
   try { db.exec(`ALTER TABLE rec.tokens ADD COLUMN ${c}`); } catch {}
 
 /**
@@ -586,6 +596,26 @@ try {
    * reading is published beside it; a reader gets both and can see them disagree. Repairing the column would destroy
    * the evidence that the error happened, which is the one thing a correction must not do.
    */
+  /**
+   * The peak, re-synced in full rather than backfilled once, for the same reason as the curve reading below.
+   *
+   * A peak ratchets, so a row unchanged since the watermark can still hold a higher peak in the collector than in
+   * the record — and the watermark can sit AHEAD of writes that already happened, which was established here today.
+   * A NULL-only backfill would publish whichever value arrived first and freeze it.
+   *
+   * Only where the collector's peak is HIGHER, so this can never walk a published peak downwards: the one
+   * direction a ratcheting fact must not move.
+   */
+  try {
+    const r = db.prepare(`UPDATE rec.tokens SET
+        peak_price = (SELECT m.peak_price FROM main.tokens m WHERE m.mint = rec.tokens.mint),
+        peak_at    = (SELECT m.peak_at    FROM main.tokens m WHERE m.mint = rec.tokens.mint)
+      WHERE EXISTS (SELECT 1 FROM main.tokens m WHERE m.mint = rec.tokens.mint
+                      AND m.peak_price IS NOT NULL AND m.peak_at IS NOT NULL
+                      AND (rec.tokens.peak_price IS NULL OR m.peak_price > rec.tokens.peak_price))`).run();
+    if (Number(r.changes ?? 0) > 0) log(`  synced ${Number(r.changes).toLocaleString()} peaks`);
+  } catch (e) { log(`  WARNING: peak sync failed: ${String((e as any)?.message ?? e).slice(0, 120)}`); }
+
   try {
     const r = db.prepare(`UPDATE rec.tokens SET
         curve_checked_at = (SELECT c.checked_at FROM main.curve_checks c WHERE c.mint = rec.tokens.mint),
@@ -652,6 +682,9 @@ try {
     { kind: "IMPLIES", sql: "image_sha256 IS NOT NULL AND image_at IS NULL", why: "image_sha256 without image_at" },
     // A curve reading and the time it was taken. NULL complete with a time is legitimate — the account was gone.
     { kind: "IMPLIES", sql: "curve_complete IS NOT NULL AND curve_checked_at IS NULL", why: "curve_complete without curve_checked_at" },
+    // A peak is only a fact with the moment we saw it, exactly as a pool balance is.
+    { kind: "IMPLIES", sql: "peak_price IS NOT NULL AND peak_at IS NULL", why: "peak_price without peak_at" },
+    { kind: "IMPLIES", sql: "peak_at IS NOT NULL AND peak_price IS NULL", why: "peak_at without peak_price" },
     // A pool balance is only ever quoted with the moment it was read, and the moment is meaningless without it.
     // db.ts enforces this on write with a CASE; asserting it here checks the invariant survived the copy, which is
     // the class of failure this file keeps producing — a rule held at the source and lost in transit.
