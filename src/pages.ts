@@ -393,7 +393,7 @@ export function apiBody(chrome: Chrome): string {
     <tr><td class="k">CORS</td><td>open to every origin. Call it from your own front end.</td></tr>
     <tr><td class="k">Caching</td><td>a settled record is immutable and served <span class="mono">max-age=3600, stale-while-revalidate=86400</span>. Anything unsettled is <span class="mono">no-store</span>.</td></tr>
     <tr><td class="k">Stability</td><td>fields are added, never repurposed. A breaking change gets a new version prefix and the old one keeps answering.</td></tr>
-    <tr><td class="k">What it is not</td><td>not a price feed, not a signal, not advice. A clean record means a launch was <b>not manufactured</b>, and says nothing about what it will do. Of 19,412 bonding-curve positions measured, none reached 5x.</td></tr>
+    <tr><td class="k">What it is not</td><td>not a price feed, not a signal, not advice. A clean record means a launch was <b>not manufactured</b>, and says nothing about what it will do. Of 19,412 bonding-curve positions measured over 24 hours in September 2026 — organic launches only — none reached 5x. That is a dated measurement of a favourable subset, not a claim about the whole archive.</td></tr>
   </table>
   <p class="callout">If you ship this in front of users and find a record you think is wrong, tell us: a false
   warning on an honest launch costs us more than a missed one. <a href="mailto:${esc(CONTACT)}">${esc(CONTACT)}</a></p>

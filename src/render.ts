@@ -687,7 +687,47 @@ ${/*
     : "unrecorded"}</b></div>
   <div>Public domain · <b><a href="${root}data.html">CC0</a></b></div>
   <div>Free · no account</div>
-</div></div></div></header>
+</div></div></div>
+${/*
+    The counter climbs, because the collector never stops.
+    
+    It reads the record's own count when the page is rendered and then follows the collector, which is the honest
+    pair: the first cell is how many launches the archive HAS, the cell beside it is when the file you can download
+    was last built. A snapshot count under a live label would understate the record by thousands by the end of each
+    build cycle, which is what it did while this script was missing — the markup carried `id` and `data-n` and
+    nothing acted on them, a promise in the HTML with no code behind it.
+    
+    It only ever displays values the collector actually reported. The animation interpolates between two real
+    readings and stops on the second; it never extrapolates forward from a rate, because a number that invents
+    launches it has not seen is precisely what this site exists to catch other people doing. If the collector is
+    unreachable the figure stays exactly as rendered and nothing pretends to be live.
+    
+    In page() rather than on the front page, because the status band is on every page now and a counter that ticks
+    on one of them and sits frozen on the rest is worse than one that never ticks at all.
+  */ ""}
+<script>(function(){
+  var el=document.getElementById('rec');
+  if(!el||!window.fetch)return;
+  var shown=+el.getAttribute('data-n')||0,anim=null;
+  function paint(n){el.textContent=n.toLocaleString()}
+  function to(target){
+    if(target===shown)return; if(anim)cancelAnimationFrame(anim);
+    var from=shown,d=target-from,t0=null,ms=Math.min(1200,Math.max(300,Math.abs(d)*12));
+    function step(t){ if(t0===null)t0=t; var k=Math.min(1,(t-t0)/ms);
+      paint(Math.round(from+d*(1-Math.pow(1-k,3))));
+      if(k<1){anim=requestAnimationFrame(step)}else{shown=target;paint(target)} }
+    anim=requestAnimationFrame(step);
+  }
+  function tick(){
+    fetch('/api/v1/live',{cache:'no-store'}).then(function(r){return r.json()}).then(function(d){
+      if(typeof d.observed!=='number')return;   // collector unreachable or stale: leave the rendered figure alone
+      if(d.observed<shown)return;               // an archive never shrinks; refuse a lower number rather than animate down
+      to(d.observed);
+    }).catch(function(){});
+  }
+  tick(); setInterval(tick,10000);
+  document.addEventListener('visibilitychange',function(){if(!document.hidden)tick()});
+})()</script></header>
 <main class="page shell">
 ${body}
 </main>
@@ -695,7 +735,9 @@ ${body}
 In property law, the chain of title is the unbroken documented history of ownership from origin: what you establish
 before you believe a claim about what something is. Coverage begins ${c.coverageFrom}${c.gapMin >= 1 ? `, with ${fmt(c.gapMin)} min of recorded downtime` : ", no recorded downtime"}.
 Everything here is read from the Solana chain. Where we recorded a launch's creation transaction, its page cites it and you can check every figure yourself; where we did not, the page says so. Where we say no markers were found, we checked the launch against every pattern we record and none was present. That is a statement about what we checked, not a prediction and not advice.
-Most tokens lose money regardless: of 19,412 bonding-curve positions measured, none reached 5x.
+Most launches lose money regardless: of 19,412 bonding-curve positions measured over 24 hours in September 2026,
+none reached 5x &mdash; and those were the organic ones, filtered to launches with a creator share under 50% and at
+least 30 outside buyers. A dated measurement of a favourable subset, not a running total over the archive above.
 <div class="who">Kept by <b>${esc(KEEPER)}</b> · <a href="mailto:${esc(CONTACT)}">${esc(CONTACT)}</a>${SOURCE_URL ? ` · <a href="${esc(SOURCE_URL)}">Source</a>` : ""}<br>
 Free to use, with no account and no wallet connection. The archive is public domain (<a href="${root}data.html">CC0</a>) and
 downloadable in full, so nothing here depends on trusting us to keep publishing it. Funded by grants and by the
