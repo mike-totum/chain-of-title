@@ -57,11 +57,11 @@ export function keepTweetEvidence(db: { prepare(sql: string): { get(...a: unknow
 }
 
 export const KEEP_TRADE_EVIDENCE = `AND NOT (
-    (venue = 'curve' AND side = 'buy' AND sol >= ${BUYOUT_SOL})
-    OR (venue = 'amm' AND EXISTS (
+    (market = 'curve' AND side = 'buy' AND sol >= ${BUYOUT_SOL})
+    OR (market = 'amm' AND EXISTS (
           SELECT 1 FROM trades b
            WHERE b.wallet = trades.wallet AND b.mint = trades.mint
-             AND b.venue = 'curve' AND b.side = 'buy' AND b.sol >= ${BUYOUT_SOL}))
+             AND b.market = 'curve' AND b.side = 'buy' AND b.sol >= ${BUYOUT_SOL}))
   )`;
 /** Above this share of supply in the first block, the creator is the market. */
 export const MAX_DEV_PCT = 20;
@@ -167,6 +167,25 @@ export const graduationDisproved = (t: any) => t.curve_checked_at != null && t.c
 
 export const OPTIONAL_TOKEN_COLUMNS = ["curve_checked_at", "curve_complete"];
 
+/**
+ * The name this database gives the trades column that says curve or amm.
+ *
+ * `trades.venue` was renamed to `trades.market` on 2026-09-11, and the two sides of that rename cannot deploy at
+ * the same instant: the collector migrates its own database and rebuilds the record, while the web service opens
+ * the record with `migrate: false` on purpose - it serves that file to the public and must not be the reason its
+ * bytes differ from what servicedb built. So for a window, a reader can be handed either shape.
+ *
+ * Detecting it costs one pragma at query-build time and removes the ordering hazard completely: neither deploy has
+ * to go first. Delete this and hard-code "market" once no record older than the rename is in circulation, which
+ * means after the next DOI deposit at the earliest.
+ */
+export function tradeMarketColumn(dbh: any): string {
+  try {
+    const cols = dbh.prepare("PRAGMA table_info(trades)").all() as { name: string }[];
+    return cols.some((c) => c.name === "market") ? "market" : "venue";
+  } catch { return "market"; }
+}
+
 export function optionalColumns(dbh: any): string {
   try {
     const have = new Set((dbh.prepare("PRAGMA table_info(tokens)").all() as any[]).map((c) => c.name));
@@ -200,7 +219,7 @@ function curveBuyersQ(db: DatabaseSync) {
   let s = curveBuyersStmt.get(db);
   if (!s) {
     s = db.prepare(`SELECT COUNT(DISTINCT wallet) n, COUNT(*) rows FROM trades
-      WHERE mint = ? AND venue='curve' AND side='buy' AND COALESCE(is_dev,0)=0`);
+      WHERE mint = ? AND market='curve' AND side='buy' AND COALESCE(is_dev,0)=0`);
     curveBuyersStmt.set(db, s);
   }
   return s;

@@ -86,8 +86,8 @@ const DOCS: Record<string, Record<string, Doc>> = {
   wallet_flow: {
     wallet: { kind: "chain", desc: "A wallet that has bought at least one bonding curve outright. One row each." },
     curve_sol: { kind: "chain", desc: "SOL this wallet spent buying bonding curves." },
-    amm_buy: { kind: "ours", desc: "SOL this wallet spent buying back on the open market, on the curves it took. Sum the venue='amm', side='buy' rows in trades for this wallet and you will get this number." },
-    amm_sell: { kind: "ours", desc: "SOL this wallet received selling on the open market, on the curves it took: the tokens it bought the float of, not everything it ever traded. Sum the venue='amm', side='sell' rows in trades for this wallet and you will get this number. It used to count every token the wallet touched while the pages around it said 'sold after taking the curve'." },
+    amm_buy: { kind: "ours", desc: "SOL this wallet spent buying back on the open market, on the curves it took. Sum the market='amm', side='buy' rows in trades for this wallet and you will get this number." },
+    amm_sell: { kind: "ours", desc: "SOL this wallet received selling on the open market, on the curves it took: the tokens it bought the float of, not everything it ever traded. Sum the market='amm', side='sell' rows in trades for this wallet and you will get this number. It used to count every token the wallet touched while the pages around it said 'sold after taking the curve'." },
     tokens: { kind: "ours", desc: "Number of curves this wallet took. Count the distinct mints in trades for this wallet and you will get this number." },
   },
   trades: {
@@ -97,7 +97,7 @@ const DOCS: Record<string, Record<string, Doc>> = {
     side: { kind: "chain", desc: "'buy' or 'sell'." },
     sol: { kind: "chain", desc: "Size of the trade in SOL." },
     ts: { kind: "chain", desc: "When we decoded the trade, epoch ms. Events arriving together carry the same timestamp, so ordering within a batch is not established." },
-    venue: { kind: "chain", desc: "'curve' for a bonding-curve trade, 'amm' for one on the open market. This table holds two things and nothing else: curve buys large enough to count as a buyout, and the market trades those same wallets made on those same tokens afterwards. The second set is here so wallet_flow can be checked against it rather than believed." },
+    market: { kind: "chain", desc: "'curve' for a bonding-curve trade, 'amm' for one on the open market. This table holds two things and nothing else: curve buys large enough to count as a buyout, and the market trades those same wallets made on those same tokens afterwards. The second set is here so wallet_flow can be checked against it rather than believed." },
     is_dev: { kind: "chain", desc: "1 when the trading wallet is the token's creator." },
     slot: { kind: "chain", desc: "Solana slot, where known." },
   },

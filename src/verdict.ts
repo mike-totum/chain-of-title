@@ -23,8 +23,8 @@ const rows = db.prepare(`SELECT mint, symbol, dev_pct, graduated, graduated_at, 
 const opWallets = new Set((db.prepare("SELECT wallet FROM operator_wallets WHERE cluster IS NOT NULL").all() as { wallet: string }[]).map((r) => r.wallet));
 const avoidClusters = new Set((db.prepare("SELECT cluster FROM operator_policy WHERE policy='avoid'").all() as { cluster: string }[]).map((r) => r.cluster));
 const opOnToken = db.prepare(`SELECT DISTINCT w.cluster FROM trades t JOIN operator_wallets w ON w.wallet = t.wallet WHERE t.mint = ? AND w.cluster IS NOT NULL`);
-const buyerConc = db.prepare(`SELECT wallet, SUM(sol) s FROM trades WHERE mint=? AND venue='amm' AND side='buy' GROUP BY wallet ORDER BY s DESC LIMIT 1`);
-const buyTotal = db.prepare(`SELECT COALESCE(SUM(sol),0) s, COUNT(DISTINCT wallet) w FROM trades WHERE mint=? AND venue='amm' AND side='buy'`);
+const buyerConc = db.prepare(`SELECT wallet, SUM(sol) s FROM trades WHERE mint=? AND market='amm' AND side='buy' GROUP BY wallet ORDER BY s DESC LIMIT 1`);
+const buyTotal = db.prepare(`SELECT COALESCE(SUM(sol),0) s, COUNT(DISTINCT wallet) w FROM trades WHERE mint=? AND market='amm' AND side='buy'`);
 
 type Flag = { level: "danger" | "caution"; code: string; why: string };
 function verdict(t: Tok): Flag[] {
@@ -79,7 +79,7 @@ function verdict(t: Tok): Flag[] {
   const bad = cl.filter((c) => avoidClusters.has(c));
   if (bad.length && bt && bt.s > 5) {
     const opBuy = (db.prepare(`SELECT COALESCE(SUM(t.sol),0) s FROM trades t JOIN operator_wallets w ON w.wallet=t.wallet
-      WHERE t.mint=? AND t.venue='amm' AND t.side='buy' AND w.cluster IS NOT NULL`).get(t.mint) as { s: number }).s;
+      WHERE t.mint=? AND t.market='amm' AND t.side='buy' AND w.cluster IS NOT NULL`).get(t.mint) as { s: number }).s;
     const share = opBuy / bt.s;
     if (share >= 0.25)
       f.push({ level: "danger", code: "farm-is-the-demand", why: `${(100 * share).toFixed(0)}% of all buying comes from operator cluster${bad.length > 1 ? "s" : ""} ${bad.join(", ")}, which sell into buyers on the plays we have measured.` });

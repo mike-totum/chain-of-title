@@ -55,7 +55,7 @@ for (const f of [OUT, `${OUT}-wal`, `${OUT}-shm`]) if (existsSync(f)) rmSync(f, 
  * so the seed carries precisely what the published record is built from and nothing else.
  */
 const EVIDENCE_WHERE: Record<string, string> = {
-  trades: `WHERE venue = 'curve' AND side = 'buy' AND sol >= ${BUYOUT_SOL}`,
+  trades: `WHERE market = 'curve' AND side = 'buy' AND sol >= ${BUYOUT_SOL}`,
   hist_trades: `WHERE side = 'buy' AND sol >= ${BUYOUT_SOL}`,
 };
 const tables = ["tokens", "operator_wallets", "operator_funders", "operator_policy", "pool_map", "runs", "signals",

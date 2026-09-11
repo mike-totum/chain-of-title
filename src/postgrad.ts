@@ -32,10 +32,10 @@ const pct = (a: number, b: number) => (b ? `${((100 * a) / b).toFixed(1)}%` : "-
 const toks = q(`SELECT t.mint, t.symbol, t.creator, t.created_at, t.graduated_at, t.launch_price, t.dev_pct, t.unique_buyers, t.late_discovery, o.mcap_sol, o.mcap_usd, o.pool_sol, o.verified
   FROM tokens t LEFT JOIN token_outcomes o ON o.mint=t.mint
   WHERE t.graduated=1 AND t.graduated_at IS NOT NULL AND t.late_discovery=0 AND t.created_at >= ? AND t.finalized=1
-    AND t.mint IN (SELECT DISTINCT mint FROM trades WHERE venue='amm')`, since);
+    AND t.mint IN (SELECT DISTINCT mint FROM trades WHERE market='amm')`, since);
 const crew = new Set((q(`SELECT wallet FROM wallet_teams`) as any[]).map((r) => r.wallet));
 const first10Stmt = db.prepare(`SELECT wallet FROM wallet_token_stats WHERE mint=? AND first_buy_rank<=10`);
-const ammStmt = db.prepare(`SELECT ts, wallet, side, sol, tokens, price FROM trades WHERE mint=? AND venue='amm' AND tokens>=1000 AND sol>=0.0005 ORDER BY ts, id`);
+const ammStmt = db.prepare(`SELECT ts, wallet, side, sol, tokens, price FROM trades WHERE mint=? AND market='amm' AND tokens>=1000 AND sol>=0.0005 ORDER BY ts, id`);
 
 interface Row {
   sym: string; buyers: number; buys: number; sells: number; buySol: number; sellSol: number; net: number; insiderSellShare: number; medBuy: number; bigBuyers: number;

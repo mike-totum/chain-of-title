@@ -69,7 +69,7 @@ const t0 = Date.now();
 if (!READ_ONLY) db.exec(`
   UPDATE tokens SET curve_buyers = (
     SELECT COUNT(DISTINCT tr.wallet) FROM trades tr
-    WHERE tr.mint = tokens.mint AND tr.venue = 'curve' AND tr.side = 'buy' AND COALESCE(tr.is_dev, 0) = 0
+    WHERE tr.mint = tokens.mint AND tr.market = 'curve' AND tr.side = 'buy' AND COALESCE(tr.is_dev, 0) = 0
   )
   WHERE ${FULL ? "1=1" : `curve_buyers IS NULL OR updated_at >= ${Date.now() - RECENT_MS}`}
     AND EXISTS (SELECT 1 FROM trades tr2 WHERE tr2.mint = tokens.mint)
@@ -85,6 +85,15 @@ if (FULL) {
   for (const t of ["tokens", "trades", "hist_trades", "operator_wallets", "operator_policy", "operator_funders", "pool_map", "runs", "meta", "corrections"])
     db.exec(`DROP TABLE IF EXISTS rec.${t}`);
 }
+/**
+ * The published record's own trades.venue becomes trades.market, for the same reason the collector's did.
+ *
+ * CREATE TABLE IF NOT EXISTS does not alter a table that already exists, so an incremental build against a record
+ * written before this change would keep the old column and then insert into the new name. Renamed here, before the
+ * DDL below runs, and caught if it has already happened. A record built fresh gets the new name from the DDL.
+ */
+try { db.exec("ALTER TABLE rec.trades RENAME COLUMN venue TO market"); } catch {}
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS rec.tokens (
     mint TEXT PRIMARY KEY, name TEXT, symbol TEXT, creator TEXT,
@@ -166,7 +175,7 @@ db.exec(`
     -- enough to be a buyout, which is the most serious thing the record says about a launch - one wallet bought the
     -- float and called it demand. Without the signature a reader has to take that on our word, on a record whose
     -- own pages promise it can be checked against the chain. NULL where retention took the row before this existed.
-    mint TEXT NOT NULL, wallet TEXT NOT NULL, side TEXT, sol REAL, ts INTEGER, slot INTEGER, venue TEXT, is_dev INTEGER,
+    mint TEXT NOT NULL, wallet TEXT NOT NULL, side TEXT, sol REAL, ts INTEGER, slot INTEGER, market TEXT, is_dev INTEGER,
     sig TEXT
   );
   CREATE INDEX IF NOT EXISTS rec.trades_mint ON trades(mint, ts);
@@ -449,7 +458,7 @@ try {
     SELECT mint, name, symbol, creator, created_at, COALESCE(late_discovery,0), dev_pct, dev_sold,
            unique_buyers,
            ${READ_ONLY ? `COALESCE(curve_buyers, (SELECT COUNT(DISTINCT tr.wallet) FROM trades tr
-             WHERE tr.mint = main.tokens.mint AND tr.venue='curve' AND tr.side='buy' AND COALESCE(tr.is_dev,0)=0))` : "curve_buyers"},
+             WHERE tr.mint = main.tokens.mint AND tr.market='curve' AND tr.side='buy' AND COALESCE(tr.is_dev,0)=0))` : "curve_buyers"},
            snap30_buyers, bundled_buyers, graduated, graduated_at,
            pool, vault_sol, vault_at, last_price, rebuilt_at, rebuilt_complete, updated_at,
            -- Last, matching both schemas. COALESCE because a collector database migrated mid-run can hold rows
@@ -493,16 +502,16 @@ try {
   // in - 97% of buyouts record a gap of exactly zero. The slot is the one field that could settle it, and leaving it
   // out of the published record meant nobody could check the claim, including us.
   // Named columns, not positional. `slot` is new, and on a record database built before it existed the ALTER above
-  // appends it last - so a positional SELECT would quietly write the slot into `venue` on exactly the incremental
+  // appends it last - so a positional SELECT would quietly write the slot into `market` on exactly the incremental
   // runs the collector actually does. Naming them makes physical column order irrelevant.
-  db.exec(`INSERT INTO rec.trades (mint, wallet, side, sol, ts, slot, venue, is_dev, sig)
-    SELECT mint, wallet, side, sol, ts, slot, venue, COALESCE(is_dev,0), sig
-    FROM main.trades WHERE venue='curve' AND side='buy' AND sol >= ${BUYOUT_SOL}`);
+  db.exec(`INSERT INTO rec.trades (mint, wallet, side, sol, ts, slot, market, is_dev, sig)
+    SELECT mint, wallet, side, sol, ts, slot, market, COALESCE(is_dev,0), sig
+    FROM main.trades WHERE market='curve' AND side='buy' AND sol >= ${BUYOUT_SOL}`);
   /**
    * The AMM trades that `wallet_flow` is computed from, on the mints those wallets actually took.
    *
    * Without them `amm_sell` was the one column in the published file that could not be reproduced FROM the published
-   * file: the record carried no `venue='amm'` rows at all, so a reader could see "this wallet sold 4,515 SOL into
+   * file: the record carried no `market='amm'` rows at all, so a reader could see "this wallet sold 4,515 SOL into
    * buyers" and had no way to check it, or to disagree. For a project whose entire claim is that you should not have
    * to take its word, that is the wrong column to have.
    *
@@ -510,13 +519,13 @@ try {
    * a second, larger claim. 1,916 rows measured 2026-09-08 against 10,773 for the wallet-wide version - small enough
    * that there was never a size reason not to publish it.
    */
-  db.exec(`INSERT INTO rec.trades (mint, wallet, side, sol, ts, slot, venue, is_dev, sig)
-    SELECT t.mint, t.wallet, t.side, t.sol, t.ts, t.slot, t.venue, COALESCE(t.is_dev,0), t.sig
+  db.exec(`INSERT INTO rec.trades (mint, wallet, side, sol, ts, slot, market, is_dev, sig)
+    SELECT t.mint, t.wallet, t.side, t.sol, t.ts, t.slot, t.market, COALESCE(t.is_dev,0), t.sig
     FROM main.trades t
     JOIN (SELECT DISTINCT wallet, mint FROM main.trades
-           WHERE venue='curve' AND side='buy' AND sol >= ${BUYOUT_SOL}) b
+           WHERE market='curve' AND side='buy' AND sol >= ${BUYOUT_SOL}) b
       ON b.wallet = t.wallet AND b.mint = t.mint
-    WHERE t.venue='amm'`);
+    WHERE t.market='amm'`);
   /**
    * `hist_trades` is optional, and assuming otherwise is what has produced every 94 KB record the cloud collector has
    * ever built. The table is created by `history.ts`, which only ever runs on the laptop - so on a collector it does
@@ -575,13 +584,13 @@ try {
    */
   db.exec(`INSERT INTO rec.wallet_flow
     SELECT t.wallet,
-      COALESCE(SUM(CASE WHEN t.venue='curve' AND t.side='buy' THEN t.sol END),0),
-      COALESCE(SUM(CASE WHEN t.venue='amm'   AND t.side='buy' THEN t.sol END),0),
-      COALESCE(SUM(CASE WHEN t.venue='amm'   AND t.side='sell' THEN t.sol END),0),
+      COALESCE(SUM(CASE WHEN t.market='curve' AND t.side='buy' THEN t.sol END),0),
+      COALESCE(SUM(CASE WHEN t.market='amm'   AND t.side='buy' THEN t.sol END),0),
+      COALESCE(SUM(CASE WHEN t.market='amm'   AND t.side='sell' THEN t.sol END),0),
       COUNT(DISTINCT t.mint)
     FROM main.trades t
     JOIN (SELECT DISTINCT wallet, mint FROM main.trades
-           WHERE venue='curve' AND side='buy' AND sol >= ${BUYOUT_SOL}) b
+           WHERE market='curve' AND side='buy' AND sol >= ${BUYOUT_SOL}) b
       ON b.wallet = t.wallet AND b.mint = t.mint
     GROUP BY t.wallet`);
 

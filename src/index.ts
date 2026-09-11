@@ -563,7 +563,7 @@ if (amm) {
     if (!t) return;
     if (cluster) noteOperator(t, tr.user, cluster, tr.side, tr.quoteSol, "amm", tr.price, now);
     ammMatched++;
-    trades.push({ mint, wallet: tr.user, side: tr.side, sol: tr.quoteSol, tokens: tr.baseTokens, price: tr.price, ts: now, slot, sig: "", ageMs: now - t.createdAt, buyerRank: null, isDev: tr.user === t.creator, venue: "amm" });
+    trades.push({ mint, wallet: tr.user, side: tr.side, sol: tr.quoteSol, tokens: tr.baseTokens, price: tr.price, ts: now, slot, sig: "", ageMs: now - t.createdAt, buyerRank: null, isDev: tr.user === t.creator, market: "amm" });
     broker.evaluateEntries(t, now, t.kolSignals > 0);
     broker.update(t, now);
   });

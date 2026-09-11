@@ -29,7 +29,7 @@ const toks = new Map<string, { created_at: number; launch_price: number; p_15m: 
 for (const t of q(`SELECT mint, created_at, launch_price, p_15m, graduated_at FROM tokens WHERE created_at >= ? AND finalized = 1 AND late_discovery = 0 AND launch_price > 0`, since)) toks.set(t.mint, t);
 const rows = q<{ wallet: string; mint: string; first_buy_at: number; first_buy_slot_delta: number | null }>(
   `SELECT wallet, mint, first_buy_at, first_buy_slot_delta FROM wallet_token_stats WHERE token_created_at >= ? AND is_dev = 0 AND first_buy_age_s <= 60 AND sol_in >= 0.05 ORDER BY first_buy_at`, since);
-const pathStmt = db.prepare(`SELECT ts, price FROM trades WHERE mint = ? AND venue = 'curve' AND ts >= ? AND ts <= ? ORDER BY ts, id`);
+const pathStmt = db.prepare(`SELECT ts, price FROM trades WHERE mint = ? AND market = 'curve' AND ts >= ? AND ts <= ? ORDER BY ts, id`);
 
 class Agg { n = 0; sum = 0; wins = 0; xs: number[] = []; add(x: number) { if (x > MAX_X) return; this.n++; this.sum += Math.min(x, CAP_X); if (x > 1) this.wins++; this.xs.push(x); }
   get avg() { return this.n ? this.sum / this.n : null; } get win() { return this.n ? this.wins / this.n : null; }

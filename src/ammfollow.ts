@@ -29,8 +29,8 @@ const pct = (a: number, b: number) => (b ? `${((100 * a) / b).toFixed(0)}%` : "-
 
 interface Trade { ts: number; wallet: string; side: "buy" | "sell"; sol: number; price: number }
 const toks = q<{ mint: string; symbol: string; creator: string; dev_pct: number }>(
-  `SELECT t.mint, t.symbol, t.creator, t.dev_pct FROM tokens t WHERE t.graduated = 1 AND t.created_at >= ? AND EXISTS (SELECT 1 FROM trades x WHERE x.mint = t.mint AND x.venue = 'amm')`, since);
-const tradeStmt = db.prepare(`SELECT ts, wallet, side, sol, price FROM trades WHERE mint = ? AND venue = 'amm' AND tokens >= 1000 AND sol >= 0.0005 ORDER BY ts, id`);
+  `SELECT t.mint, t.symbol, t.creator, t.dev_pct FROM tokens t WHERE t.graduated = 1 AND t.created_at >= ? AND EXISTS (SELECT 1 FROM trades x WHERE x.mint = t.mint AND x.market = 'amm')`, since);
+const tradeStmt = db.prepare(`SELECT ts, wallet, side, sol, price FROM trades WHERE mint = ? AND market = 'amm' AND tokens >= 1000 AND sol >= 0.0005 ORDER BY ts, id`);
 
 // load usable paths
 const paths = new Map<string, { t: (typeof toks)[0]; path: Trade[]; end: number }>();

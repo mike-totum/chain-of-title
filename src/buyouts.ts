@@ -16,13 +16,13 @@ const buyouts = db.prepare(`
   SELECT t.mint, tk.symbol, t.wallet, MAX(t.sol) sol, MIN(t.ts) ts,
          tk.created_at created, tk.dev_pct devPct, tk.graduated, tk.unique_buyers buyers
   FROM trades t JOIN tokens tk ON tk.mint = t.mint
-  WHERE t.venue = 'curve' AND t.side = 'buy' AND t.sol >= ? AND t.ts >= ?
+  WHERE t.market = 'curve' AND t.side = 'buy' AND t.sol >= ? AND t.ts >= ?
   GROUP BY t.mint`).all(MIN_SOL, since) as Buyout[];
 
 console.log(`${buyouts.length} tokens with a >= ${MIN_SOL} SOL single curve buy in the last ${HOURS} h (${(buyouts.length / (HOURS / 24)).toFixed(0)}/day)\n`);
 
-const ammAfter = db.prepare(`SELECT ts, price, sol, side FROM trades WHERE mint = ? AND venue = 'amm' AND ts >= ? ORDER BY ts LIMIT 4000`);
-const curveBefore = db.prepare(`SELECT COUNT(*) n, COALESCE(SUM(sol),0) vol FROM trades WHERE mint = ? AND venue = 'curve' AND ts < ? AND ts >= ?`);
+const ammAfter = db.prepare(`SELECT ts, price, sol, side FROM trades WHERE mint = ? AND market = 'amm' AND ts >= ? ORDER BY ts LIMIT 4000`);
+const curveBefore = db.prepare(`SELECT COUNT(*) n, COALESCE(SUM(sol),0) vol FROM trades WHERE mint = ? AND market = 'curve' AND ts < ? AND ts >= ?`);
 
 type Row = Buyout & { ageH: number; quietH: number; entry: number; mx1: number; mx6: number; mx24: number; last: number; n: number };
 const rows: Row[] = [];

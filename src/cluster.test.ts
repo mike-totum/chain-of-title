@@ -19,7 +19,7 @@ function fixture(withHistory = true) {
            CREATE TABLE operator_policy (cluster TEXT PRIMARY KEY, policy TEXT);
            CREATE TABLE tokens (mint TEXT PRIMARY KEY, symbol TEXT, name TEXT, created_at INTEGER, dev_pct REAL,
              curve_buyers INTEGER, graduated_confirmed_by TEXT);
-           CREATE TABLE trades (mint TEXT, wallet TEXT, side TEXT, sol REAL, ts INTEGER, venue TEXT, is_dev INTEGER,
+           CREATE TABLE trades (mint TEXT, wallet TEXT, side TEXT, sol REAL, ts INTEGER, market TEXT, is_dev INTEGER,
              slot INTEGER, sig TEXT);
            CREATE TABLE wallet_flow (wallet TEXT PRIMARY KEY, curve_sol REAL, amm_buy REAL, amm_sell REAL, tokens INTEGER);`);
   if (withHistory) db.exec(`CREATE TABLE hist_trades (mint TEXT, sig TEXT, idx INTEGER, ts INTEGER, slot INTEGER,
@@ -36,10 +36,10 @@ function fixture(withHistory = true) {
       .run(mint, mint, at - 600_000, 5, 12);
 
   // Watched live: milliseconds, a signature, and a venue.
-  db.prepare(`INSERT INTO trades (mint, wallet, side, sol, ts, venue, sig) VALUES (?,?,?,?,?,?,?)`)
+  db.prepare(`INSERT INTO trades (mint, wallet, side, sol, ts, market, sig) VALUES (?,?,?,?,?,?,?)`)
     .run("MintLive", "WalletOne", "buy", 85, t0 + 1234, "curve", "SigLive");
   if (withHistory) {
-    // Recovered afterwards: seconds, no venue column at all. Invisible to anything that reads `trades` alone.
+    // Recovered afterwards: seconds, no market column at all. Invisible to anything that reads `trades` alone.
     db.prepare(`INSERT INTO hist_trades (mint, wallet, side, sol, ts, sig) VALUES (?,?,?,?,?,?)`)
       .run("MintHist", "WalletTwo", "buy", 85, t0 + 3600_000, "SigHist");
     // The same purchase as the live row, as chain history records it: one second of resolution, so it can only be

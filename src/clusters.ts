@@ -114,7 +114,7 @@ function collectSeeds(): number {
   for (const g of grads) if (g.w) { insWallet.run(g.w, null, null, "buyout", null, g.mint, 0, Date.now()); n++; }
   }
   // live curve buys >= 40 SOL (the buyout size) by anyone
-  const live = db.prepare(`SELECT DISTINCT wallet, mint FROM trades WHERE venue = 'curve' AND side = 'buy' AND sol >= 40`).all() as any[];
+  const live = db.prepare(`SELECT DISTINCT wallet, mint FROM trades WHERE market = 'curve' AND side = 'buy' AND sol >= 40`).all() as any[];
   for (const l of live) { insWallet.run(l.wallet, null, null, "buyout", null, l.mint, 0, Date.now()); n++; }
   return n;
 }
@@ -203,7 +203,7 @@ async function enumerateFunder(funder: string): Promise<{ wallets: Map<string, n
 function buildClusterTrades(): void {
   db.exec(`DROP TABLE IF EXISTS temp.ct`);
   db.exec(`CREATE TEMP TABLE ct AS
-    SELECT w.cluster, w.funder, tr.mint, tr.wallet, tr.side, tr.sol, tr.price, tr.ts, tr.venue
+    SELECT w.cluster, w.funder, tr.mint, tr.wallet, tr.side, tr.sol, tr.price, tr.ts, tr.market
     FROM operator_wallets w JOIN trades tr ON tr.wallet = w.wallet WHERE w.cluster IS NOT NULL`);
   db.exec(`CREATE INDEX temp.ct_cm ON ct(cluster, mint, ts)`);
 }
@@ -275,19 +275,19 @@ function policyTable(): void {
   for (const r of rows.slice(0, 30)) console.log([r.cluster, r.policy, r.hold_plays, r.dist_plays, r.plays, r.manual ? "hand" : "table", r.note].map((v) => String(v ?? "").padEnd(12)).join(""));
 }
 const BEHAVIOUR_SQL = `
-    WITH plays AS (SELECT cluster, mint, COUNT(DISTINCT wallet) wallets, MIN(ts) first_ts FROM ct WHERE venue = 'amm' AND ts >= ? GROUP BY cluster, mint HAVING wallets >= 3),
+    WITH plays AS (SELECT cluster, mint, COUNT(DISTINCT wallet) wallets, MIN(ts) first_ts FROM ct WHERE market = 'amm' AND ts >= ? GROUP BY cluster, mint HAVING wallets >= 3),
     agg AS (SELECT p.cluster, p.mint, p.wallets, p.first_ts,
       SUM(CASE WHEN c.side = 'buy' AND c.ts < p.first_ts + 3600000 THEN c.sol ELSE 0 END) buy_h1,
       SUM(CASE WHEN c.side = 'sell' AND c.ts < p.first_ts + 3600000 THEN c.sol ELSE 0 END) sell_h1,
       SUM(CASE WHEN c.side = 'buy' AND c.ts >= p.first_ts + 3600000 THEN c.sol ELSE 0 END) buy_later,
       SUM(CASE WHEN c.side = 'sell' AND c.ts >= p.first_ts + 3600000 THEN c.sol ELSE 0 END) sell_later,
       MIN(CASE WHEN c.ts = p.first_ts THEN c.price END) p_first
-      FROM plays p JOIN ct c ON c.cluster = p.cluster AND c.mint = p.mint AND c.venue = 'amm' GROUP BY p.cluster, p.mint),
-    px AS (SELECT mint, MAX(price) p_peak, COUNT(DISTINCT CASE WHEN side = 'buy' THEN wallet END) buyers FROM trades WHERE venue = 'amm' AND mint IN (SELECT mint FROM plays) GROUP BY mint),
-    lastpx AS (SELECT mint, price p_last FROM trades WHERE venue = 'amm' AND mint IN (SELECT mint FROM plays) AND id IN (SELECT MAX(id) FROM trades WHERE venue = 'amm' AND mint IN (SELECT mint FROM plays) GROUP BY mint))
+      FROM plays p JOIN ct c ON c.cluster = p.cluster AND c.mint = p.mint AND c.market = 'amm' GROUP BY p.cluster, p.mint),
+    px AS (SELECT mint, MAX(price) p_peak, COUNT(DISTINCT CASE WHEN side = 'buy' THEN wallet END) buyers FROM trades WHERE market = 'amm' AND mint IN (SELECT mint FROM plays) GROUP BY mint),
+    lastpx AS (SELECT mint, price p_last FROM trades WHERE market = 'amm' AND mint IN (SELECT mint FROM plays) AND id IN (SELECT MAX(id) FROM trades WHERE market = 'amm' AND mint IN (SELECT mint FROM plays) GROUP BY mint))
     SELECT a.cluster, t.symbol, a.wallets, ROUND((COALESCE(t.graduated_at, a.first_ts) - t.created_at) / 3600000.0, 1) grad_h,
       ROUND(a.buy_h1, 1) buy_h1, ROUND(a.sell_h1, 1) sell_h1, ROUND(a.buy_later, 1) buy_later, ROUND(a.sell_later, 1) sell_later,
-      (SELECT COUNT(DISTINCT x.wallet) FROM trades x WHERE x.mint = a.mint AND x.venue = 'amm' AND x.side = 'buy' AND x.wallet NOT IN (SELECT wallet FROM operator_wallets)) outside_buyers, ROUND(lastpx.p_last / NULLIF(a.p_first, 0), 2) px_last, ROUND(px.p_peak / NULLIF(a.p_first, 0), 2) px_peak,
+      (SELECT COUNT(DISTINCT x.wallet) FROM trades x WHERE x.mint = a.mint AND x.market = 'amm' AND x.side = 'buy' AND x.wallet NOT IN (SELECT wallet FROM operator_wallets)) outside_buyers, ROUND(lastpx.p_last / NULLIF(a.p_first, 0), 2) px_last, ROUND(px.p_peak / NULLIF(a.p_first, 0), 2) px_peak,
       (SELECT ROUND(o.mcap_sol) FROM token_outcomes o WHERE o.mint = a.mint AND o.verified) mcap_now
     FROM agg a JOIN tokens t ON t.mint = a.mint LEFT JOIN px ON px.mint = a.mint LEFT JOIN lastpx ON lastpx.mint = a.mint
     ORDER BY a.first_ts DESC LIMIT 400`;

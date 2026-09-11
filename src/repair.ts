@@ -12,9 +12,9 @@ const db = openDb(config.dbPath);
 
 const rows = db.prepare(`
   SELECT t.mint, t.symbol, t.unique_buyers stored,
-         (SELECT COUNT(DISTINCT wallet) FROM trades x WHERE x.mint=t.mint AND x.venue='curve' AND x.side='buy' AND x.is_dev=0) real_buyers,
-         (SELECT COUNT(*) FROM trades x WHERE x.mint=t.mint AND x.venue='curve' AND x.side='buy') buys,
-         (SELECT COALESCE(SUM(sol),0) FROM trades x WHERE x.mint=t.mint AND x.venue='curve' AND x.side='buy') buyvol
+         (SELECT COUNT(DISTINCT wallet) FROM trades x WHERE x.mint=t.mint AND x.market='curve' AND x.side='buy' AND x.is_dev=0) real_buyers,
+         (SELECT COUNT(*) FROM trades x WHERE x.mint=t.mint AND x.market='curve' AND x.side='buy') buys,
+         (SELECT COALESCE(SUM(sol),0) FROM trades x WHERE x.mint=t.mint AND x.market='curve' AND x.side='buy') buyvol
   FROM tokens t
   WHERE t.late_discovery = 0 AND COALESCE(t.unique_buyers,0) = 0
 `).all() as any[];

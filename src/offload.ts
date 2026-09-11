@@ -128,7 +128,7 @@ export async function offloadTrades(db: any, o: OffloadOptions = {}): Promise<Of
    */
   const keep = new Set<string>();
   for (const b of db.prepare(
-    `SELECT DISTINCT wallet, mint FROM trades WHERE venue='curve' AND side='buy' AND sol >= ?`).all(BUYOUT_SOL) as any[])
+    `SELECT DISTINCT wallet, mint FROM trades WHERE market='curve' AND side='buy' AND sol >= ?`).all(BUYOUT_SOL) as any[])
     keep.add(`${b.wallet} ${b.mint}`);
   const isEvidence = (r: any) =>
     (r.venue === "curve" && r.side === "buy" && Number(r.sol) >= BUYOUT_SOL) ||

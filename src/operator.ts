@@ -8,6 +8,7 @@
  */
 import { config } from "./config.ts";
 import { openDb } from "./db.ts";
+import { tradeMarketColumn } from "./provenance.ts";
 
 const BUYOUT_SOL = 40;
 
@@ -28,6 +29,8 @@ export interface Profile {
 // prepared once per database handle instead of on every call.
 const buyoutStmts = new WeakMap<object, { live: any; hist: any | null }>();
 function stmts(dbh: any) {
+  // Which name this database gives the curve/amm column. See tradeMarketColumn.
+  const MKT = tradeMarketColumn(dbh);
   let s = buyoutStmts.get(dbh);
   if (!s) {
     s = {
@@ -35,7 +38,7 @@ function stmts(dbh: any) {
       // from the row that supplied the extreme value, so this is the signature of the largest buy and not some other
       // row's. That guarantee is specific to a single MAX or MIN, which is why it is spelled out rather than assumed.
       live: dbh.prepare(`SELECT wallet, MAX(sol) sol, MIN(ts) ts, sig FROM trades
-        WHERE mint = ? AND venue='curve' AND side='buy' AND sol >= ? GROUP BY wallet ORDER BY sol DESC LIMIT 1`),
+        WHERE mint = ? AND ${MKT}='curve' AND side='buy' AND sol >= ? GROUP BY wallet ORDER BY sol DESC LIMIT 1`),
       hist: (() => {
         try {
           return dbh.prepare(`SELECT wallet, MAX(sol) sol, MIN(ts) ts, sig FROM hist_trades
@@ -49,6 +52,8 @@ function stmts(dbh: any) {
 }
 
 export function findBuyout(dbh: any, mint: string, minSol = 40): { wallet: string; sol: number; ts: number; sig?: string | null } | null {
+  // Which name this database gives the curve/amm column. See tradeMarketColumn.
+  const MKT = tradeMarketColumn(dbh);
   const s = stmts(dbh);
   const live = s.live.get(mint, minSol) as any;
   if (live) return live;
@@ -65,8 +70,8 @@ export function findBuyout(dbh: any, mint: string, minSol = 40): { wallet: strin
  * the pair. Every count of a cluster's curves goes through this, because the alternative is what happened: three
  * call sites, two of them reading only `trades`, and two pages linked to each other disagreeing by five.
  */
-const CLUSTER_BUYS = `SELECT t.wallet wallet, t.mint mint FROM trades t JOIN operator_wallets w ON w.wallet = t.wallet
-     WHERE t.venue='curve' AND t.side='buy' AND t.sol >= ${BUYOUT_SOL} AND w.cluster = ?
+const CLUSTER_BUYS = (MKT: string) => `SELECT t.wallet wallet, t.mint mint FROM trades t JOIN operator_wallets w ON w.wallet = t.wallet
+     WHERE t.${MKT}='curve' AND t.side='buy' AND t.sol >= ${BUYOUT_SOL} AND w.cluster = ?
      GROUP BY t.wallet, t.mint
    UNION
    SELECT h.wallet, h.mint FROM hist_trades h JOIN operator_wallets w ON w.wallet = h.wallet
@@ -75,18 +80,22 @@ const CLUSTER_BUYS = `SELECT t.wallet wallet, t.mint mint FROM trades t JOIN ope
 
 /** How many distinct bonding curves a cluster has taken. Null-safe against a database with no `hist_trades`. */
 export function clusterCurveCount(dbh: any, cluster: string): number {
+  // Which name this database gives the curve/amm column. See tradeMarketColumn.
+  const MKT = tradeMarketColumn(dbh);
   try {
-    return Number((dbh.prepare(`SELECT COUNT(DISTINCT mint) c FROM (${CLUSTER_BUYS})`).get(cluster, cluster) as any).c);
+    return Number((dbh.prepare(`SELECT COUNT(DISTINCT mint) c FROM (${CLUSTER_BUYS(MKT)})`).get(cluster, cluster) as any).c);
   } catch {
     return Number((dbh.prepare(`SELECT COUNT(DISTINCT t.mint) c FROM trades t JOIN operator_wallets w ON w.wallet = t.wallet
-      WHERE t.venue='curve' AND t.side='buy' AND t.sol >= ${BUYOUT_SOL} AND w.cluster = ?`).get(cluster) as any).c);
+      WHERE t.${MKT}='curve' AND t.side='buy' AND t.sol >= ${BUYOUT_SOL} AND w.cluster = ?`).get(cluster) as any).c);
   }
 }
 
 export function profile(dbh: any, w: string): Profile {
+  // Which name this database gives the curve/amm column. See tradeMarketColumn.
+  const MKT = tradeMarketColumn(dbh);
   const buyouts = dbh.prepare(`SELECT t.mint, tk.symbol, MAX(t.sol) sol, MIN(t.ts) ts, tk.created_at
     FROM trades t LEFT JOIN tokens tk ON tk.mint = t.mint
-    WHERE t.wallet = ? AND t.venue='curve' AND t.side='buy' AND t.sol >= ?
+    WHERE t.wallet = ? AND t.${MKT}='curve' AND t.side='buy' AND t.sol >= ?
     GROUP BY t.mint ORDER BY ts DESC`).all(w, BUYOUT_SOL) as any[];
   // reconstructed curves count too, or a wallet's record is understated by exactly the winners we rebuilt by hand
   try {
@@ -105,9 +114,9 @@ export function profile(dbh: any, w: string): Profile {
     catch { return null; }
   })();
   if (!flow) flow = dbh.prepare(`SELECT
-      COALESCE(SUM(CASE WHEN venue='curve' AND side='buy' THEN sol END),0) curveSol,
-      COALESCE(SUM(CASE WHEN venue='amm'   AND side='buy' THEN sol END),0) ammBuy,
-      COALESCE(SUM(CASE WHEN venue='amm'   AND side='sell' THEN sol END),0) ammSell,
+      COALESCE(SUM(CASE WHEN ${MKT}='curve' AND side='buy' THEN sol END),0) curveSol,
+      COALESCE(SUM(CASE WHEN ${MKT}='amm'   AND side='buy' THEN sol END),0) ammBuy,
+      COALESCE(SUM(CASE WHEN ${MKT}='amm'   AND side='sell' THEN sol END),0) ammSell,
       COUNT(DISTINCT mint) tokens
     FROM trades WHERE wallet = ?`).get(w) as any;
   const op = dbh.prepare("SELECT cluster, funder FROM operator_wallets WHERE wallet = ?").get(w) as any;
@@ -216,6 +225,8 @@ export interface ClusterProfile {
  * `profile()` already uses. Counting rows instead plotted six of FC9BqG's curves twice.
  */
 export function clusterProfile(dbh: any, cluster: string): ClusterProfile {
+  // Which name this database gives the curve/amm column. See tradeMarketColumn.
+  const MKT = tradeMarketColumn(dbh);
   const wallets = dbh.prepare(
     `SELECT wallet, role, funder FROM operator_wallets WHERE cluster = ? ORDER BY wallet`
   ).all(cluster) as any[];
@@ -242,7 +253,7 @@ export function clusterProfile(dbh: any, cluster: string): ClusterProfile {
   for (const r of dbh.prepare(
     `SELECT t.wallet, t.mint, MIN(t.ts) ts, MAX(t.sol) sol, t.sig, ${cols}
      FROM trades t LEFT JOIN tokens tk ON tk.mint = t.mint
-     WHERE t.wallet IN (${holes}) AND t.venue='curve' AND t.side='buy' AND t.sol >= ?
+     WHERE t.wallet IN (${holes}) AND t.${MKT}='curve' AND t.side='buy' AND t.sol >= ?
      GROUP BY t.wallet, t.mint`).all(...list, BUYOUT_SOL) as any[]) add(r);
   // Reconstructed curves count too, exactly as they do on a wallet page. A collector database has no `hist_trades`
   // at all, so its absence is normal and not a fault.
@@ -296,12 +307,14 @@ export interface ClusterRow {
  * calling the group it belongs to an operator, and the wallet page already says everything we know about it.
  */
 export function clusterTable(dbh: any, limit = 10): ClusterRow[] {
+  // Which name this database gives the curve/amm column. See tradeMarketColumn.
+  const MKT = tradeMarketColumn(dbh);
   const shape = (from: string) => `SELECT cluster, COUNT(DISTINCT wallet) used, COUNT(DISTINCT mint) curves,
       SUM(sol) sol, MAX(ts) last, (SELECT COUNT(*) FROM operator_wallets x WHERE x.cluster = b.cluster) funded
     FROM (${from}) b GROUP BY cluster HAVING used >= 2 ORDER BY curves DESC, sol DESC LIMIT ?`;
   const live = `SELECT w.cluster cluster, t.wallet wallet, t.mint mint, MIN(t.ts) ts, MAX(t.sol) sol
       FROM trades t JOIN operator_wallets w ON w.wallet = t.wallet
-     WHERE t.venue='curve' AND t.side='buy' AND t.sol >= ${BUYOUT_SOL} AND w.cluster IS NOT NULL
+     WHERE t.${MKT}='curve' AND t.side='buy' AND t.sol >= ${BUYOUT_SOL} AND w.cluster IS NOT NULL
      GROUP BY t.wallet, t.mint`;
   // A collector database has no `hist_trades` at all, so the reconstructed half is attempted and not required.
   const both = `${live}
@@ -310,7 +323,7 @@ export function clusterTable(dbh: any, limit = 10): ClusterRow[] {
       FROM hist_trades h JOIN operator_wallets w ON w.wallet = h.wallet
      WHERE h.side='buy' AND h.sol >= ${BUYOUT_SOL} AND w.cluster IS NOT NULL
        AND NOT EXISTS (SELECT 1 FROM trades t2 WHERE t2.wallet = h.wallet AND t2.mint = h.mint
-                        AND t2.venue='curve' AND t2.side='buy' AND t2.sol >= ${BUYOUT_SOL})
+                        AND t2.${MKT}='curve' AND t2.side='buy' AND t2.sol >= ${BUYOUT_SOL})
      GROUP BY h.wallet, h.mint`;
   const run = (sql: string) => (dbh.prepare(sql).all(limit) as any[]).map((r): ClusterRow => ({
     cluster: r.cluster, funded: Number(r.funded), used: Number(r.used),

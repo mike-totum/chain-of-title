@@ -43,11 +43,11 @@ interface Tok { mint: string; symbol: string; creator: string; created_at: numbe
 const toks = q<Tok>(
   `SELECT t.mint, t.symbol, t.creator, t.created_at, t.graduated_at, t.kol_signals, t.dev_pct, t.unique_buyers, t.late_discovery, o.mcap_sol, o.mcap_usd, o.pool_sol, o.verified
    FROM tokens t LEFT JOIN token_outcomes o ON o.mint = t.mint
-   WHERE t.graduated = 1 AND t.created_at >= ? AND EXISTS (SELECT 1 FROM trades x WHERE x.mint = t.mint AND x.venue = 'amm')`,
+   WHERE t.graduated = 1 AND t.created_at >= ? AND EXISTS (SELECT 1 FROM trades x WHERE x.mint = t.mint AND x.market = 'amm')`,
   since,
 );
-const tradeStmt = db.prepare(`SELECT ts, wallet, side, sol, price FROM trades WHERE mint = ? AND venue = 'amm' AND tokens >= 1000 AND sol >= 0.0005 ORDER BY ts, id`);
-const countStmt = db.prepare(`SELECT COUNT(*) n FROM trades WHERE mint = ? AND venue = 'amm'`);
+const tradeStmt = db.prepare(`SELECT ts, wallet, side, sol, price FROM trades WHERE mint = ? AND market = 'amm' AND tokens >= 1000 AND sol >= 0.0005 ORDER BY ts, id`);
+const countStmt = db.prepare(`SELECT COUNT(*) n FROM trades WHERE mint = ? AND market = 'amm'`);
 const first10Stmt = db.prepare(`SELECT wallet FROM wallet_token_stats WHERE mint = ? AND first_buy_rank <= 10`);
 
 // ---------- exits ----------

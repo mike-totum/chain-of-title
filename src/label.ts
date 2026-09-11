@@ -29,7 +29,7 @@ export function organicDemand(db: DatabaseSync, t: { mint: string; dev_pct?: num
   if (!t.late_discovery && (t.dev_pct ?? 0) >= REAL_MAX_DEV_PCT) return false;
   if ((t.unique_buyers ?? 0) >= REAL_MIN_BUYERS) return true;
   let st = ammBuyersStmt.get(db);
-  if (!st) { st = db.prepare("SELECT COUNT(DISTINCT wallet) n FROM trades WHERE mint = ? AND venue = 'amm' AND side = 'buy'"); ammBuyersStmt.set(db, st); }
+  if (!st) { st = db.prepare("SELECT COUNT(DISTINCT wallet) n FROM trades WHERE mint = ? AND market = 'amm' AND side = 'buy'"); ammBuyersStmt.set(db, st); }
   return ((st.get(t.mint) as any)?.n ?? 0) >= REAL_MIN_BUYERS;
 }
 

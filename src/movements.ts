@@ -14,7 +14,7 @@ const sigs = db.prepare(`SELECT source, mint, symbol, text, seen_at FROM signals
   WHERE source IN ('movement','buyout','lategrad') AND seen_at >= ? ORDER BY seen_at`).all(since) as
   { source: string; mint: string; symbol: string; text: string; seen_at: number }[];
 
-const path = db.prepare(`SELECT ts, price, sol FROM trades WHERE mint = ? AND venue = 'amm' AND ts >= ? ORDER BY ts LIMIT 6000`);
+const path = db.prepare(`SELECT ts, price, sol FROM trades WHERE mint = ? AND market = 'amm' AND ts >= ? ORDER BY ts LIMIT 6000`);
 type R = { source: string; symbol: string; mint: string; text: string; at: number; entry: number; mx: (h: number) => number; last: number; n: number };
 const rows: R[] = [];
 for (const s of sigs) {

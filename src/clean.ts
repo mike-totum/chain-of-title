@@ -59,11 +59,11 @@ const farmOn = db.prepare(`SELECT DISTINCT w.cluster FROM trades t JOIN operator
 // ~9.5 h until one 85 SOL buy took the whole curve - the operator buyout pattern. "Took 9.5h to fill" reads as healthy
 // slow growth in a table and is the opposite. A curve completed by a single large buy was bought, not filled.
 const BUYOUT_SOL = 40;
-const buyout = db.prepare(`SELECT wallet, sol FROM trades WHERE mint=? AND venue='curve' AND side='buy' AND sol>=?
+const buyout = db.prepare(`SELECT wallet, sol FROM trades WHERE mint=? AND market='curve' AND side='buy' AND sol>=?
   ORDER BY sol DESC LIMIT 1`);
-const buyTot = db.prepare(`SELECT COALESCE(SUM(sol),0) s FROM trades WHERE mint=? AND venue='amm' AND side='buy'`);
+const buyTot = db.prepare(`SELECT COALESCE(SUM(sol),0) s FROM trades WHERE mint=? AND market='amm' AND side='buy'`);
 const farmBuy = db.prepare(`SELECT COALESCE(SUM(t.sol),0) s FROM trades t JOIN operator_wallets w ON w.wallet=t.wallet
-  WHERE t.mint=? AND t.venue='amm' AND t.side='buy' AND w.cluster IS NOT NULL`);
+  WHERE t.mint=? AND t.market='amm' AND t.side='buy' AND w.cluster IS NOT NULL`);
 const final = clean.map((t) => {
   const cl = (farmOn.all(t.mint) as any[]).map((r) => r.cluster).filter((c: string) => avoid.has(c));
   const tot = (buyTot.get(t.mint) as any).s as number;

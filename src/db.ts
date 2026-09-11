@@ -112,7 +112,7 @@ export function openDb(path: string, opts: { migrate?: boolean } = {}): Database
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       mint TEXT NOT NULL, wallet TEXT NOT NULL, side TEXT NOT NULL,
       sol REAL, tokens REAL, price REAL, ts INTEGER, slot INTEGER, sig TEXT,
-      age_ms INTEGER, buyer_rank INTEGER, is_dev INTEGER DEFAULT 0, venue TEXT DEFAULT 'curve'
+      age_ms INTEGER, buyer_rank INTEGER, is_dev INTEGER DEFAULT 0, market TEXT DEFAULT 'curve'
     );
     CREATE INDEX IF NOT EXISTS trades_mint ON trades(mint, ts);
     CREATE INDEX IF NOT EXISTS trades_wallet ON trades(wallet);
@@ -253,6 +253,23 @@ export function openDb(path: string, opts: { migrate?: boolean } = {}): Database
   try { db.exec("ALTER TABLE tokens ADD COLUMN venue TEXT NOT NULL DEFAULT 'pumpfun'"); } catch {}
   // Same reasoning for runs, and the same default: every window already recorded was a pump.fun window.
   try { db.exec("ALTER TABLE runs ADD COLUMN venue TEXT NOT NULL DEFAULT 'pumpfun'"); } catch {}
+
+  /**
+   * trades.venue becomes trades.market.
+   *
+   * A metadata-only rename in SQLite, which is the only reason it is safe to do on an 11 GB table inside the
+   * ingesting process: no rows are rewritten and no index is rebuilt. It runs before any statement is prepared, so
+   * a process that boots on an old database renames it and then queries the new name; a process that boots on a
+   * renamed one throws here and is caught. Both end in the same place, which is what makes the deploy order not
+   * matter.
+   *
+   * The old name meant the market a trade happened on while tokens.venue means the launchpad - one word, two
+   * meanings, in a schema whose whole discipline is that a word means one thing. Renamed now because with a second
+   * launchpad an unqualified `venue` in any query spanning both tables silently resolves to whichever the planner
+   * picks, and that is not a failure anyone would see.
+   */
+  try { db.exec("ALTER TABLE trades RENAME COLUMN venue TO market"); } catch {}
+  try { db.exec("ALTER TABLE hist_trades RENAME COLUMN venue TO market"); } catch {}
   /**
    * How we know a curve completed: 'pool', 'curve_complete', or NULL.
    *
@@ -501,7 +518,15 @@ export interface TradeRow {
   ageMs: number;
   buyerRank: number | null;
   isDev: boolean;
-  venue?: "curve" | "amm";
+  /**
+   * Which market the trade happened on, and it is NOT the launch venue.
+   *
+   * This column was called `venue` while `tokens.venue` means the launchpad, so one word named two different things
+   * in one schema - in a project whose stated rule is one word, one meaning. Harmless while pump.fun was the only
+   * launchpad and a silent trap the day there are two: every query mentioning an unqualified `venue` across a join
+   * would mean whichever the planner resolved it to. Renamed while the answer was still unambiguous.
+   */
+  market?: "curve" | "amm";
 }
 
 /** Buffers trade rows and writes them in one transaction per second. */
@@ -512,7 +537,7 @@ export class TradeWriter {
   written = 0;
   constructor(private db: DatabaseSync) {
     this.stmt = db.prepare(
-      `INSERT INTO trades (mint, wallet, side, sol, tokens, price, ts, slot, sig, age_ms, buyer_rank, is_dev, venue) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      `INSERT INTO trades (mint, wallet, side, sol, tokens, price, ts, slot, sig, age_ms, buyer_rank, is_dev, market) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     );
     this.timer = setInterval(() => this.flush(), 1000);
   }
@@ -525,7 +550,7 @@ export class TradeWriter {
     this.queue = [];
     this.db.exec("BEGIN");
     try {
-      for (const r of rows) this.stmt.run(r.mint, r.wallet, r.side, r.sol, r.tokens, r.price, r.ts, r.slot, r.sig, r.ageMs, r.buyerRank, r.isDev ? 1 : 0, r.venue ?? "curve");
+      for (const r of rows) this.stmt.run(r.mint, r.wallet, r.side, r.sol, r.tokens, r.price, r.ts, r.slot, r.sig, r.ageMs, r.buyerRank, r.isDev ? 1 : 0, r.market ?? "curve");
       this.db.exec("COMMIT");
       this.written += rows.length;
     } catch (e) {
@@ -552,10 +577,10 @@ export function finalizeTokenTrades(db: DatabaseSync, t: TokenState, opts: { kee
     `INSERT INTO wallet_token_stats (mint, wallet, first_buy_at, first_buy_age_s, first_buy_rank, first_buy_slot_delta, buys, sells, sol_in, sol_out,
        tokens_net, realized_pnl_sol, unrealized_sol, last_trade_at, hold_s, is_dev, token_graduated, token_peak_x, token_created_at)
      SELECT mint, wallet,
-       MIN(CASE WHEN side='buy' AND venue='curve' THEN ts END),
-       MIN(CASE WHEN side='buy' AND venue='curve' THEN age_ms END) / 1000.0,
-       MIN(CASE WHEN side='buy' AND venue='curve' THEN buyer_rank END),
-       CASE WHEN ? > 0 THEN MIN(CASE WHEN side='buy' AND venue='curve' THEN slot END) - ? END,
+       MIN(CASE WHEN side='buy' AND market='curve' THEN ts END),
+       MIN(CASE WHEN side='buy' AND market='curve' THEN age_ms END) / 1000.0,
+       MIN(CASE WHEN side='buy' AND market='curve' THEN buyer_rank END),
+       CASE WHEN ? > 0 THEN MIN(CASE WHEN side='buy' AND market='curve' THEN slot END) - ? END,
        SUM(side='buy'), SUM(side='sell'),
        SUM(CASE WHEN side='buy' THEN sol ELSE 0 END), SUM(CASE WHEN side='sell' THEN sol ELSE 0 END),
        SUM(CASE WHEN side='buy' THEN tokens ELSE -tokens END),
@@ -568,8 +593,8 @@ export function finalizeTokenTrades(db: DatabaseSync, t: TokenState, opts: { kee
   ).run(t.createdSlot, t.createdSlot, t.lastPrice, t.graduated ? 1 : 0, t.launchPrice > 0 ? t.peakPrice / t.launchPrice : null, t.createdAt, t.mint);
   if (!opts.keepAll) {
     const keepCurve = opts.keepCurve ?? 100, keepAmm = opts.keepAmm ?? 0;
-    db.prepare(`DELETE FROM trades WHERE mint = ? AND venue = 'curve' AND id NOT IN (SELECT id FROM trades WHERE mint = ? AND venue = 'curve' ORDER BY ts, id LIMIT ?)`).run(t.mint, t.mint, keepCurve);
-    db.prepare(`DELETE FROM trades WHERE mint = ? AND venue = 'amm' AND id NOT IN (SELECT id FROM trades WHERE mint = ? AND venue = 'amm' ORDER BY ts, id LIMIT ?)`).run(t.mint, t.mint, keepAmm);
+    db.prepare(`DELETE FROM trades WHERE mint = ? AND market = 'curve' AND id NOT IN (SELECT id FROM trades WHERE mint = ? AND market = 'curve' ORDER BY ts, id LIMIT ?)`).run(t.mint, t.mint, keepCurve);
+    db.prepare(`DELETE FROM trades WHERE mint = ? AND market = 'amm' AND id NOT IN (SELECT id FROM trades WHERE mint = ? AND market = 'amm' ORDER BY ts, id LIMIT ?)`).run(t.mint, t.mint, keepAmm);
   }
 }
 

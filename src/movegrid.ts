@@ -11,7 +11,7 @@ db.exec("PRAGMA query_only = 1");
 
 const sigs = db.prepare(`SELECT mint, symbol, text, seen_at FROM signals WHERE source='movement' AND seen_at >= ? ORDER BY seen_at`)
   .all(Date.now() - HOURS * 3600_000) as { mint: string; symbol: string; text: string; seen_at: number }[];
-const pathQ = db.prepare(`SELECT ts, price, sol FROM trades WHERE mint=? AND venue='amm' AND ts>=? ORDER BY ts LIMIT 8000`);
+const pathQ = db.prepare(`SELECT ts, price, sol FROM trades WHERE mint=? AND market='amm' AND ts>=? ORDER BY ts LIMIT 8000`);
 
 /** the wash factory relaunches the same ticker families all day; they should not be counted as organic demand */
 const FAMILY = /^(pons|z|stonk|wofi|usms|rst|lqx|goaf|wotf|ftfs|uotf)/i;

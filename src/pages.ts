@@ -329,7 +329,7 @@ WHERE graduated_confirmed_by IS NOT NULL
     <tr><td class="mono" style="white-space:pre-wrap">SELECT t.wallet, COUNT(*) curves,
   ROUND(SUM(t.sol)) sol
 FROM trades t
-WHERE t.venue='curve' AND t.side='buy'
+WHERE t.market='curve' AND t.side='buy'
 GROUP BY t.wallet ORDER BY curves DESC;</td><td>who takes the most curves, counted from the trade rows in this file rather than from an aggregate you cannot check</td></tr>
     <tr><td class="mono" style="white-space:pre-wrap">SELECT COUNT(*) FROM tokens
 WHERE graduated=1

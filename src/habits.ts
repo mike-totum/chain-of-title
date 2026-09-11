@@ -203,7 +203,7 @@ const OWN_L = ["lost >20%", "lost 0-20%", "made 0-50%", "made >=50%"];
 const wfollower = { n: 0, sol: 0 };
 const wfollowerReal = { n: 0, sol: 0, wins: 0, big: 0 };
 // realistic copy-trade entry: the first stored trade >= 1.5 s after the wallet's buy (its price is what we would have paid)
-const fillStmt = db.prepare("SELECT price FROM trades WHERE mint = ? AND venue = 'curve' AND ts >= ? ORDER BY ts, id LIMIT 1");
+const fillStmt = db.prepare("SELECT price FROM trades WHERE mint = ? AND market = 'curve' AND ts >= ? ORDER BY ts, id LIMIT 1");
 const wbaseReal = new Bucket();
 for (const r of wrows) {
   const t = tokByMint.get(r.mint);
