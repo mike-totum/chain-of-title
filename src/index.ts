@@ -9,7 +9,7 @@ import { RpcFeed } from "./feed/rpc.ts";
 import { PumpSwapFeed } from "./feed/pumpswap.ts";
 import { Tracker, fetchMeta, fetchMetaResult } from "./tracker.ts";
 import { PaperBroker } from "./paper.ts";
-import { strategies, type OperatorActivity } from "./strategies/index.ts";
+import { strategies, ALL_STRATEGIES, type OperatorActivity } from "./strategies/index.ts";
 import { rpc as rpcHttpCall } from "./rpc-http.ts";
 import { BUYOUT_SOL, TOKEN_COLUMNS, KEEP_TRADE_EVIDENCE, keepTweetEvidence, coverageWindows, assess } from "./provenance.ts";
 import { base58 } from "./feed/rpc.ts";
@@ -1108,8 +1108,18 @@ setTimeout(pruneWorkingData, 10 * 60_000); // once shortly after start, not duri
 
 feed.connect();
 log(`source=${config.tradeSource}${config.tradeSource === "rpc" ? ` (${config.solanaWsUrl.replace(/\?.*$/, "")})` : ""}`);
-log(`paper trading ${strategies.length} strategies, ${config.buySol} SOL per buy, ${config.fillLatencyMs}ms fill latency, ${config.watchMinutes}m watch window → ${config.dbPath}`);
-for (const s of strategies) log(`   ${s.name.padEnd(16)} ${s.description}`);
+/**
+ * Say which it is. "paper trading 0 strategies" is the kind of line a reader skims past as a rounding error rather
+ * than reading as a deliberate state, and this one is deliberate: the thesis is dead and the strategies are off so
+ * that ingestion is not sharing a thread with an answered question.
+ */
+if (strategies.length) {
+  log(`paper trading ${strategies.length} strategies, ${config.buySol} SOL per buy, ${config.fillLatencyMs}ms fill latency, ${config.watchMinutes}m watch window → ${config.dbPath}`);
+  for (const s of strategies) log(`   ${s.name.padEnd(16)} ${s.description}`);
+} else {
+  log(`paper trading OFF (${ALL_STRATEGIES.length} strategies available; PAPER=1 to run them). The curve thesis is `
+    + `settled — 0 of 19,412 positions ever reached 5x — and this process's job is ingestion.`);
+}
 
 function shutdown() {
   log("shutting down: closing open paper positions at last price");

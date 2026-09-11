@@ -321,4 +321,24 @@ export const clusterFollow: Strategy = {
   exit: { takeProfitX: 1000, stopLossX: 0.6, trailArmX: 1.5, trailDropPct: 35, maxHoldS: 12 * 3600, exitOnDevSell: false, exitOnOperatorSell: { windowS: 1800, ratio: 1.5 } },
 };
 
-export const strategies: Strategy[] = [baselineAll, filteredAll, earlyMomentum, strictMomentum, kolSignal, smartWallet, teamWallet, gradRunner, survivorTrail, clusterFollow];
+/**
+ * Every paper strategy ever written here, and by default none of them run.
+ *
+ * These belong to the trading thesis, which was tested and is dead: zero of 19,412 bonding-curve positions ever
+ * reached 5x, because graduation caps the curve near 15x, so any strategy paying bounded losses to catch a big
+ * winner is *required* to fail there. That is a proof of impossibility rather than a weak result, and it is why
+ * every strategy below lands at roughly the fee.
+ *
+ * They kept running anyway, inside the collector — ten of them, evaluated on every launch and every trade, in the
+ * one process whose only irreplaceable job is ingestion. On 2026-09-11 the collector's health endpoint timed out
+ * for four minutes while its log carried 225 `baseline-all` events in a forty-second sample. Ingestion survived;
+ * it should not have had to compete. The thing that must never be starved of attention was sharing a thread with a
+ * question that has already been answered.
+ *
+ * Kept in the file, not deleted: re-checking a settled claim is worth being able to do, and a dead thesis with its
+ * apparatus intact is evidence. `PAPER=1` brings them back for a local run. Nothing in the archive depends on them
+ * — an empty list makes every loop in PaperBroker a no-op, which is why this is the whole of the change.
+ */
+export const ALL_STRATEGIES: Strategy[] = [baselineAll, filteredAll, earlyMomentum, strictMomentum, kolSignal, smartWallet, teamWallet, gradRunner, survivorTrail, clusterFollow];
+
+export const strategies: Strategy[] = process.env.PAPER === "1" ? ALL_STRATEGIES : [];
