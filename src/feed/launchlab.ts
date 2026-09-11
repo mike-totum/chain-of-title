@@ -256,3 +256,71 @@ export function decodeCurve(b64: string): CurveState | null {
     totalSupply: 0, complete: p.status !== 0, creator: p.creator,
   };
 }
+
+/**
+ * The pool an event is about, which is the identity every LaunchLab event DOES carry.
+ *
+ * Clause 8 in venues.ts says the payload may not name the launch, and the useful corollary is that it always names
+ * something. Both events put `pool_state` in the first field, so a live feed can key on the pool from the log alone
+ * and resolve the mint once per pool rather than once per event - no instruction accounts, no transaction fetch,
+ * nothing per trade. That is what makes this venue affordable on a free endpoint.
+ */
+export function poolOf(d: Buffer): string | null {
+  if (d.length < 40) return null;
+  const disc = d.subarray(0, 8);
+  if (!disc.equals(TRADE_DISC) && !disc.equals(CREATE_DISC)) return null;
+  return base58(d.subarray(8, 40));
+}
+
+export const isCreateEvent = (d: Buffer) => d.length >= 105 && d.subarray(0, 8).equals(CREATE_DISC);
+export const isTradeEvent = (d: Buffer) => d.length >= 147 && d.subarray(0, 8).equals(TRADE_DISC);
+
+/** What a create event says on its own, before the pool has been read. No mint: see clause 8. */
+export interface CreateParts {
+  poolState: string; creator: string; platformConfig: string;
+  decimals: number; name: string; symbol: string; uri: string;
+}
+
+export function createParts(d: Buffer): CreateParts | null {
+  if (!isCreateEvent(d)) return null;
+  let o = 104;
+  const decimals = d[o]; o += 1;
+  const str = (): string | null => {
+    if (o + 4 > d.length) return null;
+    const len = d.readUInt32LE(o); o += 4;
+    if (len > 512 || o + len > d.length) return null;
+    const s = d.subarray(o, o + len).toString("utf8"); o += len; return s;
+  };
+  const name = str(), symbol = str(), uri = str();
+  if (name === null || symbol === null || uri === null) return null;
+  return {
+    poolState: base58(d.subarray(8, 40)), creator: base58(d.subarray(40, 72)),
+    platformConfig: base58(d.subarray(72, 104)), decimals, name, symbol, uri,
+  };
+}
+
+/**
+ * What a trade event says on its own. Raw integers, because scaling needs the pool's decimals and inventing a scale
+ * here is exactly the 1000x error described in the header.
+ */
+export interface TradeParts {
+  poolState: string; isBuy: boolean; quoteRaw: number; baseRaw: number;
+  vBaseRaw: number; vQuoteRaw: number; realBaseRaw: number; realQuoteRaw: number; feeQuoteRaw: number;
+  /** Pool status after this trade: 0 Fund, 1 Migrate, 2 Trade. Leaving 0 is this venue's graduation. */
+  status: number;
+}
+
+export function tradeParts(d: Buffer): TradeParts | null {
+  if (!isTradeEvent(d)) return null;
+  const u = (o: number) => Number(d.readBigUInt64LE(o));
+  const isBuy = d[144] === 0;
+  return {
+    poolState: base58(d.subarray(8, 40)), isBuy,
+    quoteRaw: isBuy ? u(96) : u(104),
+    baseRaw: isBuy ? u(104) : u(96),
+    vBaseRaw: u(48), vQuoteRaw: u(56),
+    realBaseRaw: u(80), realQuoteRaw: u(88),
+    feeQuoteRaw: u(112) + u(120) + u(128) + u(136),
+    status: d[145],
+  };
+}

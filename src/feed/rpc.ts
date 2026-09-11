@@ -121,7 +121,12 @@ export class RpcFeed extends EventEmitter {
   private ws: WebSocket | null = null;
   private closed = false;
   private backoffMs = 1000;
-  private stats = { messages: 0, creates: 0, trades: 0, reconnects: 0 };
+  /**
+   * `protected`, not private, so a venue whose events are shaped differently can subclass this rather than fork the
+   * connection, backoff and watchdog logic. Nothing about pump.fun's path changes: `handleLogs` below is still the
+   * only implementation this class uses.
+   */
+  protected stats = { messages: 0, creates: 0, trades: 0, reconnects: 0 };
   private lastMessageAt = 0;
   private openedAt = 0;
   private reconnectTimer: NodeJS.Timeout | null = null;
@@ -214,7 +219,7 @@ export class RpcFeed extends EventEmitter {
     };
   }
 
-  private handleLogs(signature: string, logs: string[], slot: number): void {
+  protected handleLogs(signature: string, logs: string[], slot: number): void {
     const now = Date.now();
     let create: DecodedCreate | null = null;
     const trades: DecodedTrade[] = [];
