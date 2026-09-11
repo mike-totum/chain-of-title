@@ -76,7 +76,27 @@ const isMintInit = (ix: any, keys: string[]) => {
 
     for (const tx of b.transactions) {
       if (tx.meta?.err) continue;
-      const keys: string[] = tx.transaction?.message?.accountKeys ?? [];
+      /**
+       * Static keys FIRST, then the lookup-table addresses, in that order. This is not a detail.
+       *
+       * A v0 transaction resolves an instruction's programIdIndex against the static `accountKeys` followed by
+       * `meta.loadedAddresses.writable` then `.readonly`. Reading only the static half made `keys[programIdIndex]`
+       * undefined for every index past it, so `isMintInit` compared undefined against the token program, returned
+       * false, and the whole transaction was skipped in silence.
+       *
+       * Measured: 12 of 12 recent pump.fun creations use a lookup table, none carries the token program in its
+       * static keys, and each has 14 to 31 instruction indices past the end of that array. So this script saw 8
+       * pump.fun launches in a window where the collector's own record holds 302 - it was reading 2.6% of them, and
+       * only the rare legacy-format transactions. The bias is not noise: venues whose launches are built by bots and
+       * terminals use lookup tables and were near-invisible, while programs issuing plain legacy mints were counted
+       * in full and rose to the top. The first run's 44.7% leader is one of those, and it is not a launchpad.
+       */
+      const la = tx.meta?.loadedAddresses;
+      const keys: string[] = [
+        ...(tx.transaction?.message?.accountKeys ?? []),
+        ...(la?.writable ?? []),
+        ...(la?.readonly ?? []),
+      ];
       const ixs: any[] = tx.transaction?.message?.instructions ?? [];
       const inner = (tx.meta?.innerInstructions ?? []).flatMap((g: any) => g.instructions ?? []);
       if (![...ixs, ...inner].some((ix) => isMintInit(ix, keys))) continue;

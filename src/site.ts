@@ -39,7 +39,19 @@ const PAGES = process.argv.includes("--pages");
  * was pointed at the record: `npm run site` put all nine collector-only tables back into data/record.db seconds
  * after servicedb had stripped them. Same bug as the web service, one caller further along.
  */
-const db = openDb(config.dbPath, { migrate: false });
+/**
+ * Defaults to the published record, not the collector's working database.
+ *
+ * `config.dbPath` defaults to `data/pump.db`, which is right for the forty tools that read the collector and wrong
+ * for this one: this generates the public pages, and the public pages describe the record. Pointed at pump.db the
+ * build takes 20+ minutes and renders a file nobody can download; pointed at the record it takes seconds and renders
+ * the file the download link actually hands over. HANDOFF has carried "run it as DB_PATH=data/record.db" as a known
+ * trap for days, which is a default in the wrong place written down instead of moved.
+ *
+ * An explicit DB_PATH still wins, so anyone who does want the collector's view keeps it.
+ */
+const SITE_DB = process.env.DB_PATH ?? "data/record.db";
+const db = openDb(SITE_DB, { migrate: false });
 db.exec("PRAGMA query_only = 1");
 const now = Date.now();
 
