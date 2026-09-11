@@ -18,6 +18,7 @@ import { readFileSync, existsSync, statSync } from "node:fs";
 import { join, normalize } from "node:path";
 import { config } from "./config.ts";
 import { openDb } from "./db.ts";
+import * as usage from "./usage.ts";
 import { DatabaseSync } from "node:sqlite";
 import { type Assessment, assess, cleanAtBirth, coverageWindows, TOKEN_COLUMNS, optionalColumns, graduationDisproved, MIN_POOL_SOL,
   readingCertifies, readingIsFresh, MAX_READING_AGE_MS, MAX_DEV_PCT, MIN_BUYERS, BUYOUT_SOL , coverageFor} from "./provenance.ts";
@@ -1407,6 +1408,24 @@ const TYPES: Record<string, string> = { ".html": "text/html; charset=utf-8", ".j
 
 const server = createServer(async (req, res) => {
   /**
+   * Count the response, whatever produced it.
+   *
+   * On `finish` rather than inside `send`, and this is the whole point of putting it here. `send` is one of several
+   * ways this handler answers: the 301 for /index.html writes its own head, the API builds its own `j`, the record
+   * stream and the static branch each end their own response. A counter wired into `send` would have counted some
+   * of those and silently missed the rest, and any route added later would default to uncounted. That is the shape
+   * this codebase keeps producing - the guard living in the consumer, so the producer always passes. A `finish`
+   * listener cannot be bypassed by not calling a helper.
+   *
+   * What is passed is the path and the status. `usage.note` reduces the path to one of a fixed list of route
+   * classes and never stores it, reads the user agent only to decide whether the caller looked automated, and
+   * stores no address. See src/usage.ts for why that constraint is not negotiable.
+   */
+  res.on("finish", () => {
+    try { usage.note(new URL(req.url ?? "/", "http://x").pathname, res.statusCode, req.headers["user-agent"]); }
+    catch { /* a counter must never be able to affect the response it counts */ }
+  });
+  /**
    * Caching is the CDN's job, not the disk's. A launch record is immutable once complete, so it can be cached hard and
    * revalidated in the background; a page that is still UNKNOWN or waiting on a rebuild must not be, or a visitor is
    * pinned to an answer we are in the middle of improving. Pre-rendering these to files does not scale - ~24,000
@@ -2085,4 +2104,9 @@ if (!NO_REFRESH) {
 server.listen(PORT, () => {
   console.log(`serving ${DIR} from ${DB_FILE} (${held.toLocaleString()} launches) on http://localhost:${PORT}`);
   console.log(`unknown mints are rebuilt from chain (queue max ${MAX_QUEUE}, one at a time)`);
+  // Beside the record, because that is the directory this service can write to. Says which state it is in rather
+  // than failing quietly, so "no usage data" can be told apart from "no readers".
+  console.log(usage.start(DB_FILE)
+    ? `[usage] counting route classes and status codes; no addresses, agents or paths are stored`
+    : `[usage] could not open a usage database - requests will NOT be counted`);
 });
