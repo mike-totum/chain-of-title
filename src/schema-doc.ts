@@ -17,8 +17,12 @@ import { esc } from "./render.ts";
  * What a reader actually needs to know about a column is not its type. It is whether they could reproduce it
  * themselves, and whether it is a fact or a snapshot.
  *
- *   live    observed at the creation transaction and unrecoverable afterwards. This is the archive's whole reason to
- *           exist: nobody can go back and measure it, including us.
+ *   live    observed at the creation transaction, as it happened, and not readable from the token's present state
+ *           afterwards: once the float is spread, no amount of inspecting the token now recovers it. Most of these
+ *           can be reconstructed later from archival chain history, at a cost - see `chain` - so what this file
+ *           adds is that they were recorded contemporaneously rather than reassembled afterwards. Said plainly
+ *           because the front page said `unrecoverable` for a while and that was wrong. meta_sha256 is the one
+ *           genuine exception: it commits to a document the creator can delete, and frequently has.
  *   chain   reproducible from chain history by anyone willing to pay for archival RPC. We are a convenience here,
  *           not a source of truth.
  *   reading one measurement taken at one moment, carrying the moment it was taken. Not a time series. The value was
@@ -30,7 +34,7 @@ import { esc } from "./render.ts";
 export type Kind = "live" | "chain" | "reading" | "ours" | "opaque";
 
 export const KIND_NOTE: Record<Kind, string> = {
-  live: "recorded at the creation transaction; unrecoverable afterwards",
+  live: "recorded at the creation transaction; not readable from the token's present state afterwards",
   chain: "reproducible from chain history by anyone",
   reading: "one measurement, carrying the moment it was taken",
   ours: "our own bookkeeping or an aggregate we computed",

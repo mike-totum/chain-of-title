@@ -1254,9 +1254,11 @@ export function homeBody(h: Home): string {
           : `<strong>${fmt(h.cleanBirth24h)} showed none of it.</strong>`} The other ${fmt(between)} fall between:
         nothing recorded against them, and still short of one of our tests: most often the creator sold, or
         fewer than ${h.minBuyers} outside wallets bought the curve. Checked, not unexamined.</p>
-        <p>All of it is visible for about thirty seconds and unrecoverable afterwards. Once the float has been
-        spread across wallets none of it can be read off the chain any more, which is why the record has to be taken
-        at the moment of creation or not at all.</p>
+        <p>All of it is visible for about thirty seconds, and a check run afterwards cannot see it: once the float
+        has been spread across wallets, nothing about the launch can be read from the token's present state. The
+        events themselves stay on chain, and a launch nobody watched can be decoded again from an archival node,
+        slower and marked as a rebuild rather than an observation. This record was taken as it happened, and says
+        so where it was not.</p>
       </div>
       ${/* The findings, as figures. A launch can carry more than one, which the note under the row states. */ ""}
       <div class="figs">

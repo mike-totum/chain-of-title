@@ -187,7 +187,12 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS rec.trades_wallet ON trades(wallet);
   CREATE TABLE IF NOT EXISTS rec.hist_trades (
     mint TEXT NOT NULL, sig TEXT NOT NULL, idx INTEGER, ts INTEGER, slot INTEGER, wallet TEXT,
-    side TEXT, sol REAL, tokens REAL, vsol REAL, vtok REAL, is_dev INTEGER, PRIMARY KEY (mint, sig, idx)
+    side TEXT, sol REAL, tokens REAL, vsol REAL, vtok REAL, is_dev INTEGER,
+    -- Whether the rebuild this row came from read the whole curve. 1 complete, 0 truncated, NULL not knowable here.
+    -- See the note at the hist_trades copy below: these rows are reconstructions, and a reconstruction that read a
+    -- fortieth of a curve produces real trades and a false total.
+    rebuild_complete INTEGER,
+    PRIMARY KEY (mint, sig, idx)
   );
   CREATE INDEX IF NOT EXISTS rec.hist_trades_mint ON hist_trades(mint, ts);
   CREATE TABLE IF NOT EXISTS rec.operator_wallets (
@@ -542,14 +547,51 @@ try {
    * survived. That was an accident, not a design: the build was broken for the entire life of the cloud collector and
    * seeding it with 168,300 launches did not change that, because the fault was never missing data.
    */
+  // Widen a record file built before the qualifier existed; CREATE TABLE IF NOT EXISTS will not do it.
+  try { db.exec("ALTER TABLE rec.hist_trades ADD COLUMN rebuild_complete INTEGER"); } catch {}
+
   const hasHist = (db.prepare(
     "SELECT COUNT(*) c FROM main.sqlite_master WHERE type='table' AND name='hist_trades'").get() as any).c > 0;
+  /**
+   * Published WITH the qualifier that says how much of the curve the rebuild actually read.
+   *
+   * These rows are reconstructions, and `backfill.ts` states the rule they are meant to follow: a rebuild that could
+   * not read every transaction "is partial, however many it did read" and certifies nothing. That rule was enforced
+   * in `hist_tokens` — which `history.ts` only ever wrote on a laptop, and which the seed never carried. So the
+   * evidence reached the record through a merge and the qualifier did not: 1,072 buyout rows published with no way
+   * to tell a rebuild that read a whole curve from one that read 2.5% of it. Measured on the laptop, 188 of 2,729
+   * rebuilds were truncated, averaging 38.7% of their own history.
+   *
+   * An undercount biased toward understating an operator is the safe direction and still an unauditable figure, and
+   * checkability is the whole product. So: carry it where it can be known, and publish NULL where it cannot rather
+   * than a guess. `meta.hist_trades_qualified` says which of those two a given file is, so a reader never has to
+   * infer the difference from a column full of NULLs.
+   */
+  const hasHistTokens = (db.prepare(
+    "SELECT COUNT(*) c FROM main.sqlite_master WHERE type='table' AND name='hist_tokens'").get() as any).c > 0;
   db.exec("DELETE FROM rec.hist_trades");
-  if (hasHist)
-    db.exec(`INSERT INTO rec.hist_trades SELECT mint, sig, idx, ts, slot, wallet, side, sol, tokens, vsol, vtok, COALESCE(is_dev,0)
-      FROM main.hist_trades WHERE side='buy' AND sol >= ${BUYOUT_SOL}`);
-  else
+  if (hasHist) {
+    db.exec(`INSERT INTO rec.hist_trades SELECT h.mint, h.sig, h.idx, h.ts, h.slot, h.wallet, h.side, h.sol, h.tokens,
+        h.vsol, h.vtok, COALESCE(h.is_dev,0),
+        ${hasHistTokens ? `(SELECT CASE WHEN t.status = 'done' THEN 1 ELSE 0 END FROM main.hist_tokens t WHERE t.mint = h.mint)` : "NULL"}
+      FROM main.hist_trades h WHERE h.side='buy' AND h.sol >= ${BUYOUT_SOL}`);
+    const total = (db.prepare("SELECT COUNT(*) c FROM rec.hist_trades").get() as any).c as number;
+    if (hasHistTokens) {
+      const soft = (db.prepare("SELECT COUNT(*) c FROM rec.hist_trades WHERE rebuild_complete = 0").get() as any).c as number;
+      const unknown = (db.prepare("SELECT COUNT(*) c FROM rec.hist_trades WHERE rebuild_complete IS NULL").get() as any).c as number;
+      log(`  hist_trades ${total.toLocaleString()} buyout rows, ${soft.toLocaleString()} from truncated rebuilds, ${unknown.toLocaleString()} unattributable`);
+    } else {
+      log(`  hist_trades ${total.toLocaleString()} buyout rows published WITHOUT a completeness qualifier — ` +
+          `hist_tokens is not in this source, so the record cannot say which rebuilds read a whole curve`);
+    }
+  } else
     log("  hist_trades absent in the source (history.ts has never run here); the record carries none");
+  /**
+   * Recorded as a property of the FILE, so a reader can branch on it instead of guessing why a column is all NULL.
+   * A qualifier that is absent and a qualifier that is unknown look identical in the data and are not the same fact.
+   */
+  db.exec(`INSERT INTO rec.meta (k, v) VALUES ('hist_trades_qualified', '${hasHist && hasHistTokens ? 1 : 0}')
+           ON CONFLICT(k) DO UPDATE SET v = excluded.v`);
 
   /**
    * A table this build's source does not have is skipped, not fatal - the same treatment hist_trades already gets.
@@ -853,6 +895,27 @@ try {
     + "graduations re-read, 31 of 2,717 were disproved (1.1%); of unconfirmed graduations, 5,187 of 5,378 had not "
     + "completed (96.4%). The page states that neither is a rate over all graduations and why. The split figures "
     + "were always the ones in the record - no reading changed, only what we said about them.");
+  ins.run("overstated-unrecoverability", at("2026-09-11"), "record", null,
+    "The front page said of the launch-time facts: \"All of it is visible for about thirty seconds and "
+    + "unrecoverable afterwards. Once the float has been spread across wallets none of it can be read off the chain "
+    + "any more.\" The data dictionary said the same of every column marked `live` - \"unrecoverable afterwards ... "
+    + "nobody can go back and measure it, including us.\" The chain retains those events permanently. What a "
+    + "present-tense check cannot do is read them from the token's current state, which is a narrower claim and the "
+    + "one this archive actually rests on. This repository's own src/backfill.ts reconstructs those same figures "
+    + "from a bonding curve's transaction history, and the history job has done it for 2,729 launches aged up to "
+    + "four months.",
+    "The overstatement ran in the direction that flattered us: it presented the archive as the only possible source "
+    + "for figures a reader with archival RPC could derive independently. Anyone deciding whether to depend on this "
+    + "project - a researcher, a grant reviewer, a journalist citing the record - was given a stronger reason than "
+    + "the facts support. The method page had carried the accurate version throughout, that only the off-chain "
+    + "metadata behind a creator-controlled URI is genuinely unrecoverable, so the site disagreed with itself in "
+    + "public and the wrong half was the louder one.",
+    "The front page now says the launch cannot be read from the token's present state, that the events stay on "
+    + "chain and can be decoded again from an archival node as a rebuild rather than an observation, and that this "
+    + "record was taken as it happened. The dictionary's `live` kind is defined the same way and points to `chain` "
+    + "for reconstruction. No figure in the record changes - only what was claimed about how else they could be "
+    + "obtained. What this file adds is that the reading was contemporaneous, which is a smaller claim than the one "
+    + "withdrawn and the one that is true.");
   ins.run("uncheckable-figures", at("2026-09-09"), "record", null,
     "Every record page carried the sentence \"Everything here is read from the Solana chain and can be checked "
     + "against it\", and until 2026-09-09 the record withheld what was needed to check it. No launch row cited the "

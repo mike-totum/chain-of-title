@@ -196,8 +196,8 @@ export function methodBody(f: PageFacts, chrome: Chrome): string {
     <tr><td>Creator sold</td><td class="num">no</td><td>self-explanatory</td></tr>
   </table>
   <p class="callout"><b>Liquidity is not one of these tests, and until 2026-09-09 it was.</b> Every test above is a
-  fact about the first blocks of a token's life: once true, always true, and unrecoverable once the float has been
-  spread. A pool balance is a reading taken at one moment and it decays. Requiring both before calling a launch clean
+  fact about the first blocks of a token's life: once true, always true, and not readable from the token's present
+  state once the float has been spread. A pool balance is a reading taken at one moment and it decays. Requiring both before calling a launch clean
   meant an hour of unanswered RPC calls silently withdrew findings about the past: over seven days, 423 launches
   matched every line above and ten were published. We still read the pool, still refuse to quote a balance we could
   not confirm, and now show it beside the launch record with the age of the reading instead of gating the record on
