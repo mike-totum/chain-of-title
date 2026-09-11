@@ -22,11 +22,25 @@
  * hand. Filtering to "launchpad-shaped" programs would need a list of launchpads, which is the thing being
  * discovered, so the filtering is left to the reader on purpose.
  *
- * FIRST RUN, 2026-09-11, 400 blocks and 94 mints. The result was not what anyone expected and is the reason this
- * file exists: pump.fun was 8.5%. BopTVfs428fBBX2vf28FgdAjzX5F8vAhsaG3SrCs4rHm was 44.7%, dbcij3LWUppWqq96dh6gJW
- * wBifmcGfLSB5D4DuSMaqN 16.0%, LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj 7.4%. The repo's standing note that
- * pump.fun runs 62-80% of Solana launches is from an earlier period and should not be relied on again without a
- * fresh run. Re-run before any venue decision.
+ * RESULTS, 2026-09-11, 596 blocks and 284 mints, AFTER the lookup-table fix below. The first run of this file
+ * reported pump.fun at 8.5% and a 44.7% leader; both were artefacts of that bug and are retracted, not adjusted.
+ *
+ *   raw ranking          BopTVfs 21.1%  CAMMCzo 18.0%  pump.fun 16.2%  LanMV9 13.0%  cpamdpZ 12.0%  dbcij3 6.0%
+ *
+ * Most of that is not launches, which is what the warning above predicts and what the reader has to do by hand.
+ * Sampling the mints each program creates settles it: BopTVfs mints carry supply 0, so nothing was launched;
+ * CAMMCzo (Raydium CLMM), cpamdpZ (Meteora CP-AMM), whirLbM (Orca) and pAMMBay (PumpSwap) mint position and LP
+ * tokens; metaqbx is Metaplex Token Metadata and is an attribution artefact, not a venue. What is left mints 1
+ * billion units at 6 decimals, which is the memecoin launch shape:
+ *
+ *   launchpads only      pump.fun 46 (46%)   LanMV9 37 (37%)   dbcij3 17 (17%)
+ *
+ * SO THE SHAPE IS: not a long tail. One clear challenger at about 80% of pump.fun's rate, and a second at a third
+ * of it. That is the answer the venue decision turns on, and it means one decoder buys most of the missing breadth.
+ *
+ * STILL A LOWER BOUND. Over this window the collector's own record implies roughly 61 pump.fun launches and this
+ * found 46, so capture is about 75%. The ratios are more trustworthy than the absolute shares, and any future run
+ * should keep that cross-check against our own launch rate: it is the only thing that caught the bug below.
  *
  *   npx tsx research/venueshare.ts [blocks]
  */
