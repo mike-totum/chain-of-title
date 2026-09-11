@@ -536,6 +536,17 @@ try {
   else
     log("  hist_trades absent in the source (history.ts has never run here); the record carries none");
 
+  /**
+   * A table this build's source does not have is skipped, not fatal — the same treatment hist_trades already gets.
+   *
+   * These are copied by name from `main`, and a name that is not there throws and takes the whole record build down
+   * with it. That is not a theoretical risk: `operator_funders` is new to this list, the collector only has it
+   * because a seed merge brought it, and a fresh collector seeded from an older export would not. A build that dies
+   * publishes no record at all, the web service then refuses the pull, and the archive freezes — which is a far
+   * worse outcome than a record carrying one table fewer and saying so in the log.
+   */
+  const sourceHas = (t: string) =>
+    !!(db.prepare("SELECT 1 FROM main.sqlite_master WHERE type='table' AND name = ?").get(t) as any);
   for (const [t, cols] of [
     ["operator_wallets", "wallet, funder, cluster, role, seeded_at, source_mint, added_at"],
     ["operator_policy", "cluster, policy, hold_plays, dist_plays, plays, note, updated_at"],
@@ -543,6 +554,7 @@ try {
     ["pool_map", "pool, mint, created_at"],
     ["runs", "id, started_at, stopped_at, note"],
   ] as const) {
+    if (!sourceHas(t)) { log(`  ${t} absent in the source; the record carries none`); continue; }
     db.exec(`DELETE FROM rec.${t}`);
     db.exec(`INSERT INTO rec.${t} SELECT ${cols} FROM main.${t}`);
   }
