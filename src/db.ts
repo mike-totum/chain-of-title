@@ -63,7 +63,7 @@ export function openDb(path: string, opts: { migrate?: boolean } = {}): Database
       mint TEXT PRIMARY KEY,
       name TEXT, symbol TEXT, uri TEXT, creator TEXT,
       created_at INTEGER, late_discovery INTEGER DEFAULT 0,
-      launch_price REAL, last_price REAL, peak_price REAL, peak_at INTEGER,
+      launch_price REAL, last_price REAL, peak_price REAL, peak_at INTEGER, peak_source TEXT,
       dev_pct REAL, dev_sold INTEGER, dev_sold_at INTEGER,
       create_sig TEXT, create_slot INTEGER,
       buys INTEGER, sells INTEGER, buy_vol_sol REAL, sell_vol_sol REAL,
@@ -274,6 +274,12 @@ export function openDb(path: string, opts: { migrate?: boolean } = {}): Database
    * while those rows survive retention; what retention has already taken is recoverable only from an archival node.
    */
   try { db.exec("ALTER TABLE tokens ADD COLUMN create_sig TEXT"); } catch {}
+  /**
+   * Where a peak came from. NULL on every row written before 2026-09-10, which means we did not record it — never
+   * that the peak was unsourced. Deliberately not backfilled: the source is only knowable at the moment the price
+   * arrived, and inferring it afterwards from what trade rows survived retention would be manufacturing provenance.
+   */
+  try { db.exec("ALTER TABLE tokens ADD COLUMN peak_source TEXT"); } catch {}
   try { db.exec("ALTER TABLE tokens ADD COLUMN create_slot INTEGER"); } catch {}
   /**
    * What the token claimed to be at launch: its image, its description, and when we read them.
@@ -385,15 +391,18 @@ const NOT_LAUNCHES = new Set([
 export function upsertToken(db: DatabaseSync, t: TokenState): void {
   if (NOT_LAUNCHES.has(t.mint)) return;
   db.prepare(`
-    INSERT INTO tokens (mint, name, symbol, uri, creator, created_at, late_discovery, launch_price, last_price, peak_price, peak_at,
+    INSERT INTO tokens (mint, name, symbol, uri, creator, created_at, late_discovery, launch_price, last_price, peak_price, peak_at, peak_source,
       create_sig, create_slot,
       dev_pct, dev_sold, dev_sold_at, buys, sells, buy_vol_sol, sell_vol_sol, unique_buyers, unique_sellers, bundled_buyers,
       snap30_buyers, snap30_buys, snap30_sells, snap30_vol, graduated, graduated_at, p_1m, p_5m, p_15m, p_60m,
       twitter, telegram, website, image, description, meta_at, kol_signals, pool, amm_trusted, vault_sol, vault_at, finalized, updated_at, venue, graduated_confirmed_by, meta_json, meta_bytes)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(mint) DO UPDATE SET
       name=excluded.name, symbol=excluded.symbol, launch_price=excluded.launch_price, last_price=excluded.last_price,
-      peak_price=excluded.peak_price, peak_at=excluded.peak_at, dev_sold=excluded.dev_sold, dev_sold_at=excluded.dev_sold_at,
+      -- The three move together or not at all: a peak is a price, a moment, and where it came from. Splitting them
+      -- is how vault_sol ended up published 1,198 times with no reading time.
+      peak_price=excluded.peak_price, peak_at=excluded.peak_at, peak_source=excluded.peak_source,
+      dev_sold=excluded.dev_sold, dev_sold_at=excluded.dev_sold_at,
       -- Provenance counters must never go backwards. A token restored by a detector (buyout, movement, late graduation)
       -- starts with an empty buyer set, and an unconditional assignment overwrote the recorded launch history with
       -- zeros: BILL lost 3,046 curve buyers this way on 2026-09-06 and dropped off the clean list. These are monotonic
@@ -444,7 +453,7 @@ export function upsertToken(db: DatabaseSync, t: TokenState): void {
                     THEN excluded.vault_at ELSE tokens.vault_at END,
       finalized=excluded.finalized, updated_at=excluded.updated_at
   `).run(
-    t.mint, t.name, t.symbol, t.uri, t.creator, t.createdAt, t.lateDiscovery ? 1 : 0, t.launchPrice, t.lastPrice, t.peakPrice, t.peakAt,
+    t.mint, t.name, t.symbol, t.uri, t.creator, t.createdAt, t.lateDiscovery ? 1 : 0, t.launchPrice, t.lastPrice, t.peakPrice, t.peakAt, t.peakSource,
     t.createSig || null, t.createdSlot || null,
     t.devPct, t.devSold ? 1 : 0, t.devSoldAt, t.buys, t.sells, t.buyVolSol, t.sellVolSol, t.buyers.size, t.sellers.size, t.bundledBuyers,
     t.snap30?.buyers ?? null, t.snap30?.buys ?? null, t.snap30?.sells ?? null, t.snap30?.volSol ?? null,

@@ -38,6 +38,17 @@ export interface TokenState {
   lastPrice: number;
   lastTradeAt: number;
   peakPrice: number;
+  /**
+   * Where the peak came from: a decoded on-chain trade, or a third-party price quote.
+   *
+   * 'curve' and 'amm' mean we decoded a transaction that executed at that price. 'external' means a price feed told
+   * us, and no trade was witnessed — a different kind of claim, and the one that produced every peak this archive
+   * cannot corroborate. Two of the four largest peaks on file hold a pool, zero decoded AMM trades, and an implied
+   * market cap over 2.9 million SOL; the two beside them are backed by 122 and 211 trades and reconcile exactly.
+   *
+   * Without this the record cannot tell those apart, which is why a ranking built on peak was withheld.
+   */
+  peakSource: "curve" | "amm" | "external" | null;
   peakAt: number;
   devInitialTokens: number;
   devInitialSol: number;
@@ -195,7 +206,7 @@ export class Tracker extends EventEmitter {
       launchPrice: p,
       lastPrice: p,
       lastTradeAt: now,
-      peakPrice: p,
+      peakPrice: p, peakSource: "curve",
       peakAt: now,
       devInitialTokens: e.initialBuy,
       devInitialSol: e.solAmount,
@@ -265,7 +276,7 @@ export class Tracker extends EventEmitter {
       launchPrice: prior?.launchPrice ?? 0,
       lastPrice: 0,
       lastTradeAt: now, // grace period: no curve trade may ever arrive for an AMM-traded token
-      peakPrice: 0,
+      peakPrice: 0, peakSource: null,
       peakAt: now,
       devInitialTokens: 0,
       devInitialSol: 0,
@@ -327,6 +338,7 @@ export class Tracker extends EventEmitter {
     if (p > t.peakPrice) {
       t.peakPrice = p;
       t.peakAt = now;
+      t.peakSource = "curve";
     }
     if (e.feeBps !== undefined && e.feeBps !== null) t.feeBps = e.feeBps;
     if (Number.isFinite(e.newTokenBalance)) t.balances.set(e.traderPublicKey, e.newTokenBalance);
@@ -390,6 +402,8 @@ export class Tracker extends EventEmitter {
     if (priceSol > t.peakPrice) {
       t.peakPrice = priceSol;
       t.peakAt = now;
+      // A quote, not a trade. Nothing here witnessed a transaction at this price.
+      t.peakSource = "external";
     }
     t.feeBps = 125; // ~0.25% PumpSwap fee + ~1% assumed slippage
     t.externalPriced = true;
@@ -433,6 +447,7 @@ export class Tracker extends EventEmitter {
     if (tr.price > t.peakPrice) {
       t.peakPrice = tr.price;
       t.peakAt = now;
+      t.peakSource = "amm";
     }
     const prev = t.balances.get(tr.user) ?? 0;
     t.balances.set(tr.user, Math.max(0, prev + (tr.side === "buy" ? tr.baseTokens : -tr.baseTokens)));

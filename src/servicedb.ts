@@ -153,7 +153,10 @@ db.exec(`
     --
     -- It is what we SAW, not what the token reached. A peak between our observations is not in here, and a launch
     -- we stopped following has a peak that stops with us. A floor on the truth, never a ceiling.
-    peak_price REAL, peak_at INTEGER
+    peak_price REAL, peak_at INTEGER,
+    -- Where that peak came from: a decoded on-chain trade, or a third-party price quote. See db.ts. NULL means we
+    -- did not record it, which is every row written before 2026-09-10, and never that the peak was unsourced.
+    peak_source TEXT
   );
   CREATE INDEX IF NOT EXISTS rec.tokens_created ON tokens(created_at);
   CREATE INDEX IF NOT EXISTS rec.tokens_creator ON tokens(creator);
@@ -268,7 +271,7 @@ try { db.exec("UPDATE rec.tokens SET graduated_confirmed_by = 'pool' WHERE gradu
 for (const c of ["uri TEXT", "image TEXT", "description TEXT", "meta_at INTEGER",
                  "image_sha256 TEXT", "image_bytes INTEGER", "image_at INTEGER", "meta_bytes INTEGER",
                  "meta_sha256 TEXT", "curve_checked_at INTEGER", "curve_complete INTEGER", "meta_lag_ms INTEGER",
-                 "peak_price REAL", "peak_at INTEGER"])
+                 "peak_price REAL", "peak_at INTEGER", "peak_source TEXT"])
   try { db.exec(`ALTER TABLE rec.tokens ADD COLUMN ${c}`); } catch {}
 
 /**
@@ -608,8 +611,9 @@ try {
    */
   try {
     const r = db.prepare(`UPDATE rec.tokens SET
-        peak_price = (SELECT m.peak_price FROM main.tokens m WHERE m.mint = rec.tokens.mint),
-        peak_at    = (SELECT m.peak_at    FROM main.tokens m WHERE m.mint = rec.tokens.mint)
+        peak_price  = (SELECT m.peak_price  FROM main.tokens m WHERE m.mint = rec.tokens.mint),
+        peak_at     = (SELECT m.peak_at     FROM main.tokens m WHERE m.mint = rec.tokens.mint),
+        peak_source = (SELECT m.peak_source FROM main.tokens m WHERE m.mint = rec.tokens.mint)
       WHERE EXISTS (SELECT 1 FROM main.tokens m WHERE m.mint = rec.tokens.mint
                       AND m.peak_price IS NOT NULL AND m.peak_at IS NOT NULL
                       AND (rec.tokens.peak_price IS NULL OR m.peak_price > rec.tokens.peak_price))`).run();
@@ -685,6 +689,7 @@ try {
     // A peak is only a fact with the moment we saw it, exactly as a pool balance is.
     { kind: "IMPLIES", sql: "peak_price IS NOT NULL AND peak_at IS NULL", why: "peak_price without peak_at" },
     { kind: "IMPLIES", sql: "peak_at IS NOT NULL AND peak_price IS NULL", why: "peak_at without peak_price" },
+    { kind: "IMPLIES", sql: "peak_source IS NOT NULL AND peak_price IS NULL", why: "peak_source without a peak" },
     // A pool balance is only ever quoted with the moment it was read, and the moment is meaningless without it.
     // db.ts enforces this on write with a CASE; asserting it here checks the invariant survived the copy, which is
     // the class of failure this file keeps producing — a rule held at the source and lost in transit.
