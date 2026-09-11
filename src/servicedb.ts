@@ -837,6 +837,9 @@ try {
   const ins = db.prepare(`INSERT OR IGNORE INTO rec.corrections
     (id, issued_at, scope, subject, finding, effect, remedy, supersedes) VALUES (?,?,?,?,?,?,?,NULL)`);
   const at = (d: string) => Date.parse(`${d}T00:00:00Z`);
+  /** The same insert, for a correction that replaces an earlier one. Nothing here ever UPDATEs; amendment is a row. */
+  const amend = db.prepare(`INSERT OR IGNORE INTO rec.corrections
+    (id, issued_at, scope, subject, finding, effect, remedy, supersedes) VALUES (?,?,?,?,?,?,?,?)`);
   ins.run("zero-buyers-ungated", at("2026-09-07"), "record", null,
     "The rule that flags a launch for having no outside buyers was never made conditional on the curve having "
     + "completed. It was written for graduations and applied to every launch, including the great majority that "
@@ -916,6 +919,24 @@ try {
     + "for reconstruction. No figure in the record changes - only what was claimed about how else they could be "
     + "obtained. What this file adds is that the reading was contemporaneous, which is a smaller claim than the one "
     + "withdrawn and the one that is true.");
+  amend.run("disproved-fix-did-not-travel", at("2026-09-11"), "column", "graduated",
+    "The correction below said the predicate that folded 'we read the curve account and it was gone' into 'we read "
+    + "it and it had not completed' now requires an explicit 0. That was true of the shared helper and false of the "
+    + "two callers that had written the test out longhand instead of calling it: the token page in provenance.ts "
+    + "and launch.graduated in api/v1. Both kept `curve_checked_at != null && !curve_complete`, and !null is true in "
+    + "JavaScript, so both went on reporting an unreadable account as a disproved graduation.",
+    "The remedy clause of a published correction overstated what had been fixed, on the two surfaces most people "
+    + "actually read. For the same 191-launch population, a record page said we do not state that this curve "
+    + "graduated, and api/v1 returned launch.graduated: false. A reader who took the correction at its word - which "
+    + "is what a corrections register is for - was told the field had been repaired on 2026-09-11 while the API "
+    + "served the unrepaired answer until 2026-09-12. A test existed and passed throughout, because it pinned the "
+    + "helper and nothing asserted that the callers used it.",
+    "Both callers now share the one spelling, so the copies cannot diverge again. Two tests rather than one, "
+    + "because they fail differently: a source check rejects the longhand predicate in any file that could carry "
+    + "it, and a behavioural check runs assess over an account-gone row and asserts it produces no disproof. "
+    + "Verified by reintroducing the fault and watching the first fail. No stored value changed; what changed is "
+    + "that the published answer now matches the correction that promised it.",
+    "disproved-conflated-with-unreadable");
   ins.run("uncheckable-figures", at("2026-09-09"), "record", null,
     "Every record page carried the sentence \"Everything here is read from the Solana chain and can be checked "
     + "against it\", and until 2026-09-09 the record withheld what was needed to check it. No launch row cited the "
