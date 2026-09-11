@@ -690,21 +690,22 @@ ${/*
     on every page, in one line.
   */ ""}
 <div class="statusband"><div class="shell"><div class="status">
-  <div><b id="rec" data-n="${c.onFile ?? 0}">${fmt(c.onFile ?? 0)}</b> launches watched</div>
-  <div>Coverage from <b>${esc(compactDate(c.coverageFrom))}</b></div>
   ${/*
-      A SECOND figure and never a sum. The first cell counts launches this archive WATCHED - a subscription held to
-      a venue's program, its events decoded as they happened. This one counts what it SCANNED: blocks read across
-      the whole chain, whatever program made the token. A scanned launch's on-chain numbers are as sound as a
-      watched one's; what a scan cannot recover is what the launch CLAIMED to be, because that lives off-chain
-      behind a pointer its creator can repoint. Adding the two would erase that, and "every Solana launch" is the
-      one sentence most capable of destroying an archive's credibility.
-      Omitted rather than zeroed when the scanner cannot be reached, and "look like launches" is said in those
-      words because it is our published test rather than the chain's declaration.
+      One cell, two numbers, never a sum.
+      
+      This was two extra cells and it broke the band: seven cells at this width truncate to "270,997 LAUNCHES WA…"
+      and "2,144 OF THEM LOOK …", which is worse than not saying it. The band answers the first questions anyone
+      asks of an archive and it only works if every cell is readable.
+      
+      Not summed, and not summable. The collector WATCHED its launches - a subscription held to a venue's program,
+      events decoded as they happened. The scanner SCANNED across the whole chain afterwards. They also OVERLAP: a
+      pump.fun launch today is in both, so adding them would double-count as well as conflate two different claims.
+      The detail - how many of the scanned mints look like launches, and by what test - lives on /method.html where
+      there is room to state the test beside the number.
    */ ""}
-  ${c.chain ? `<div><b>${fmt(c.chain.mints)}</b> token creations scanned chain-wide${
-    c.chain.ranges.length > 1 ? `, in ${c.chain.ranges.length} ranges` : ""}</div>
-  <div><b>${fmt(c.chain.launches)}</b> of them <a href="${root}method.html">look like launches</a></div>` : ""}
+  <div><b id="rec" data-n="${c.onFile ?? 0}">${fmt(c.onFile ?? 0)}</b> launches watched${
+    c.chain ? ` · <b>${fmt(c.chain.mints)}</b> scanned` : ""}</div>
+  <div>Coverage from <b>${esc(compactDate(c.coverageFrom))}</b></div>
   <div>Archive read <b id="recnote">${c.builtAt
     ? (sameUtcDay(Date.now(), c.builtAt) ? `${when(c.builtAt).slice(11)} today` : compactDate(when(c.builtAt)))
     : "unrecorded"}</b></div>
