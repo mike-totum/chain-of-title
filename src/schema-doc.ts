@@ -97,6 +97,19 @@ const DOCS: Record<string, Record<string, Doc>> = {
     side: { kind: "chain", desc: "'buy' or 'sell'." },
     sol: { kind: "chain", desc: "Size of the trade in SOL." },
     ts: { kind: "chain", desc: "When we decoded the trade, epoch ms. Events arriving together carry the same timestamp, so ordering within a batch is not established." },
+    /**
+     * Both names, because a record file can legitimately carry either for a while.
+     *
+     * This column was renamed from `venue` to `market` on 2026-09-11. The collector migrates its own database and
+     * rebuilds the record; the web service opens that record with `migrate: false` on purpose, so between the two
+     * a served record still has the old name while the code documents the new one. The guard above then fires on a
+     * column with no description and takes /data.html down with a 500, which is exactly what happened.
+     *
+     * Documenting both is the honest fix rather than weakening the guard: a reader holding an older copy of the
+     * file gets a description of the column it actually has. Drop the `venue` entry once no record older than the
+     * rename is in circulation.
+     */
+    venue: { kind: "chain", desc: "Superseded name for `market`, below. Records built before 2026-09-11 carry this instead; the values and meaning are identical. Renamed because `tokens.venue` means the launchpad and one word cannot mean two things in one schema." },
     market: { kind: "chain", desc: "'curve' for a bonding-curve trade, 'amm' for one on the open market. This table holds two things and nothing else: curve buys large enough to count as a buyout, and the market trades those same wallets made on those same tokens afterwards. The second set is here so wallet_flow can be checked against it rather than believed." },
     is_dev: { kind: "chain", desc: "1 when the trading wallet is the token's creator." },
     slot: { kind: "chain", desc: "Solana slot, where known." },
