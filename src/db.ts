@@ -564,23 +564,50 @@ export function finalizeTokenTrades(db: DatabaseSync, t: TokenState, opts: { kee
 export function recoverOrphans(db: DatabaseSync, olderThanMs = 10 * 60_000): number {
   const GRAD_PRICE = 115 / 279_900_000; // curve price at graduation (vSol 115 / remaining virtual tokens)
   const rows = db
-    .prepare(`SELECT mint, created_at, launch_price, peak_price, last_price, graduated, kol_signals, creator FROM tokens WHERE finalized = 0 AND updated_at < ?`)
+    .prepare(`SELECT mint, created_at, launch_price, peak_price, peak_at, peak_source, last_price, graduated, kol_signals, creator FROM tokens WHERE finalized = 0 AND updated_at < ?`)
     .all(Date.now() - olderThanMs) as any[];
   let n = 0;
   for (const r of rows) {
     const tr = db.prepare("SELECT price, ts, slot, is_dev, age_ms FROM trades WHERE mint = ? ORDER BY ts, id").all(r.mint) as any[];
-    let last = r.last_price ?? r.launch_price, peak = r.peak_price ?? r.launch_price, peakAt = r.created_at, lastAt = r.created_at;
+    let last = r.last_price ?? r.launch_price, peak = r.peak_price ?? r.launch_price, lastAt = r.created_at;
+    /**
+     * The recorded peak time, not the creation time.
+     *
+     * This was `peakAt = r.created_at`, and `peak_at` was not even selected — so a recovery that found no higher
+     * price still overwrote a real peak timestamp with the moment the token was created, silently, on every restart.
+     * The peak survived and the answer to "when" was replaced by a different question's answer.
+     */
+    let peakAt = r.peak_at ?? r.created_at;
+    /**
+     * Whether the recomputation actually moved the peak. If it did not, the peak on the row is the one that was
+     * observed live and its `peak_source` still describes it; overwriting that would downgrade a witnessed price to
+     * a recomputed one for no reason.
+     */
+    let peakMoved = false;
     const cp: Record<number, number> = {};
     for (const x of tr) {
-      if (x.price > peak) { peak = x.price; peakAt = x.ts; }
+      if (x.price > peak) { peak = x.price; peakAt = x.ts; peakMoved = true; }
       last = x.price; lastAt = x.ts;
       for (const s of [60, 300, 900, 3600]) if (x.age_ms <= s * 1000) cp[s] = x.price; // last price seen before the checkpoint
     }
     for (const s of [60, 300, 900, 3600]) if (cp[s] === undefined) cp[s] = tr.length ? (tr.find((x) => x.age_ms > s * 1000) ? (cp[s] ?? r.launch_price) : last) : r.launch_price;
     const graduated = r.graduated === 1 || peak >= GRAD_PRICE * 0.999;
+    /**
+     * `peak_source` travels with the pair it describes.
+     *
+     * This statement wrote `peak_price` and `peak_at` and left `peak_source` alone, which split the triple the
+     * ON CONFLICT clause in `upsertToken` is careful to keep together — a row whose source said `curve` kept a
+     * source describing a peak that no longer existed. The ON CONFLICT pairing was right; this is a different
+     * statement and inherited none of it.
+     *
+     * `recomputed` rather than the trade's own venue, and that is the honest answer rather than the convenient one.
+     * `curve` and `amm` mean we decoded that trade as it happened. Reconstructing a peak afterwards from whichever
+     * rows survived a four-day retention is a different act even when the underlying trade is the same, and the
+     * entire purpose of the column is that a reader can tell a witnessed price from an asserted one.
+     */
     db.prepare(
-      `UPDATE tokens SET last_price=?, peak_price=?, peak_at=?, last_seen_at=?, graduated=?, p_1m=COALESCE(p_1m,?), p_5m=COALESCE(p_5m,?), p_15m=COALESCE(p_15m,?), p_60m=COALESCE(p_60m,?), finalized=1, updated_at=? WHERE mint=?`,
-    ).run(last, peak, peakAt, lastAt, graduated ? 1 : 0, cp[60], cp[300], cp[900], cp[3600], Date.now(), r.mint);
+      `UPDATE tokens SET last_price=?, peak_price=?, peak_at=?, peak_source=?, last_seen_at=?, graduated=?, p_1m=COALESCE(p_1m,?), p_5m=COALESCE(p_5m,?), p_15m=COALESCE(p_15m,?), p_60m=COALESCE(p_60m,?), finalized=1, updated_at=? WHERE mint=?`,
+    ).run(last, peak, peakAt, peakMoved ? "recomputed" : (r.peak_source ?? null), lastAt, graduated ? 1 : 0, cp[60], cp[300], cp[900], cp[3600], Date.now(), r.mint);
     if (tr.length) {
       const createdSlot = tr.find((x) => x.is_dev && x.age_ms === 0)?.slot ?? tr[0].slot ?? 0;
       const fake = { mint: r.mint, createdSlot, lastPrice: last, graduated, launchPrice: r.launch_price, peakPrice: peak, createdAt: r.created_at } as unknown as TokenState;

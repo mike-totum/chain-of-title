@@ -694,57 +694,69 @@ if (provider?.search && config.xListenQueries.length) {
 }
 
 // ---------- external prices for tokens that trade on PumpSwap (graduated or called after graduation) ----------
+/**
+ * One poll at a time, for the same reason the metadata sweep now takes one: an unguarded timer over slow I/O runs
+ * itself twice. Every other periodic task in this file already carries this guard; these two did not, and the
+ * metadata sweep was observed doing exactly that. Here the doubled work lands on someone else's API, so overlapping
+ * runs spend a rate limit we do not control and cannot see the ceiling of.
+ */
+let pollingExternal = false;
+
 async function pollExternalPrices(): Promise<void> {
+  if (pollingExternal) return;
   const want = [...tracker.tokens.values()].filter((t) => !t.finalized && (t.lateDiscovery || t.graduated) && (t.kolSignals > 0 || broker.hasOpenPosition(t.mint) || gradCandidate(t)));
   if (!want.length) return;
-  for (let i = 0; i < want.length; i += 30) {
-    const batch = want.slice(i, i + 30);
-    try {
-      const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${batch.map((t) => t.mint).join(",")}`, { signal: AbortSignal.timeout(8000) });
-      if (!res.ok) continue;
-      const j: any = await res.json();
-      const best = new Map<string, { px: number; amm: boolean; implied: number | null; pool: string | null; symbol?: string; name?: string; pump: boolean }>();
-      for (const p of j?.pairs ?? []) {
-        const mint = p?.baseToken?.address;
-        const px = Number(p?.priceNative);
-        if (!mint || !(px > 0)) continue;
-        if (p?.quoteToken?.address && p.quoteToken.address !== WSOL_MINT) continue; // priceNative/reserves are in the quote token; only SOL pairs are usable
-        const amm = p.dexId !== "pumpfun";
-        // the pair's own reserves imply a price; a quoted price that disagrees with them is a wash print or a decimals slip
-        const liqBase = Number(p?.liquidity?.base), liqQuote = Number(p?.liquidity?.quote);
-        const implied = liqBase > 0 && liqQuote > 0 ? liqQuote / liqBase : null;
-        const pool = p.dexId === "pumpswap" && typeof p.pairAddress === "string" ? p.pairAddress : null;
-        const cur = best.get(mint);
-        const pump = (cur?.pump ?? false) || p.dexId === "pumpfun" || p.dexId === "pumpswap" || String(mint).endsWith("pump");
-        // prefer the AMM pair (pumpswap/raydium) over the stale bonding-curve pair
-        if (!cur || (amm && !cur.amm)) best.set(mint, { px, amm, implied, pool: pool ?? cur?.pool ?? null, symbol: p.baseToken?.symbol, name: p.baseToken?.name, pump });
-        else { cur.pump = pump; if (!cur.pool && pool) cur.pool = pool; }
-      }
-      const now = Date.now();
-      for (const [mint, b] of best) {
-        const cur = tracker.tokens.get(mint);
-        if (cur) {
-          // borrow symbol/origin, and the pool address so the vault balances can price the token on-chain
-          if (b.symbol && (cur.symbol === "?" || !cur.symbol)) cur.symbol = b.symbol;
-          if (cur.pumpOrigin === null) cur.pumpOrigin = b.pump;
-          if (!cur.pool && b.pool) setPool(mint, b.pool);
-          if (cur.ammBuys + cur.ammSells > 0) continue; // live AMM trades are the truth
-          if (cur.vaultPrice !== null) continue; // pool known: priced from its vault balances (checkVault), never from an indexer
+  pollingExternal = true;
+  try {
+    for (let i = 0; i < want.length; i += 30) {
+      const batch = want.slice(i, i + 30);
+      try {
+        const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${batch.map((t) => t.mint).join(",")}`, { signal: AbortSignal.timeout(8000) });
+        if (!res.ok) continue;
+        const j: any = await res.json();
+        const best = new Map<string, { px: number; amm: boolean; implied: number | null; pool: string | null; symbol?: string; name?: string; pump: boolean }>();
+        for (const p of j?.pairs ?? []) {
+          const mint = p?.baseToken?.address;
+          const px = Number(p?.priceNative);
+          if (!mint || !(px > 0)) continue;
+          if (p?.quoteToken?.address && p.quoteToken.address !== WSOL_MINT) continue; // priceNative/reserves are in the quote token; only SOL pairs are usable
+          const amm = p.dexId !== "pumpfun";
+          // the pair's own reserves imply a price; a quoted price that disagrees with them is a wash print or a decimals slip
+          const liqBase = Number(p?.liquidity?.base), liqQuote = Number(p?.liquidity?.quote);
+          const implied = liqBase > 0 && liqQuote > 0 ? liqQuote / liqBase : null;
+          const pool = p.dexId === "pumpswap" && typeof p.pairAddress === "string" ? p.pairAddress : null;
+          const cur = best.get(mint);
+          const pump = (cur?.pump ?? false) || p.dexId === "pumpfun" || p.dexId === "pumpswap" || String(mint).endsWith("pump");
+          // prefer the AMM pair (pumpswap/raydium) over the stale bonding-curve pair
+          if (!cur || (amm && !cur.amm)) best.set(mint, { px, amm, implied, pool: pool ?? cur?.pool ?? null, symbol: p.baseToken?.symbol, name: p.baseToken?.name, pump });
+          else { cur.pump = pump; if (!cur.pool && pool) cur.pool = pool; }
         }
-        if (!b.amm) continue; // still on the bonding curve: the curve feed prices it, and an indexer price must not mark it graduated
-        if (b.implied === null || b.px / b.implied > 5 || b.px / b.implied < 0.2) {
-          if (!extPriceRejected.has(mint)) { extPriceRejected.add(mint); log(`[ext] rejected DexScreener price for ${cur?.symbol ?? "?"} ${short(mint)}: ${b.px.toExponential(3)} vs liquidity-implied ${b.implied === null ? "unknown" : b.implied.toExponential(3)}`); }
-          continue;
+        const now = Date.now();
+        for (const [mint, b] of best) {
+          const cur = tracker.tokens.get(mint);
+          if (cur) {
+            // borrow symbol/origin, and the pool address so the vault balances can price the token on-chain
+            if (b.symbol && (cur.symbol === "?" || !cur.symbol)) cur.symbol = b.symbol;
+            if (cur.pumpOrigin === null) cur.pumpOrigin = b.pump;
+            if (!cur.pool && b.pool) setPool(mint, b.pool);
+            if (cur.ammBuys + cur.ammSells > 0) continue; // live AMM trades are the truth
+            if (cur.vaultPrice !== null) continue; // pool known: priced from its vault balances (checkVault), never from an indexer
+          }
+          if (!b.amm) continue; // still on the bonding curve: the curve feed prices it, and an indexer price must not mark it graduated
+          if (b.implied === null || b.px / b.implied > 5 || b.px / b.implied < 0.2) {
+            if (!extPriceRejected.has(mint)) { extPriceRejected.add(mint); log(`[ext] rejected DexScreener price for ${cur?.symbol ?? "?"} ${short(mint)}: ${b.px.toExponential(3)} vs liquidity-implied ${b.implied === null ? "unknown" : b.implied.toExponential(3)}`); }
+            continue;
+          }
+          const t = tracker.setExternalPrice(mint, b.px, now, { symbol: b.symbol, name: b.name, pumpOrigin: b.pump });
+          if (!t) continue;
+          broker.evaluateEntries(t, now, t.kolSignals > 0);
+          broker.update(t, now);
         }
-        const t = tracker.setExternalPrice(mint, b.px, now, { symbol: b.symbol, name: b.name, pumpOrigin: b.pump });
-        if (!t) continue;
-        broker.evaluateEntries(t, now, t.kolSignals > 0);
-        broker.update(t, now);
-      }
-      // tokens DexScreener does not know at all: mark as non-pump so they are not traded
-      for (const t of batch) if (!best.has(t.mint) && t.lateDiscovery && t.pumpOrigin === null && Date.now() - t.createdAt > 120_000) t.pumpOrigin = false;
-    } catch {}
-  }
+        // tokens DexScreener does not know at all: mark as non-pump so they are not traded
+        for (const t of batch) if (!best.has(t.mint) && t.lateDiscovery && t.pumpOrigin === null && Date.now() - t.createdAt > 120_000) t.pumpOrigin = false;
+      } catch {}
+    }
+  } finally { pollingExternal = false; }
 }
 setInterval(() => void pollExternalPrices(), config.extPriceSeconds * 1000);
 
@@ -917,7 +929,23 @@ const META_RETRY_MS = Number(process.env.META_RETRY_HOURS ?? 6) * 3600_000;
  * The cost it was bounding is also not real: the documents average 306 bytes. Every launch this project has ever
  * seen is 63 MB. The batch size, not the age, is what keeps this from competing with ingestion.
  */
+/**
+ * One sweep at a time. Two is not merely wasteful, it is wasteful in the currency that is scarce.
+ *
+ * The batch went from 25 sequential fetches to 200 at concurrency 12, and nothing stopped the 60-second timer
+ * firing again while a slow pass was still in flight. Both passes then run the same SELECT with the same ORDER BY,
+ * get the same rows, and ask the same gateways for the same documents — observed 2026-09-11 as two identical log
+ * lines in the same second: "recovered 48/120 ... 65,683 still without a document", twice.
+ *
+ * The writes are idempotent so nothing is corrupted, and that is exactly why it could run unnoticed. What it costs
+ * is half the gateway budget, and gateway throughput is the binding constraint on the one thing here with a
+ * deadline — documents disappear from their hosts whether or not we spent the request on a duplicate.
+ */
+let sweepingMeta = false;
+
 async function sweepMissingMeta(): Promise<void> {
+  if (sweepingMeta) return;
+  sweepingMeta = true;
   try {
     /**
      * Both ends, for the same reason the image capture needs both: newest keeps pace with the small fraction the
@@ -975,6 +1003,7 @@ async function sweepMissingMeta(): Promise<void> {
     if (got) log(`[meta] recovered ${got}/${rows.length} launch claims that the first attempt missed; ` +
                  `${left.toLocaleString()} still without a document`);
   } catch (e) { log("[meta] sweep failed:", (e as Error).message); }
+  finally { sweepingMeta = false; }
 }
 setInterval(() => void sweepMissingMeta(), 60_000);
 setTimeout(() => void sweepMissingMeta(), 90_000);
