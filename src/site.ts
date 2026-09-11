@@ -579,6 +579,101 @@ const F = (() => {
 })();
 const pct = (n: number, d: number) => d > 0 ? `${(100 * n / d).toFixed(1)}%` : "—";
 
+/**
+ * Reports: dated pieces of work, as opposed to `findings.html`, which is a live view that changes under the reader.
+ *
+ * The distinction is the reason there are two. A finding recomputed every build is the right shape for "what is true
+ * now" and the wrong shape for anything anyone cites, because the number they quote will have moved by the time
+ * someone checks it. A report states what was true on a date, says so, and stays put.
+ */
+mkdirSync(join(OUT, "reports"), { recursive: true });
+
+const FAM = db.prepare(`
+  WITH live AS (SELECT * FROM tokens WHERE COALESCE(late_discovery,0) = 0 AND rebuilt_at IS NULL
+                  AND symbol IS NOT NULL AND symbol != '')
+  SELECT symbol, COUNT(*) mints, COUNT(DISTINCT creator) creators,
+         SUM(graduated_confirmed_by IS NOT NULL) grads,
+         AVG(dev_pct) dev, SUM(curve_buyers = 0) zero
+  FROM live GROUP BY symbol
+  HAVING mints >= 15 AND creators >= mints * 0.9 AND grads >= 5
+  ORDER BY grads DESC LIMIT 20`).all() as any[];
+
+const famTotals = FAM.reduce((a: any, f: any) => ({ mints: a.mints + f.mints, creators: a.creators + f.creators, grads: a.grads + f.grads }), { mints: 0, creators: 0, grads: 0 });
+
+writeFileSync(join(OUT, "reports", "ticker-factories.html"), page("The same ticker, a new creator every time", `
+  <h1 class="headline">The same ticker, a new creator every time</h1>
+  <p class="lede"><b>Report ${when(builtAt).slice(0, 10)}.</b> The figures below were computed from the record on that
+  date and are not updated afterwards. <a href="../findings.html">The live view is here</a>.</p>
+
+  <p class="lede">Across the launches this archive watched from the creation transaction, ${FAM.length} ticker symbols
+  were each used by <b>fifteen or more separate mints</b>, and almost every mint was created by a wallet that had
+  never launched anything before and never launched anything again. ${fmt(famTotals.mints)} launches,
+  ${fmt(famTotals.creators)} distinct creator wallets, ${fmt(famTotals.grads)} of them completing a bonding curve we
+  confirmed against the curve account itself.</p>
+
+  <div class="sec"><h2>What the record holds</h2></div>
+  <table>
+    <tr><th>Ticker</th><th class="num">Mints</th><th class="num">Distinct creators</th><th class="num">Confirmed graduations</th><th class="num">Avg creator share</th><th class="num">With no outside buyer</th></tr>
+    ${FAM.map((f: any) => `<tr>
+      <td class="mono">${esc(f.symbol)}</td>
+      <td class="num">${fmt(f.mints)}</td>
+      <td class="num">${fmt(f.creators)}</td>
+      <td class="num">${fmt(f.grads)}</td>
+      <td class="num${f.dev >= 50 ? " thin" : ""}">${f.dev == null ? "?" : f.dev.toFixed(1) + "%"}</td>
+      <td class="num${f.zero > f.mints / 2 ? " thin" : ""}">${fmt(f.zero)}</td></tr>`).join("")}
+  </table>
+
+  <div class="sec"><h2>Why a fresh wallet each time is the whole point</h2></div>
+  <p class="lede">Every heuristic that judges a launch by its creator's history fails against a wallet with no
+  history. A creator that has launched forty tokens is visible; forty creators that have launched one each are not,
+  and they are the same operation. That is why this project validates its own criteria against creator-wallet reuse
+  rather than with it — it is an axis <a href="../method.html">none of the published criteria read</a>, which is what
+  makes it usable as an independent check on them.</p>
+  <p class="callout">Several of these tickers match the names of well-known companies, films and products. The record
+  states what ticker a launch declared for itself and nothing more: it is not evidence that any named business was
+  involved, and nothing here should be read as saying so.</p>
+
+  <div class="sec"><h2>What this does not say</h2></div>
+  <p class="lede">A shared ticker is not identity. Two launches using the same symbol may be unrelated, and the
+  record cannot tell one operator running two hundred mints from two hundred people with the same idea. What it can
+  say is what each launch did at birth, and the table above is that and only that.</p>
+  <p class="lede">Coverage begins <b>${when(COV.from ?? 0)}</b>. Launches before then were not watched. Rows a
+  detector restored after the fact, and rows rebuilt from chain history, are excluded throughout — a launch found
+  late shows no outside buyers because nobody was watching it, which would flatter every figure here.</p>
+
+  <div class="sec"><h2>Check it yourself</h2></div>
+  <p class="lede">One query against the public-domain file. Disagreeing with it is the point of publishing it.</p>
+  <table>
+    <tr><td class="mono" style="white-space:pre-wrap">SELECT symbol, COUNT(*) mints,
+       COUNT(DISTINCT creator) creators,
+       SUM(graduated_confirmed_by IS NOT NULL) grads,
+       AVG(dev_pct), SUM(curve_buyers = 0)
+FROM tokens
+WHERE COALESCE(late_discovery,0) = 0
+  AND rebuilt_at IS NULL
+GROUP BY symbol
+HAVING mints >= 15
+   AND creators >= mints * 0.9
+   AND grads >= 5
+ORDER BY grads DESC;</td><td>the table above, verbatim. Bulk file: <a href="../data.html">record.db</a>; permanent copy at <span class="mono">doi:10.57967/hf/10338</span></td></tr>
+  </table>
+`, chrome, 1, `${FAM.length} ticker symbols, each used by fifteen or more separate mints with a fresh creator wallet almost every time.`, "/reports/ticker-factories.html"));
+
+writeFileSync(join(OUT, "reports.html"), page("Reports", `
+  <h1 class="headline">Reports</h1>
+  <p class="lede">Dated pieces of work, computed from the record on the day they were written and left alone
+  afterwards. For what is true right now, which changes under you, see
+  <a href="findings.html">what the record shows</a>.</p>
+  <table>
+    <tr><th>Date</th><th>Report</th><th>What it is about</th></tr>
+    <tr><td class="num">${when(builtAt).slice(0, 10)}</td>
+      <td><a href="reports/ticker-factories.html">The same ticker, a new creator every time</a></td>
+      <td>${FAM.length} ticker symbols used by fifteen or more separate mints, each with a fresh creator wallet</td></tr>
+  </table>
+  <p class="callout">Every figure in a report is a query against <a href="data.html">the public-domain record</a>,
+  printed alongside it so anyone can run it and get the same answer &mdash; or a different one, and say so.</p>
+`, chrome, 0, "Dated reports computed from the launch record, each with the queries to reproduce it.", "/reports.html"));
+
 writeFileSync(join(OUT, "findings.html"), page("What the record shows", `
   <h1 class="headline">Nearly half of the graduations we watched had no outside buyer</h1>
   <p class="lede">Of <b>${fmt(F.watched)}</b> tokens that completed a pump.fun bonding curve, which this archive
@@ -708,4 +803,4 @@ console.log(PAGES
   ? `  ${toks.length.toLocaleString()} token pages + ${wallets.size} wallet pages written (--pages)`
   : `  ${toks.length.toLocaleString()} graduations and ${wallets.size} curve-taking wallets assessed; their pages are rendered on request by \`npm run serve\` (pass --pages to write them)`);
 console.log(`  ${clean.length} checked with no markers found; ${dayClean.length} in the last 24 h of ${day.length} graduations`);
-console.log(`  findings.html, method.html, data.html, 404.html, api.html, pledge.html, corrections.html` + (PAGES ? `, api/${API_VERSION}/token/<mint>.json, api/${API_VERSION}/wallet/<wallet>.json` : ""));
+console.log(`  reports.html, reports/ticker-factories.html, findings.html, method.html, data.html, 404.html, api.html, pledge.html, corrections.html` + (PAGES ? `, api/${API_VERSION}/token/<mint>.json, api/${API_VERSION}/wallet/<wallet>.json` : ""));
