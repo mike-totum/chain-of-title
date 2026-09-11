@@ -132,6 +132,7 @@ const DOCS: Record<string, Record<string, Doc>> = {
     id: { kind: "ours", desc: "Collector run." },
     started_at: { kind: "ours", desc: "When the collector started watching, epoch ms." },
     stopped_at: { kind: "ours", desc: "When it stopped, epoch ms. NULL means still running. Launches outside these windows were not observed; this table is how you check what we were awake for." },
+    venue: { kind: "ours", desc: "Which launch venue this window covers. A window says we were observing THIS venue; it says nothing about any other, and a launch on a venue absent from these windows is unwatched rather than clean. Every window recorded before 2026-09-11 is a pump.fun window and carries that value." },
     note: { kind: "ours", desc: "Why the run started or ended, when we recorded it." },
   },
   pool_map: {

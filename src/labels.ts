@@ -23,7 +23,7 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { config } from "./config.ts";
 import { openDb } from "./db.ts";
-import { assess, cleanAtBirth, coverageWindows, TOKEN_COLUMNS } from "./provenance.ts";
+import { assess, cleanAtBirth, coverageWindows, TOKEN_COLUMNS , coverageFor} from "./provenance.ts";
 
 const BUILD = process.argv.includes("--build");
 const PATH = "data/labels.json";
@@ -34,7 +34,7 @@ const MAX_CREATOR_LAUNCHES = 2; // a burnt identity launches once, maybe twice -
 const db = openDb(config.dbPath);
 db.exec("PRAGMA query_only = 1");
 const win = coverageWindows(db);
-const covered = (ts: number) => win.some((w) => ts >= w.a && ts <= w.b);
+const covered = coverageFor(db);
 
 type Label = { mint: string; symbol: string | null; label: "manufactured"; why: string };
 

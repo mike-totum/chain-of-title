@@ -93,6 +93,8 @@ if (FULL) {
  * DDL below runs, and caught if it has already happened. A record built fresh gets the new name from the DDL.
  */
 try { db.exec("ALTER TABLE rec.trades RENAME COLUMN venue TO market"); } catch {}
+// Same reason: a record written before this change has no runs.venue and CREATE TABLE IF NOT EXISTS will not add it.
+try { db.exec("ALTER TABLE rec.runs ADD COLUMN venue TEXT NOT NULL DEFAULT 'pumpfun'"); } catch {}
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS rec.tokens (
@@ -209,7 +211,11 @@ db.exec(`
   );
   CREATE TABLE IF NOT EXISTS rec.pool_map (pool TEXT PRIMARY KEY, mint TEXT NOT NULL, created_at INTEGER);
   CREATE INDEX IF NOT EXISTS rec.pool_map_mint ON pool_map(mint);
-  CREATE TABLE IF NOT EXISTS rec.runs (id INTEGER PRIMARY KEY, started_at INTEGER, stopped_at INTEGER, note TEXT);
+  -- venue says which launch venue each observation window covers. Without it a reader of this file cannot answer
+  -- "were you watching THIS venue", and coverageWindows falls back to treating every window as covering everything
+  -- - which is true of a single-venue archive and a lie the moment there are two. venues.ts clause 3.
+  CREATE TABLE IF NOT EXISTS rec.runs (id INTEGER PRIMARY KEY, started_at INTEGER, stopped_at INTEGER, note TEXT,
+    venue TEXT NOT NULL DEFAULT 'pumpfun');
   -- What each curve-taking wallet did afterwards, precomputed. Derived from every trade the wallet made, so it cannot
   -- be recomputed from this file - and a wallet page that cannot compute it must not fall back to zero, because zero
   -- reads as "did not sell" about a wallet that may have sold thousands of SOL into buyers.
@@ -561,7 +567,7 @@ try {
     ["operator_policy", "cluster, policy, hold_plays, dist_plays, plays, note, updated_at"],
     ["operator_funders", "funder, first_seen, last_seen, txs, wallets, seeds, sampled_at, note, parent, hops"],
     ["pool_map", "pool, mint, created_at"],
-    ["runs", "id, started_at, stopped_at, note"],
+    ["runs", "id, started_at, stopped_at, note, venue"],
   ] as const) {
     if (!sourceHas(t)) { log(`  ${t} absent in the source; the record carries none`); continue; }
     db.exec(`DELETE FROM rec.${t}`);

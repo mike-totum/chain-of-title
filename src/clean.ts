@@ -13,6 +13,7 @@
 import { config } from "./config.ts";
 import { openDb } from "./db.ts";
 import { findBuyout } from "./operator.ts";
+import { coverageFor } from "./provenance.ts";
 
 const arg = (k: string, d: number) => { const i = process.argv.indexOf(k); return i > 0 ? Number(process.argv[i + 1]) : d; };
 const HOURS = arg("--hours", 24), LIMIT = arg("--limit", 50);
@@ -32,7 +33,7 @@ for (const r of runs) {
   if (last && r.started_at - last.b <= GAP_TOLERANCE_MS) last.b = Math.max(last.b, end);
   else windows.push({ a: r.started_at, b: end });
 }
-const covered = (ts: number) => windows.some((w) => ts >= w.a && ts <= w.b);
+const covered = coverageFor(db);
 
 const all = db.prepare(`SELECT mint, symbol, creator, created_at, dev_pct, unique_buyers, graduated, graduated_at,
   vault_sol, dev_sold FROM tokens

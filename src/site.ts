@@ -20,8 +20,7 @@ import { BRAND, CANONICAL_HOST, CONTACT, CSS, FAVICON, SEARCH, page, tokenBody, 
 import {
   assess, cleanAtBirth, readingCertifies, MAX_READING_AGE_MS, coverageWindows, TOKEN_COLUMNS, optionalColumns, graduationDisproved,
   BUYOUT_SOL, MAX_DEV_PCT, MIN_BUYERS, MIN_GRAD_MS, MIN_POOL_SOL,
-  type Assessment, type Flag,
-} from "./provenance.ts";
+  type Assessment, type Flag, coverageFor } from "./provenance.ts";
 
 const arg = (k: string, d: string) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : d; };
 const OUT = arg("--out", "site");
@@ -46,7 +45,8 @@ const now = Date.now();
 
 // ---------- coverage ----------
 const win = coverageWindows(db);
-const covered = (ts: number) => win.some((w) => ts >= w.a && ts <= w.b);
+// Per venue; see coverageFor. Identical to the old predicate while pumpfun is the only venue.
+const covered = coverageFor(db);
 const chrome: Chrome = {
   coverageFrom: win.length ? when(win[0].a) : "unknown",
   gapMin: win.slice(1).reduce((a, w, i) => a + Math.max(0, w.a - win[i].b), 0) / 60_000,

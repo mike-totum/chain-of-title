@@ -202,14 +202,59 @@ export const TOKEN_COLUMNS = `mint, symbol, name, creator, created_at, late_disc
   description, uri, image, meta_at, meta_sha256, meta_bytes, image_sha256, image_bytes`;
 
 /** Union of the collector's run intervals. A launch outside them happened while we were blind. */
-export function coverageWindows(db: DatabaseSync): { a: number; b: number }[] {
-  const runs = db.prepare("SELECT started_at, stopped_at FROM runs WHERE started_at IS NOT NULL ORDER BY started_at").all() as any[];
+export function coverageWindows(db: DatabaseSync, venue?: string): { a: number; b: number }[] {
+  /**
+   * Filter only if this database HAS the column, which a published record may not.
+   *
+   * `runs.venue` is added by openDb's migration, and the web service opens the record with `migrate: false` on
+   * purpose - it serves that file to the public and must not be the reason its bytes differ from what servicedb
+   * built. So a served record written before this change has a `runs` table with no `venue` column, and asking for
+   * one throws "no such column" on every page that computes coverage, which is every page. Caught in rehearsal
+   * rather than in production, unlike the identical mistake made in schema-doc an hour earlier.
+   *
+   * Where the column is absent the archive is single-venue by construction, so ignoring the filter is not a
+   * fallback that hides anything: every window in that file is a pump.fun window.
+   *
+   * The column defaults to 'pumpfun', so even where it exists this is a no-op today. It stops being one the moment
+   * a second venue is subscribed, which is the point.
+   */
+  const hasVenue = (() => {
+    try { return (db.prepare("PRAGMA table_info(runs)").all() as { name: string }[]).some((c) => c.name === "venue"); }
+    catch { return false; }
+  })();
+  const filter = venue && hasVenue;
+  const sql = "SELECT started_at, stopped_at FROM runs WHERE started_at IS NOT NULL"
+    + (filter ? " AND venue = ?" : "") + " ORDER BY started_at";
+  const st = db.prepare(sql);
+  const runs = (filter ? st.all(venue) : st.all()) as any[];
   const win: { a: number; b: number }[] = [];
   for (const r of runs) {
     const end = r.stopped_at ?? r.started_at, last = win[win.length - 1];
     if (last && r.started_at - last.b <= 180_000) last.b = Math.max(last.b, end); else win.push({ a: r.started_at, b: end });
   }
   return win;
+}
+
+/**
+ * Was this archive watching THIS venue at this moment?
+ *
+ * `runs` records when the collector was observing, and with one venue a single interval could answer the question.
+ * With two it cannot: a launch on a venue we were not subscribed to sat inside a window recorded for a different
+ * one, and would have read as watched. Watched is what separates "no markers found" from "we were not looking",
+ * so getting it wrong does not produce a gap - it produces a finding we cannot support. venues.ts clause 3.
+ *
+ * Windows are read once per database and cached per venue. A launch whose venue is missing is treated as pumpfun,
+ * which is what every row in the archive predating the column actually is; it is a fact about the history, not a
+ * default that a new venue may inherit, because `CreateEvent.venue` is stamped at decode for anything live.
+ */
+export function coverageFor(db: DatabaseSync): (ts: number, venue?: string | null) => boolean {
+  const byVenue = new Map<string, { a: number; b: number }[]>();
+  return (ts: number, venue?: string | null) => {
+    const v = venue || "pumpfun";
+    let win = byVenue.get(v);
+    if (!win) { win = coverageWindows(db, v); byVenue.set(v, win); }
+    return win.some((w) => ts >= w.a && ts <= w.b);
+  };
 }
 
 // assess() runs once per token over every graduation in the window, so its statements are prepared once per database
@@ -225,13 +270,13 @@ function curveBuyersQ(db: DatabaseSync) {
   return s;
 }
 
-export function assess(db: DatabaseSync, t: any, covered: (ts: number) => boolean): Assessment {
+export function assess(db: DatabaseSync, t: any, covered: (ts: number, venue?: string | null) => boolean): Assessment {
   const flags: Flag[] = [];
   // A launch is judgeable if we watched it, or if its complete history was rebuilt from chain - the same on-chain
   // events, read later. This must be decided here rather than patched onto the result afterwards: the checks below
   // are skipped entirely for an unjudgeable token, so flipping the flag after the fact produced a rebuilt page for
   // USWS (wash factory: graduated instantly with one buyer) carrying no warnings at all.
-  const watched = (!t.late_discovery && covered(t.created_at)) || !!t.rebuilt_complete;
+  const watched = (!t.late_discovery && covered(t.created_at, t.venue)) || !!t.rebuilt_complete;
   const bo = findBuyout(db, t.mint, BUYOUT_SOL);
   // tokens.unique_buyers also counts post-graduation AMM buyers, which is not what "outside buyers before it
   // graduated" means. Count from the trade rows; no rows at all is unknown, and unknown never certifies.

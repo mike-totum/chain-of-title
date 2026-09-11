@@ -20,7 +20,7 @@ import { config } from "./config.ts";
 import { openDb } from "./db.ts";
 import { DatabaseSync } from "node:sqlite";
 import { type Assessment, assess, cleanAtBirth, coverageWindows, TOKEN_COLUMNS, optionalColumns, graduationDisproved, MIN_POOL_SOL,
-  readingCertifies, readingIsFresh, MAX_READING_AGE_MS, MAX_DEV_PCT, MIN_BUYERS, BUYOUT_SOL } from "./provenance.ts";
+  readingCertifies, readingIsFresh, MAX_READING_AGE_MS, MAX_DEV_PCT, MIN_BUYERS, BUYOUT_SOL , coverageFor} from "./provenance.ts";
 import { profile, verdictLine, walletVerdict, clusterProfile, clusterTable } from "./operator.ts";
 import { poolReservesPooled } from "./outcomes.ts";
 import { rebuild, store, curveExists } from "./backfill.ts";
@@ -439,7 +439,9 @@ if (held < 1000) {
 }
 
 let win = coverageWindows(db);
-const covered = (ts: number) => win.some((w) => ts >= w.a && ts <= w.b);
+// Per venue, not per clock. A launch on a venue we were not subscribed to must read as unwatched, never as
+// clean, and with one venue in VENUES this returns exactly what the old whole-archive predicate did.
+const covered = coverageFor(db);
 let chrome: Chrome = {
   coverageFrom: win.length ? when(win[0].a) : "unknown",
   gapMin: win.slice(1).reduce((a, w, i) => a + Math.max(0, w.a - win[i].b), 0) / 60_000,
