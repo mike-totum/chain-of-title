@@ -1,0 +1,176 @@
+{
+  "slug": "ticker-factories",
+  "title": "The same ticker, a new creator every time",
+  "published": "2026-09-11",
+  "summary": "20 ticker symbols, each used by fifteen or more separate mints with a fresh creator wallet almost every time.",
+  "coverageFrom": "2026-09-02T12:29:32.581Z",
+  "recordBuiltAt": "2026-09-11T02:22:20.893Z",
+  "totals": {
+    "mints": 1208,
+    "creators": 1160,
+    "grads": 842
+  },
+  "rows": [
+    {
+      "symbol": "WOFI",
+      "mints": 239,
+      "creators": 228,
+      "grads": 196,
+      "dev": 64.55004990087369,
+      "zero": 212
+    },
+    {
+      "symbol": "WOTF",
+      "mints": 134,
+      "creators": 131,
+      "grads": 124,
+      "dev": 70.44793733668935,
+      "zero": 121
+    },
+    {
+      "symbol": "BEAST",
+      "mints": 114,
+      "creators": 106,
+      "grads": 78,
+      "dev": 56.655971345388416,
+      "zero": 89
+    },
+    {
+      "symbol": "WWR",
+      "mints": 70,
+      "creators": 64,
+      "grads": 56,
+      "dev": 64.14358534121213,
+      "zero": 62
+    },
+    {
+      "symbol": "Anthropic",
+      "mints": 60,
+      "creators": 60,
+      "grads": 46,
+      "dev": 61.789390185627575,
+      "zero": 47
+    },
+    {
+      "symbol": "ROBIN",
+      "mints": 105,
+      "creators": 96,
+      "grads": 41,
+      "dev": 35.66079376490046,
+      "zero": 57
+    },
+    {
+      "symbol": "LEGO",
+      "mints": 52,
+      "creators": 52,
+      "grads": 40,
+      "dev": 69.13557150414245,
+      "zero": 48
+    },
+    {
+      "symbol": "GTA 6 Coin",
+      "mints": 40,
+      "creators": 40,
+      "grads": 38,
+      "dev": 75.36210459355658,
+      "zero": 38
+    },
+    {
+      "symbol": "LQX",
+      "mints": 42,
+      "creators": 42,
+      "grads": 33,
+      "dev": 71.77867832335502,
+      "zero": 39
+    },
+    {
+      "symbol": "Redbull",
+      "mints": 30,
+      "creators": 30,
+      "grads": 27,
+      "dev": 74.08248063738584,
+      "zero": 30
+    },
+    {
+      "symbol": "USWR",
+      "mints": 25,
+      "creators": 25,
+      "grads": 24,
+      "dev": 76.1467649143205,
+      "zero": 24
+    },
+    {
+      "symbol": "?",
+      "mints": 110,
+      "creators": 105,
+      "grads": 24,
+      "dev": 13.17464340521493,
+      "zero": 33
+    },
+    {
+      "symbol": "Coca Cola",
+      "mints": 23,
+      "creators": 23,
+      "grads": 23,
+      "dev": 79.31,
+      "zero": 23
+    },
+    {
+      "symbol": "POKEMON",
+      "mints": 26,
+      "creators": 25,
+      "grads": 19,
+      "dev": 58.673194979756694,
+      "zero": 21
+    },
+    {
+      "symbol": "USWS",
+      "mints": 17,
+      "creators": 17,
+      "grads": 16,
+      "dev": 74.69778246811019,
+      "zero": 17
+    },
+    {
+      "symbol": "USTF",
+      "mints": 21,
+      "creators": 21,
+      "grads": 15,
+      "dev": 79.31,
+      "zero": 21
+    },
+    {
+      "symbol": "ARROW",
+      "mints": 16,
+      "creators": 16,
+      "grads": 13,
+      "dev": 65.63550639387594,
+      "zero": 14
+    },
+    {
+      "symbol": "FTFS",
+      "mints": 15,
+      "creators": 15,
+      "grads": 11,
+      "dev": 69.47975917065388,
+      "zero": 13
+    },
+    {
+      "symbol": "TikTok",
+      "mints": 29,
+      "creators": 27,
+      "grads": 9,
+      "dev": 24.646310872085618,
+      "zero": 12
+    },
+    {
+      "symbol": "OIL",
+      "mints": 40,
+      "creators": 37,
+      "grads": 9,
+      "dev": 17.305282470191543,
+      "zero": 18
+    }
+  ],
+  "query": "SELECT symbol, COUNT(*) mints,\n       COUNT(DISTINCT creator) creators,\n       SUM(graduated_confirmed_by IS NOT NULL) grads,\n       AVG(dev_pct) dev, SUM(curve_buyers = 0) zero\nFROM tokens\nWHERE COALESCE(late_discovery,0) = 0\n  AND rebuilt_at IS NULL\n  AND symbol IS NOT NULL AND symbol != ''\nGROUP BY symbol\nHAVING mints >= 15\n   AND creators >= mints * 0.9\n   AND grads >= 5\nORDER BY grads DESC\nLIMIT 20;"
+}

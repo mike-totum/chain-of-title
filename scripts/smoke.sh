@@ -83,6 +83,9 @@ settle() {
 settle
 
 check "/"                    200 "Chain of Title"
+# One address for the front page. `/index.html` was a second, equal URL for the same document and was what every
+# link home pointed at; it now 301s. A 200 here means the redirect is gone and the duplicate is back.
+check "/index.html"          301 ""
 check "/method.html"         200 "no markers found"
 check "/data.html"           200 "record.db"
 check "/favicon.svg"         200 ""
@@ -94,6 +97,23 @@ check "/corrections.html"    200 "corrections@chainoftitle.org"
 check "/api/summary.json"    200 "clean"
 check "/t/$MINT.html"        200 "At launch"
 check "/live.html"           200 "Live"
+
+# The three lists the front page previews. The front page links into all three, so a 404 here is a front page that
+# links into nothing — and none of them existed before the layout change, so they are exactly the kind of route a
+# deploy forgets to carry.
+#
+# Checked on text the page renders whether or not it has rows to show. A clean window with nothing in it is a real
+# state of the archive, not a broken deploy, so /clean.html is matched on its criteria sentence rather than on a
+# column heading that a zero-row window would still print but that says less about the page being right.
+# Reports. `Published` proves the page came from a manifest rather than from a build clock, and the individual
+# report is followed from the index the way a reader reaches it — so a published manifest with no template, or a
+# front page advertising a report that is not in the image, fails the deploy rather than the visitor.
+check "/reports.html"        200 "Published"
+check "/reports/nosuchthing.html" 404 "No such report"
+
+check "/wallets.html"        200 "Curves taken"
+check "/operators.html"      200 "Wallets funded"
+check "/clean.html"          200 "Creator kept under"
 
 # The JSON surface. `verdict` is the field integrators branch on, so its absence is a broken deploy even when the
 # route answers 200 — and `not_an_address` proves the error bodies are records rather than bare strings.
@@ -115,6 +135,14 @@ check "/api"                 404   # a directory path is a 404, not an EISDIR 50
 first=$(sed -n 's|.*href="\(o/[1-9A-HJ-NP-Za-km-z]\{4,12\}\.html\)".*|\1|p' "$OUT/_.body" | head -1)
 if [ -n "$first" ]; then check "/$first" 200 "Operator cluster"
 else lose "/o/<cluster>.html" "the front page lists no operator clusters to follow"; fi
+
+# The latest report, followed from the front page exactly as a reader follows it. This is the check that catches the
+# failure the dynamic routes were written to prevent: the front page naming a report the service cannot render.
+# Not a failure if nothing is published yet — an empty reports list is a real state, and the index check above
+# already proves the route works.
+rep=$(sed -n 's|.*href="\(reports/[a-z0-9-]\{1,64\}\.html\)".*|\1|p' "$OUT/_.body" | head -1)
+if [ -n "$rep" ]; then check "/$rep" 200 "not updated afterwards"
+else printf '  ..   %-24s %s\n' "/reports/<slug>.html" "nothing published; skipped"; fi
 
 bulk=$(curl -s -o /dev/null -I -w '%{http_code}' --max-time 30 "$U/data/record.db")
 [ "$bulk" = "200" ] || lose "/data/record.db" "HEAD expected 200, got $bulk"

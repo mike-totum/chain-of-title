@@ -44,6 +44,7 @@
     "seed": "tsx --no-warnings=ExperimentalWarning src/seed.ts",
     "mergeseed": "tsx --no-warnings=ExperimentalWarning src/mergeseed.ts",
     "site": "tsx --no-warnings=ExperimentalWarning src/site.ts",
+    "publish": "tsx --no-warnings=ExperimentalWarning src/publish.ts",
     "labels": "tsx --no-warnings=ExperimentalWarning src/labels.ts",
     "backfill": "tsx --no-warnings=ExperimentalWarning src/backfill.ts",
     "serve": "tsx --no-warnings=ExperimentalWarning src/serve.ts",

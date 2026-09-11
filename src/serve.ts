@@ -25,8 +25,11 @@ import { profile, verdictLine, walletVerdict, clusterProfile, clusterTable } fro
 import { poolReservesPooled } from "./outcomes.ts";
 import { rebuild, store, curveExists } from "./backfill.ts";
 import { page, tokenBody, walletBody, tokenPreview, SEARCH, when, fmt, homeBody, homeTitle, verdict, CANONICAL_HOST,
-  siblingsBody, relaunchStrip, wallBody, clusterBody, type Priors, type SiblingRow, type SiblingStats, type StripMark,
+  siblingsBody, relaunchStrip, wallBody, clusterBody, walletsBody, operatorsBody, cleanBody,
+  reportBody, reportsIndexBody,
+  type Priors, type SiblingRow, type SiblingStats, type StripMark,
   type Home, type Chrome, type Reading } from "./render.ts";
+import { loadReports, reportDate } from "./reports.ts";
 import { r2Config, getWithType as r2Get } from "./r2.ts";
 import { tokenRecord, walletRecord, statusRecord, unknownRecord, errorRecord,
   API_VERSION, PER_IP_PER_HOUR, GLOBAL_PER_HOUR, GLOBAL_PER_DAY, type Coverage } from "./api.ts";
@@ -1023,6 +1026,32 @@ const HOME_TTL_MS = Number(process.env.HOME_TTL_SECONDS ?? 60) * 1000;
 /** A stall worth a log line. Below this a reader feels a slow page; above it, requests in flight are timing out. */
 const LOOP_STALL_MS = Number(process.env.LOOP_STALL_MS ?? 2000);
 const HOME_DAYS = Number(process.env.HOME_DAYS ?? 7);
+/**
+ * How many clean launches the built Home carries, and how many of them the API publishes.
+ *
+ * CLEAN_MAX bounds /clean.html so one quiet week cannot render a page nobody can load; over the seven-day window
+ * this holds every row we have (351 at the time of writing). API_CLEAN_ROWS is the published contract and is
+ * deliberately a separate number: it was 40 before these two were distinguished and it stays 40.
+ */
+/**
+ * Published reports, read once at boot.
+ *
+ * They are committed files in the image, not rows in the record, so they cannot change while the process runs and
+ * re-reading them per request would be a filesystem hit for a constant. A newly published report reaches the site
+ * the way any other source change does: on the next deploy.
+ */
+const REPORTS = loadReports();
+console.log(`[reports] ${REPORTS.length} published${REPORTS.length ? `, latest ${REPORTS[0].published} ${REPORTS[0].slug}` : ""}`);
+
+const CLEAN_MAX = 400;
+const API_CLEAN_ROWS = 40;
+/**
+ * The bounds on the wallet and operator lists, applied where they are built rather than where they are shown.
+ * Both pages state their own bound, because a list that shows the first 250 of 2,401 without saying so tells a
+ * reader they have seen the register.
+ */
+const WALLETS_MAX = 250;
+const OPERATORS_MAX = 200;
 let homeCache: { at: number; h: Home; html: string } | null = null;
 
 /**
@@ -1089,8 +1118,19 @@ function buildHome(now: number): Home {
     .filter(({ t, a }) => !t.late_discovery && t.dev_pct >= 50 && a.curveBuyers === 0 && t.pool && t.vault_at != null && (t.vault_sol ?? 0) < 10)
     .sort((x, y) => (y.t.vault_at ?? 0) - (x.t.vault_at ?? 0))[0];
 
+  /**
+   * The full lists, not the front page's preview of them.
+   *
+   * These were LIMIT 15 and limit 10 because fifteen and ten were what the front page printed. /wallets.html and
+   * /operators.html then had to re-query for the rest, which is two statements that have to agree about one table
+   * — the shape this codebase keeps finding bugs in. Built once and sliced by each consumer instead, for the same
+   * reason summary.json is derived from this object: a preview cannot say something different from the list it
+   * links to if they are the same array. 250 rows instead of 15 costs nothing next to the assessment pass above,
+   * and clusterTable was measured at 6 ms.
+   */
   const ops = db.prepare(
-    `SELECT wallet, curve_sol, amm_buy, amm_sell, tokens FROM wallet_flow ORDER BY amm_sell DESC LIMIT 15`).all() as any[];
+    `SELECT wallet, curve_sol, amm_buy, amm_sell, tokens FROM wallet_flow ORDER BY amm_sell DESC LIMIT ?`)
+    .all(WALLETS_MAX) as any[];
   const walletCount = (db.prepare("SELECT COUNT(*) c FROM wallet_flow").get() as any).c as number;
 
   return {
@@ -1107,8 +1147,14 @@ function buildHome(now: number): Home {
      * Every clean launch, liquid or not, newest first — with the liquidity reading carried as nullable rather than
      * used as a filter. A row whose pool we have not read recently belongs on this list with its liquidity column
      * saying so; leaving it off published our RPC coverage as if it were a finding about the token.
+     *
+     * This was capped at 40 because 40 was what the front page printed. It is now the list itself, sliced by each
+     * consumer: the front page takes the newest handful, /clean.html renders all of it, and the API keeps taking
+     * exactly the 40 it has always published (see summaryJson). Widening it costs nothing — `birthClean` is
+     * already fully computed above and this only maps more of it — and it means the page and the page it links to
+     * cannot disagree, which is the same reason summary.json is derived from this object rather than rebuilt.
      */
-    cleanRows: birthClean.sort((x, y) => y.t.created_at - x.t.created_at).slice(0, 40).map(({ t, a }) => ({
+    cleanRows: birthClean.sort((x, y) => y.t.created_at - x.t.created_at).slice(0, CLEAN_MAX).map(({ t, a }) => ({
       mint: t.mint, symbol: t.symbol, devPct: t.dev_pct, buyers: a.curveBuyers ?? 0,
       fillMs: t.graduated_at && t.created_at ? t.graduated_at - t.created_at : null,
       // Quote any reading recent enough to quote, thin or not, and say separately whether it clears the threshold.
@@ -1147,11 +1193,17 @@ function buildHome(now: number): Home {
       return [...n.entries()].filter(([c]) => label[c]).sort((x, y) => y[1] - x[1])
         .map(([c, v]) => ({ label: label[c], n: v }));
     })(),
-    clusterRows: clusterTable(db, 10),
+    clusterRows: clusterTable(db, OPERATORS_MAX),
+    latestReport: REPORTS.length ? {
+      slug: REPORTS[0].slug, title: REPORTS[0].title, published: REPORTS[0].published,
+      publishedLong: reportDate(REPORTS[0].published), summary: REPORTS[0].summary,
+    } : null,
     /**
      * Three records to open, newest first, for a visitor with nothing to paste. Taken from the same assessed set
-     * the counters above are built from, so the page cannot offer a record it would describe differently, and the
-     * proof token is skipped because it is already shown as a card directly above these.
+     * the counters above are built from, so the page cannot offer a record it would describe differently. The
+     * proof token is skipped because the "why a scanner cannot tell you this" passage further down the page walks
+     * through that one launch in detail; offering it here as well would spend the opening on a record the reader
+     * is about to be shown anyway.
      */
     startHere: day
       /**
@@ -1288,7 +1340,15 @@ function summaryJson(): string {
      */
     cleanAtBirth24h: h.cleanBirth24h, clean24h: h.clean24h, uncertified24h: h.unchecked24h,
     uncertified: h.unchecked, archivedLaunches: h.onFile,
-    clean: h.cleanRows.map((r) => ({
+    /**
+     * Forty, explicitly, and not `h.cleanRows.length`.
+     *
+     * That field used to be capped at 40 by the builder and this list inherited the cap by accident. The cap moved
+     * to the consumers when /clean.html needed the whole list, so without this slice the published contract would
+     * have silently widened from 40 rows to several hundred on the same deploy that changed a page layout. A
+     * consumer's response size is not ours to change as a side effect.
+     */
+    clean: h.cleanRows.slice(0, API_CLEAN_ROWS).map((r) => ({
       mint: r.mint, symbol: r.symbol, creatorSupplyPct: r.devPct, curveBuyers: r.buyers,
       // null = no reading fresh enough to quote. Not zero liquidity, and not a finding about the token.
       poolSol: r.poolSol, poolReadAt: r.readAt, liquidityVerified: r.liquid,
@@ -1317,6 +1377,18 @@ const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url ?? "/", "http://x");
     let path = decodeURIComponent(url.pathname);
+    /**
+     * One address for the front page, and it is `/`.
+     *
+     * `/index.html` used to be a second, equal address for the same document — reachable, indexable, and the one
+     * every link in the masthead and footer actually pointed at. A 301 collapses them, so a crawler sees one page
+     * and a reader never has a filename in the address bar. Permanent rather than temporary because this will not
+     * be changing back, and query strings are carried through so nothing with a `?ref=` loses it on the way.
+     */
+    if (path === "/index.html") {
+      res.writeHead(301, { location: `/${url.search}`, "cache-control": "public, max-age=3600" });
+      return res.end();
+    }
     if (path === "/") path = "/index.html";
     // never let a path escape the served directory
     const safe = normalize(path).replace(/^(\.\.[/\\])+/, "");
@@ -1357,6 +1429,69 @@ const server = createServer(async (req, res) => {
       return send(200, page("Launches, as they happen", wallBody(), chrome, 0,
         "Every pump.fun launch the moment its creation transaction is decoded, with the creator's share of supply.",
         "/live.html"), "text/html; charset=utf-8", "none");
+    }
+
+    /**
+     * The three lists the front page previews, in full.
+     *
+     * All three render from `currentHome()` rather than from queries of their own, so the rows on the front page
+     * and the rows here are literally the same arrays: a preview cannot say something a reader finds contradicted
+     * when they open it. That is the same reasoning that derives summary.json from this object instead of
+     * rebuilding it, and it is why the builder above now selects the whole list rather than the top handful.
+     *
+     * Cached "short" like the front page, for the same reason: these are its figures.
+     */
+    /**
+     * Reports, rendered here rather than served from the static tree.
+     *
+     * They were files in `site/`, written by whoever last ran `npm run site` on a laptop and uploaded with the
+     * image. That was survivable while the report was also computed there; it stopped being survivable the moment
+     * the front page began advertising the latest report from a manifest in the image, because the two could then
+     * disagree: publish a manifest, deploy without rebuilding the static tree, and the front page links to a
+     * report whose page is not in the image. A 404 from our own front page, on the one artifact meant to be cited.
+     *
+     * Rendering from the same manifests the front page reads makes that impossible to express, and it takes the
+     * laptop out of one more publish path. These are matched before the static handler, so the older files in
+     * `site/reports*` are shadowed rather than served.
+     */
+    if (safe === "/reports.html") {
+      return send(200, page("Reports", reportsIndexBody(REPORTS), chrome, 0,
+        "Dated reports computed from the launch record, each with the queries to reproduce it.",
+        "/reports.html"), "text/html; charset=utf-8", "short");
+    }
+    const rep = safe.match(/^\/reports\/([a-z0-9-]{1,64})\.html$/);
+    if (rep) {
+      const r = REPORTS.find((x) => x.slug === rep[1]);
+      const body = r ? reportBody(r) : "";
+      // A slug we hold no manifest for, or hold a manifest but no template for, is a 404 and says which. Never a
+      // page with a title and an empty table: a report that asserts nothing still looks like a report.
+      if (!r || !body) return send(404, page("No such report", `<h1 class="headline">No such report</h1>
+        <p class="lede">We publish no report under that name. <a href="../reports.html">Everything we have
+        published</a> is listed here.</p>`, chrome, 1, undefined, safe), "text/html; charset=utf-8", "none");
+      return send(200, page(r.title, body, chrome, 1, r.summary, safe), "text/html; charset=utf-8", "short");
+    }
+
+    if (safe === "/wallets.html") {
+      const h = currentHome();
+      return send(200, page("Who takes the curves",
+        walletsBody(h.opRows, h.wallets, h.opRows.length, h.buyoutSol), chrome, 0,
+        "Every wallet on file that has taken a whole bonding curve in one transaction, what it spent, and what it did with the tokens afterwards.",
+        "/wallets.html"), "text/html; charset=utf-8", "short");
+    }
+    if (safe === "/operators.html") {
+      const h = currentHome();
+      return send(200, page("Operator groups",
+        operatorsBody(h.clusterRows, h.now, h.clusterRows.length, h.clusterRows.length >= OPERATORS_MAX),
+        chrome, 0,
+        "Every group of curve-buying wallets we have traced to a common funder, ordered by curves taken.",
+        "/operators.html"), "text/html; charset=utf-8", "short");
+    }
+    if (safe === "/clean.html") {
+      const h = currentHome();
+      return send(200, page(`Checked, no markers found, last ${h.windowDays === 1 ? "24 hours" : `${h.windowDays} days`}`,
+        cleanBody(h), chrome, 0,
+        "Every launch in the window whose record carries none of the patterns we look for, with the liquidity reading and its age.",
+        "/clean.html"), "text/html; charset=utf-8", "short");
     }
 
     const SIBLINGS_MAX = 300;
