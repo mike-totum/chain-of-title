@@ -30,7 +30,7 @@ export type MergeResult = {
 
 /** Tables the seed carries, in dependency-free order. `tokens` first so the assertions below have something to check. */
 const TABLES = ["tokens", "operator_wallets", "operator_funders", "operator_policy", "pool_map", "runs", "signals",
-  "trades", "hist_trades"] as const;
+  "trades", "hist_trades", "hist_tokens"] as const;
 
 /**
  * Columns of `table` in `schema`. The schema goes in the SECOND ARGUMENT, not as a prefix.
@@ -351,6 +351,18 @@ export async function mergeSeed(
         PRIMARY KEY (mint, sig, idx))`);
       db.exec("CREATE INDEX IF NOT EXISTS main.hist_trades_mint ON hist_trades(mint, ts)");
       /**
+       * `hist_tokens` gets the same treatment and for a sharper reason: it is the QUALIFIER on the rows above.
+       * Without it a collector holds reconstructed buyout evidence and no record of how complete any reconstruction
+       * was, which is how 1,072 rows came to be published unqualified — the evidence was in the seed and the thing
+       * that says whether to trust it was not.
+       */
+      db.exec(`CREATE TABLE IF NOT EXISTS main.hist_tokens (
+        mint TEXT PRIMARY KEY, name TEXT, symbol TEXT, creator TEXT, curve TEXT, created_at INTEGER, complete INTEGER,
+        mcap_sol REAL, mcap_usd REAL, ath_usd REAL, ath_at INTEGER, sol_usd REAL, source TEXT, status TEXT DEFAULT 'new',
+        sigs INTEGER, sigs_failed INTEGER, sigs_capped INTEGER DEFAULT 0, txs_fetched INTEGER, trades INTEGER,
+        buyers INTEGER, dev_pct REAL, first_ts INTEGER, last_ts INTEGER, grad_ts INTEGER, graduated_min REAL,
+        peak_x REAL, error TEXT, updated_at INTEGER, dev_buy_pct REAL)`);
+      /**
        * Only if the seed actually carries them. A seed written before these tables were exported has neither, and an
        * unconditional copy throws `no such table: seed.hist_trades` and takes the whole merge down - including the
        * tokens and operator rows that would otherwise have landed.
@@ -374,6 +386,20 @@ export async function mergeSeed(
         db.exec(`INSERT OR IGNORE INTO main.hist_trades (mint, sig, idx, ts, slot, wallet, side, sol, tokens, vsol, vtok, is_dev)
                  SELECT mint, sig, idx, ts, slot, wallet, side, sol, tokens, vsol, vtok, is_dev FROM seed.hist_trades`);
       else log(`[seed] this seed carries no hist_trades table - reconstructed buyout history will be missing`);
+      /**
+       * Live wins: a rebuild the target ran itself describes the target's own rows. The seed only fills a mint the
+       * target has never rebuilt, which on a collector is all of them.
+       */
+      if (seedHas("hist_tokens"))
+        db.exec(`INSERT OR IGNORE INTO main.hist_tokens (mint, name, symbol, creator, curve, created_at, complete,
+                   mcap_sol, mcap_usd, ath_usd, ath_at, sol_usd, source, status, sigs, sigs_failed, sigs_capped,
+                   txs_fetched, trades, buyers, dev_pct, first_ts, last_ts, grad_ts, graduated_min, peak_x, error,
+                   updated_at, dev_buy_pct)
+                 SELECT mint, name, symbol, creator, curve, created_at, complete, mcap_sol, mcap_usd, ath_usd, ath_at,
+                   sol_usd, source, status, sigs, sigs_failed, sigs_capped, txs_fetched, trades, buyers, dev_pct,
+                   first_ts, last_ts, grad_ts, graduated_min, peak_x, error, updated_at, dev_buy_pct
+                 FROM seed.hist_tokens`);
+      else log(`[seed] this seed carries no hist_tokens table - reconstructed rows will publish unqualified`);
 
       /**
        * `runs` is evidence: provenance.ts derives published coverage from it, so merging tokens without runs would

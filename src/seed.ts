@@ -59,7 +59,11 @@ const EVIDENCE_WHERE: Record<string, string> = {
   hist_trades: `WHERE side = 'buy' AND sol >= ${BUYOUT_SOL}`,
 };
 const tables = ["tokens", "operator_wallets", "operator_funders", "operator_policy", "pool_map", "runs", "signals",
-  "trades", "hist_trades"];
+  // hist_tokens travels with hist_trades or the reconstructions arrive unqualified. It is the only place that
+  // records how much of a curve a rebuild actually read, and without it the record cannot tell a rebuild that read
+  // a whole curve from one that read 2.5% of it — which is exactly what happened: 1,072 buyout rows published with
+  // no completeness marker because the evidence was in the seed and the qualifier was not.
+  "trades", "hist_trades", "hist_tokens"];
 
 const src = new DatabaseSync(config.dbPath, { readOnly: true });
 const w = openDb(OUT);   // creates the full, correct schema
