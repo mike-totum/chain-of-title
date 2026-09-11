@@ -268,13 +268,18 @@ async function serveHealth(): Promise<void> {
     let body: string;
     try {
       const m = db.prepare(`SELECT COUNT(*) mints, SUM(looks_like_launch) launches,
-        SUM(uri IS NOT NULL) with_uri, SUM(meta_at IS NOT NULL) documents FROM chain_mints`).get() as any;
+        SUM(uri IS NOT NULL) with_uri, SUM(meta_at IS NOT NULL) documents,
+        -- Tokens the pump.fun collector is ALREADY counting. Reported separately so the two archives can be added
+        -- into one total without double counting the overlap, which is the only reason this was ever two numbers.
+        SUM(looks_like_launch AND program IS NOT '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P') beyond_pumpfun
+        FROM chain_mints`).get() as any;
       // Coverage is reported as ranges, not as a span: more than one range is a gap, and collapsing them to
       // min..max would publish a gap as continuous coverage.
       const cov = db.prepare("SELECT from_slot, to_slot FROM chain_scanned ORDER BY from_slot").all() as any[];
       body = JSON.stringify({
         mints: Number(m?.mints ?? 0), launches: Number(m?.launches ?? 0),
         withUri: Number(m?.with_uri ?? 0), documents: Number(m?.documents ?? 0),
+        beyondPumpfun: Number(m?.beyond_pumpfun ?? 0),
         ranges: cov.map((r) => ({ from: Number(r.from_slot), to: Number(r.to_slot) })),
         at: Date.now(),
       });

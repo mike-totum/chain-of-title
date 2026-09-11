@@ -191,7 +191,7 @@ const liveNow = () => (live && Date.now() - live.at <= LIVE_MAX_AGE_MS ? live : 
  *
  * Null on failure, never a stale figure, for the same reason the collector's counter is.
  */
-type ChainNow = { mints: number; launches: number; documents: number; ranges: { from: number; to: number }[]; at: number };
+type ChainNow = { mints: number; launches: number; documents: number; beyondPumpfun: number; ranges: { from: number; to: number }[]; at: number };
 const CHAIN_URL = process.env.CHAINMINTS_HEALTH_URL ?? "";
 let chain: ChainNow | null = null;
 async function pollChain(): Promise<void> {
@@ -201,7 +201,8 @@ async function pollChain(): Promise<void> {
     if (!res.ok) return;
     const j = await res.json() as any;
     if (typeof j?.mints !== "number") return;
-    chain = { mints: j.mints, launches: j.launches ?? 0, documents: j.documents ?? 0, ranges: j.ranges ?? [], at: Date.now() };
+    chain = { mints: j.mints, launches: j.launches ?? 0, documents: j.documents ?? 0,
+      beyondPumpfun: j.beyondPumpfun ?? 0, ranges: j.ranges ?? [], at: Date.now() };
   } catch { /* leave the previous reading to age out rather than replacing it with a zero */ }
 }
 const chainNow = () => (chain && Date.now() - chain.at <= 5 * 60_000 ? chain : null);

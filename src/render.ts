@@ -588,7 +588,7 @@ export function navCurrent(href: string, path?: string): boolean {
  */
 export interface Chrome {
   coverageFrom: string; gapMin: number; onFile?: number; builtAt?: number | null;
-  chain?: { mints: number; launches: number; documents: number; ranges: { from: number; to: number }[] } | null;
+  chain?: { mints: number; launches: number; documents: number; beyondPumpfun: number; ranges: { from: number; to: number }[] } | null;
 }
 
 /**
@@ -691,7 +691,19 @@ ${/*
   */ ""}
 <div class="statusband"><div class="shell"><div class="status">
   ${/*
-      One cell, two numbers, never a sum.
+      ONE number, and it is a real total rather than two figures added carelessly.
+      
+      It was two cells and then two numbers in one cell, and both were confusing: a reader cannot be expected to
+      hold "watched" and "scanned" apart in a status bar, and the second figure invited a comparison against a
+      nine-day total that it had been collecting for two hours.
+      
+      Addable because the overlap is removed at the source. The scanner counts every token creation on the chain
+      INCLUDING pump.fun's, which the collector is already counting, so the raw figures cannot be summed. The
+      scanner therefore reports `beyondPumpfun` - launches it found that pump.fun did not make - and that is what
+      is added here. One token, one count.
+      
+      The distinction between watched and scanned has not gone away and still governs what the archive CLAIMS: it
+      lives on /method.html and in the API, where there is room to state it. A status bar is not that place.
       
       This was two extra cells and it broke the band: seven cells at this width truncate to "270,997 LAUNCHES WA…"
       and "2,144 OF THEM LOOK …", which is worse than not saying it. The band answers the first questions anyone
@@ -703,8 +715,8 @@ ${/*
       The detail - how many of the scanned mints look like launches, and by what test - lives on /method.html where
       there is room to state the test beside the number.
    */ ""}
-  <div><b id="rec" data-n="${c.onFile ?? 0}">${fmt(c.onFile ?? 0)}</b> launches watched${
-    c.chain ? ` · <b>${fmt(c.chain.mints)}</b> scanned` : ""}</div>
+  <div><b id="rec" data-n="${(c.onFile ?? 0) + (c.chain?.beyondPumpfun ?? 0)}">${
+    fmt((c.onFile ?? 0) + (c.chain?.beyondPumpfun ?? 0))}</b> tokens on record</div>
   <div>Coverage from <b>${esc(compactDate(c.coverageFrom))}</b></div>
   <div>Archive read <b id="recnote">${c.builtAt
     ? (sameUtcDay(Date.now(), c.builtAt) ? `${when(c.builtAt).slice(11)} today` : compactDate(when(c.builtAt)))
