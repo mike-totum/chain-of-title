@@ -55,16 +55,47 @@
 import { decodeCreate, decodeTrade, PUMP_PROGRAM, type DecodedCreate, type DecodedTrade } from "./feed/rpc.ts";
 import { bondingCurveAddress, decodeCurveAccount, type CurveState } from "./rpc-http.ts";
 
+/**
+ * 7. A VENUE'S EVENTS DO NOT NECESSARILY ARRIVE IN A LOG, AND THIS INTERFACE ASSUMED THEY DID.
+ *
+ * Added 2026-09-11, before the second decoder rather than after it, because the assumption was invisible until
+ * measured and would have been load-bearing by then.
+ *
+ * pump.fun and Raydium LaunchLab both emit Anchor events as `Program data:` log lines. Meteora DBC emits none at
+ * all: it uses `emit_cpi!` exclusively, so its events exist only as self-CPI instruction data in
+ * `meta.innerInstructions`, tagged with the Anchor event-CPI discriminator `e445a52e51cb9a1d` and followed by the
+ * same 8-byte event discriminator and Borsh payload a log would have carried. Sampled live: LaunchLab 1 of 1
+ * transactions carried log events, DBC 0 of 7 carried any and 7 of 7 carried inner CPI data.
+ *
+ * `feed/rpc.ts` reads only lines beginning `Program data: `, so a DBC subscription would have connected, stayed up,
+ * reported healthy and ingested exactly nothing - the failure this project has now met four times in one day and
+ * once already in Helius carrying two sockets while nothing arrived.
+ *
+ * The decoders themselves do not change: after the event-CPI tag is stripped, both channels hand over the identical
+ * discriminator-plus-Borsh buffer. So the venue declares its channel and the feed does the extraction, which keeps
+ * `decodeCreate` and `decodeTrade` honest about what they take - one event payload, however it reached us.
+ *
+ * DECLARATIVE UNTIL THE FEED HONOURS IT. `feed/rpc.ts` currently implements `logs` only. A venue declaring `cpi`
+ * would be subscribed and silently produce nothing, so it must not be added to VENUES until the extraction path
+ * exists. That is the same trap this clause is about, which is why it is written down rather than assumed.
+ */
+export type EventChannel = "logs" | "cpi";
+
 export interface LaunchVenue {
   /** Value written to `tokens.venue`. Stable forever: it is published, and renaming it rewrites history. */
   readonly id: string;
   /** Shown to readers. May change; `id` may not. */
   readonly label: string;
-  /** Program whose logs carry this venue's events, and the subscription target. */
+  /** Program whose events we subscribe to. */
   readonly program: string;
-  /** Decode a creation event from one `Program data:` payload, or null if this is not one. */
+  /**
+   * Where this venue's events come from. See clause 7. `logs` means `Program data:` lines; `cpi` means self-CPI
+   * instruction data in `meta.innerInstructions`, which `feed/rpc.ts` does not read yet.
+   */
+  readonly events: EventChannel;
+  /** Decode a creation event from one event payload, or null if this is not one. */
   decodeCreate(d: Buffer): DecodedCreate | null;
-  /** Decode a trade event from one `Program data:` payload, or null if this is not one. */
+  /** Decode a trade event from one event payload, or null if this is not one. */
   decodeTrade(d: Buffer): DecodedTrade | null;
   /**
    * Address of the account holding this launch's curve state, derived from the mint.
@@ -89,6 +120,7 @@ export const pumpfun: LaunchVenue = {
   id: "pumpfun",
   label: "pump.fun",
   program: PUMP_PROGRAM,
+  events: "logs",
   decodeCreate,
   decodeTrade,
   curveAddress: bondingCurveAddress,
