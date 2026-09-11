@@ -581,7 +581,15 @@ export function navCurrent(href: string, path?: string): boolean {
  * large the archive was or how current. Both are properties of the record the process is serving, so they belong
  * with the coverage window rather than with one page's figures.
  */
-export interface Chrome { coverageFrom: string; gapMin: number; onFile?: number; builtAt?: number | null }
+/**
+ * `chain` is a LIVE getter, not a copied number: it is defined on the chrome object as a property backed by the
+ * scanner poll, so a page rendered ten minutes after the last record adoption still reports what the scanner holds
+ * now. Absent means we could not ask, which is why the band omits the line entirely rather than printing a zero.
+ */
+export interface Chrome {
+  coverageFrom: string; gapMin: number; onFile?: number; builtAt?: number | null;
+  chain?: { mints: number; launches: number; documents: number; ranges: { from: number; to: number }[] } | null;
+}
 
 /**
  * A record page is this project's only real distribution. Nobody shares a registry's front page; they paste a link to
@@ -682,8 +690,21 @@ ${/*
     on every page, in one line.
   */ ""}
 <div class="statusband"><div class="shell"><div class="status">
-  <div><b id="rec" data-n="${c.onFile ?? 0}">${fmt(c.onFile ?? 0)}</b> launches on record</div>
+  <div><b id="rec" data-n="${c.onFile ?? 0}">${fmt(c.onFile ?? 0)}</b> launches watched</div>
   <div>Coverage from <b>${esc(compactDate(c.coverageFrom))}</b></div>
+  ${/*
+      A SECOND figure and never a sum. The first cell counts launches this archive WATCHED - a subscription held to
+      a venue's program, its events decoded as they happened. This one counts what it SCANNED: blocks read across
+      the whole chain, whatever program made the token. A scanned launch's on-chain numbers are as sound as a
+      watched one's; what a scan cannot recover is what the launch CLAIMED to be, because that lives off-chain
+      behind a pointer its creator can repoint. Adding the two would erase that, and "every Solana launch" is the
+      one sentence most capable of destroying an archive's credibility.
+      Omitted rather than zeroed when the scanner cannot be reached, and "look like launches" is said in those
+      words because it is our published test rather than the chain's declaration.
+   */ ""}
+  ${c.chain ? `<div><b>${fmt(c.chain.mints)}</b> token creations scanned chain-wide${
+    c.chain.ranges.length > 1 ? `, in ${c.chain.ranges.length} ranges` : ""}</div>
+  <div><b>${fmt(c.chain.launches)}</b> of them <a href="${root}method.html">look like launches</a></div>` : ""}
   <div>Archive read <b id="recnote">${c.builtAt
     ? (sameUtcDay(Date.now(), c.builtAt) ? `${when(c.builtAt).slice(11)} today` : compactDate(when(c.builtAt)))
     : "unrecorded"}</b></div>

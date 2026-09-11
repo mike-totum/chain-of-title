@@ -177,6 +177,35 @@ async function pollLive(): Promise<void> {
 }
 /** Null once the last successful poll is older than the tolerance, so a dead collector shows no live number at all. */
 const liveNow = () => (live && Date.now() - live.at <= LIVE_MAX_AGE_MS ? live : null);
+
+/**
+ * The chain-wide scanner's own count, asked for over the private network.
+ *
+ * A SECOND figure, never added to the first, and this is the whole reason it is a separate variable rather than a
+ * number folded into the counter. The collector WATCHED those launches: it held a subscription to a venue's program
+ * and decoded its events as they happened. The scanner SCANNED these: it read the blocks covering that moment
+ * afterwards. Both are real coverage and they are not the same claim - a scanned launch's on-chain figures are as
+ * good as a watched one's, and what a scan cannot recover is what the launch CLAIMED to be, because that lives
+ * off-chain behind a pointer the creator can repoint. Summing them would erase exactly the distinction this archive
+ * is built on, and "every Solana launch" is the single sentence most likely to destroy its credibility.
+ *
+ * Null on failure, never a stale figure, for the same reason the collector's counter is.
+ */
+type ChainNow = { mints: number; launches: number; documents: number; ranges: { from: number; to: number }[]; at: number };
+const CHAIN_URL = process.env.CHAINMINTS_HEALTH_URL ?? "";
+let chain: ChainNow | null = null;
+async function pollChain(): Promise<void> {
+  if (!CHAIN_URL) return;
+  try {
+    const res = await fetch(CHAIN_URL, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) return;
+    const j = await res.json() as any;
+    if (typeof j?.mints !== "number") return;
+    chain = { mints: j.mints, launches: j.launches ?? 0, documents: j.documents ?? 0, ranges: j.ranges ?? [], at: Date.now() };
+  } catch { /* leave the previous reading to age out rather than replacing it with a zero */ }
+}
+const chainNow = () => (chain && Date.now() - chain.at <= 5 * 60_000 ? chain : null);
+if (CHAIN_URL) { void pollChain(); setInterval(() => void pollChain(), 30_000); }
 if (HEALTH_URL) { void pollLive(); setInterval(() => void pollLive(), 15_000); }
 
 async function pullRecord(first: boolean): Promise<void> {
@@ -466,6 +495,9 @@ const readBuiltAt = () => {
 let recordBuiltAt = readBuiltAt();
 // The status bar under the masthead states the age of the record being served, so chrome carries it from boot.
 chrome.builtAt = recordBuiltAt;
+// The scanner's counts are read live rather than copied, here as well as after a record adoption: a page served
+// before the first adoption would otherwise omit the line for hours while the scanner was running the whole time.
+Object.defineProperty(chrome, "chain", { get: chainNow, enumerable: true, configurable: true });
 console.log(`[record] built ${recordBuiltAt ? new Date(recordBuiltAt).toISOString() : "unknown"}`);
 let COV: Coverage = { from: win.length ? win[0].a : null, downtimeMinutes: chrome.gapMin, builtAt: recordBuiltAt };
 
@@ -503,6 +535,7 @@ function reloadRecord(): void {
       gapMin: win.slice(1).reduce((a, w, i) => a + Math.max(0, w.a - win[i].b), 0) / 60_000,
       onFile: observed, builtAt: recordBuiltAt,
     };
+    Object.defineProperty(chrome, "chain", { get: chainNow, enumerable: true, configurable: true });
     // The prose pages state figures about the record; adopting a new one without recomputing them would leave
     // findings.html describing the file we just replaced, under a masthead advertising the new one.
     try { facts = buildFacts(db, covered, COV, DB_FILE); }

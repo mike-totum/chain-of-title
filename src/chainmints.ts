@@ -248,8 +248,46 @@ async function pass(fromSlot: number, blocks: number): Promise<{ read: number; f
   return { read, found, stored };
 }
 
+/**
+ * What this scanner holds, for the web service to report.
+ *
+ * Its own endpoint on the private network rather than a shared database, because the scanner keeps its file on its
+ * own volume so it can never compete for the collector's write lock. The web service therefore cannot read the
+ * table and must ask.
+ *
+ * Counted fresh per request, never cached. A cached count is a snapshot, and the entire reason the collector grew
+ * an endpoint like this was a headline that sat frozen for six hours while ingestion never stopped. Failure returns
+ * null rather than a stale or zero figure: a number that has stopped moving, presented as live, is worse than no
+ * number, and both of those mistakes are already in this project's corrections.
+ */
+async function serveHealth(): Promise<void> {
+  const { createServer } = await import("node:http");
+  const port = Number(process.env.PORT ?? 8080);
+  createServer((req, res) => {
+    if (req.url !== "/health") { res.writeHead(404).end(); return; }
+    let body: string;
+    try {
+      const m = db.prepare(`SELECT COUNT(*) mints, SUM(looks_like_launch) launches,
+        SUM(uri IS NOT NULL) with_uri, SUM(meta_at IS NOT NULL) documents FROM chain_mints`).get() as any;
+      // Coverage is reported as ranges, not as a span: more than one range is a gap, and collapsing them to
+      // min..max would publish a gap as continuous coverage.
+      const cov = db.prepare("SELECT from_slot, to_slot FROM chain_scanned ORDER BY from_slot").all() as any[];
+      body = JSON.stringify({
+        mints: Number(m?.mints ?? 0), launches: Number(m?.launches ?? 0),
+        withUri: Number(m?.with_uri ?? 0), documents: Number(m?.documents ?? 0),
+        ranges: cov.map((r) => ({ from: Number(r.from_slot), to: Number(r.to_slot) })),
+        at: Date.now(),
+      });
+    } catch (e) {
+      body = JSON.stringify({ mints: null, launches: null, unavailable: (e as Error).message, at: Date.now() });
+    }
+    res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" }).end(body);
+  }).listen(port, () => console.log(`[chainmints] health on :${port}`));
+}
+
 (async () => {
   console.log(`[chainmints] writing to ${DB}${DAEMON ? ", daemon" : ""}`);
+  if (DAEMON) await serveHealth();
   do {
     const head = Number(await rpc("getSlot", [{ commitment: "confirmed" }]));
     const started = Date.now();
