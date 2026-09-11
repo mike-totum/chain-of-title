@@ -1,11 +1,11 @@
-# The channel archive — what it holds, why, and what has not been decided
+# The channel archive - what it holds, why, and what has not been decided
 
 `tg_messages` stores every message from the channels in `channels.txt`, whole, as posted. Not the ones that named a
-token — all of them. The watcher had been reading them since day one and discarding anything that did not match a
+token - all of them. The watcher had been reading them since day one and discarding anything that did not match a
 mint, because it was built to trade on them.
 
 **It is never published.** It is not in `servicedb.ts` and must not be added to it. The published record carries what
-a *creator* claimed about their *own* launch — the subject's own statement, and often the only surviving evidence of
+a *creator* claimed about their *own* launch - the subject's own statement, and often the only surviving evidence of
 an impersonation. A channel message is someone else's expression. Most people amplifying a manufactured token were
 fooled by it rather than party to it, and printing their words beside a fraud label, in a CC0 file under a DOI that
 cannot be withdrawn, would make an accusation this project has no basis to make.
@@ -22,7 +22,7 @@ this problem.
 | `fetched_at` | when we read it. Different question, stored separately, as everywhere else in this schema |
 | `sender` | the sender id where Telegram gives one. Channel posts frequently have none |
 | `text`, `url` | the message and a link to it |
-| `mints`, `cashtags` | our reading of it — derived, and rederivable from `text` |
+| `mints`, `cashtags` | our reading of it - derived, and rederivable from `text` |
 | `views`, `forwards` | engagement counters. Monotonic: they only ever climb |
 | `reply_to`, `edited_at` | thread position, and whether it was edited after posting |
 
@@ -33,12 +33,12 @@ thing this table is for.
 ## Why this is worth holding
 
 It is unrecoverable in exactly the way the launch image is. A message exists while it is posted and not afterwards,
-there is no archival node that sells it back, and **deletion is itself the event most worth having recorded** — a
+there is no archival node that sells it back, and **deletion is itself the event most worth having recorded** - a
 promotional channel quietly removing its posts about a token that later collapsed is evidence, and it is evidence
 that only exists if someone was watching at the time.
 
 What it is **not** is a classifier. Measured against the 88,133 messages already held: promoted launches are ~8x more
-likely to have graduated, but among graduations the promoted ones are *cleaner* on every launch test — 29.2% had 30+
+likely to have graduated, but among graduations the promoted ones are *cleaner* on every launch test - 29.2% had 30+
 outside buyers against 12.1% overall, and the average creator share was 8.1% against 19.2%. Promotion tracks
 attention, not manufacture. Anyone proposing to build a danger signal on it should read that again first.
 
@@ -51,7 +51,7 @@ Decided by the owner: collect it, publish none of it, provide it if lawfully ask
 
 Not decided, and needing counsel:
 
-1. **Lawful basis.** The likely basis is legitimate interests (GDPR Art 6(1)(f)) — fraud research and archiving — which
+1. **Lawful basis.** The likely basis is legitimate interests (GDPR Art 6(1)(f)) - fraud research and archiving - which
    requires a written balancing assessment *before* collection, not after. The public-interest archiving and research
    provisions (Art 89) offer real derogations, but only against documented safeguards: purpose limitation, data
    minimisation, access control. A dark archive fits that shape far better than a published one; it does not exempt
@@ -60,12 +60,12 @@ Not decided, and needing counsel:
    publication. The dark archive removes the irrevocable-DOI problem, which was the sharp one. It does not remove the
    obligation.
 3. **Transparency.** Art 14 requires informing people whose data we hold when it was not collected from them, with an
-   exemption where that is impossible or disproportionate — an exemption that is read narrowly and expects a public
+   exemption where that is impossible or disproportionate - an exemption that is read narrowly and expects a public
    notice in its place. We do not have one.
 4. **Retention.** `TELEGRAM_RETAIN_DAYS` exists so a decision can be enforced. Unset means keep, which is the
    archival default and the assumption to challenge rather than inherit. Indefinite retention of personal data is the
    hardest position to defend.
-5. **Erasure.** There must be a route for someone to ask, and a documented answer — even if the answer is a lawful
+5. **Erasure.** There must be a route for someone to ask, and a documented answer - even if the answer is a lawful
    refusal under an archiving derogation.
 6. **Jurisdiction.** A US LLC still falls under GDPR where it monitors the behaviour of people in the EU. "We are
    American" is not an answer.
@@ -75,7 +75,7 @@ Not decided, and needing counsel:
 - **Enabling:** `TELEGRAM_ARCHIVE=1`, plus `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` and a session.
 - **A session may run in exactly ONE place.** Running the same string on the laptop and in the cloud produced
   `406: AUTH_KEY_DUPLICATED` on every channel within minutes on 2026-09-09, and Telegram can revoke a duplicated key
-  outright — which would kill both copies, not just the second one. The cloud collector holds it; the laptop's
+  outright - which would kill both copies, not just the second one. The cloud collector holds it; the laptop's
   `TELEGRAM_API_ID`/`TELEGRAM_API_HASH` are commented out for that reason and re-enabling them means unsetting
   `TELEGRAM_SESSION` on the collector first. The failure is visible rather than silent only because a failed poll
   opens a `tg_gaps` row: twenty of them, in one pass, is what surfaced it.
@@ -88,7 +88,7 @@ Not decided, and needing counsel:
   never deleted on a timer. `TWEETS_RETAIN_DAYS` exists and is deliberately unset; setting it is a decision to
   destroy the only sample of broad pump.fun X chatter this project holds, which cannot be re-collected at any price.
   Posts cited by `token_promotion_hit` are exempt even when it is set.
-- **`LEGAL_HOLD`** suspends every deletion in both pruners — set it to anything and nothing is deleted until it is
+- **`LEGAL_HOLD`** suspends every deletion in both pruners - set it to anything and nothing is deleted until it is
   unset. Routine deletion under a documented policy is defensible; deletion that continues after a dispute is
   foreseeable is spoliation. The collector's own pruner destroys millions of rows a day, so the gap between "should
   have stopped" and "stopped" is the thing that gets measured.

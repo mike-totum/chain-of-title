@@ -52,3 +52,7 @@ data/UNDELIVERED-ALERT.txt
 
 # Written by scripts/deposit.py to describe each DOI deposit; regenerated per deposit, not source.
 data/_README.md
+
+# Captured launch images are evidence that travels separately, never in the repository or the archive.
+data/images/
+data/images.err

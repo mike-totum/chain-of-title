@@ -9,8 +9,8 @@
  * into wallets whose prior tokens paid outsiders >= 50 % of the time (the "good" set) and the rest.
  * If the good set only beats the rest at L = 0, the edge is latency, not judgement.
  */
-import { config } from "./config.ts";
-import { openDb } from "./db.ts";
+import { config } from "../src/config.ts";
+import { openDb } from "../src/db.ts";
 
 const args = new Map<string, string>();
 for (let i = 2; i < process.argv.length; i++) { const a = process.argv[i]; if (a.startsWith("--")) args.set(a.slice(2), process.argv[i + 1]?.startsWith("--") || process.argv[i + 1] === undefined ? "true" : process.argv[++i]); }

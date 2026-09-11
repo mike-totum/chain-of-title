@@ -1,8 +1,8 @@
 /** Grade the new live detectors: what happened after each [movement] and [buyout] signal.
  *  npm run movements -- [--hours 48]
  *  Entry is the first AMM print at least FILL s after the signal (a follower cannot fill on the trigger print itself). */
-import { config } from "./config.ts";
-import { openDb } from "./db.ts";
+import { config } from "../src/config.ts";
+import { openDb } from "../src/db.ts";
 
 const arg = (k: string, d: number) => { const i = process.argv.indexOf(k); return i > 0 ? Number(process.argv[i + 1]) : d; };
 const HOURS = arg("--hours", 48), FILL_S = arg("--fill", 2);

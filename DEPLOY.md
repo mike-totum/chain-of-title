@@ -34,7 +34,7 @@ Required:
 Recommended: `SOLANA_RPC_URLS`, `CURVEPOLL_RPC_URLS` (comma-separated HTTP endpoints for vault reads and curve polling).
 
 **Leave the Twitter and Telegram variables unset.** The collector starts cleanly without them, logging `watcher
-disabled`. Nothing in the archive comes from Twitter — creator share, buyer counts, graduation timing and operator
+disabled`. Nothing in the archive comes from Twitter - creator share, buyer counts, graduation timing and operator
 clusters are all on-chain. The X listener exists for `kol-signal`, which returned **-13.8 % over 543 entries**, and for
 lead/lag research that is finished. It stores ~18,600 tweets/day and costs credits, bandwidth and database growth for
 a feature the product does not use.
@@ -62,9 +62,9 @@ Overlapping for a few hours costs nothing. A gap is permanent. The two collector
 
 ## After deploying
 
-- `npm run health` — heartbeat freshness, launch rate, trade decoding, pool map, vault pricing. Non-zero exit = coverage
+- `npm run health` - heartbeat freshness, launch rate, trade decoding, pool map, vault pricing. Non-zero exit = coverage
   is being lost right now. Good as a cron check.
-- `npm run archive` — rebuilds the portable 34 MB archive and prints coverage windows and gaps.
+- `npm run archive` - rebuilds the portable 34 MB archive and prints coverage windows and gaps.
 - `scripts/daily.sh` at 07:00 runs the report, retention and archive.
 
 Note: `health` tolerates a 180 s stale heartbeat so a restart does not trip it, which means it will not detect an

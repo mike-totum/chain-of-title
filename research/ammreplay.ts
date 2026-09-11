@@ -19,9 +19,9 @@
  * Reading: the grid is ~15 entries x 9 exits = many comparisons. A cell is a candidate only if it holds on
  * both days shown in the persistence table, and with n >= --min-n on each.
  */
-import { config } from "./config.ts";
-import { openDb } from "./db.ts";
-import { isRealOutcome, organicDemand } from "./label.ts";
+import { config } from "../src/config.ts";
+import { openDb } from "../src/db.ts";
+import { isRealOutcome, organicDemand } from "../src/label.ts";
 
 const args = new Map<string, string>();
 for (let i = 2; i < process.argv.length; i++) { const a = process.argv[i]; if (a.startsWith("--")) args.set(a.slice(2), process.argv[i + 1]?.startsWith("--") || process.argv[i + 1] === undefined ? "true" : process.argv[++i]); }

@@ -1,0 +1,12 @@
+{
+  "builtAt": 1789072870132,
+  "documents": 76206,
+  "launchesCovered": 106169,
+  "launchesWithDocumentRecorded": 131777,
+  "launchesWithBytesHeld": 106169,
+  "storedHashDisagreed": 0,
+  "ndjsonBytes": 38624003,
+  "gzipBytes": 13024796,
+  "sha256": "f9a404f43f92693367b0cdab169ddce27a0c2f03f8fdc694246d9aa8da92b5ab",
+  "license": "CC0-1.0"
+}

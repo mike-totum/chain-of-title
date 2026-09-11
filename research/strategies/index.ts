@@ -1,6 +1,6 @@
-import type { TokenState, Tracker } from "../tracker.ts";
-import { config } from "../config.ts";
-import { TOTAL_SUPPLY } from "../curve.ts";
+import type { TokenState, Tracker } from "../../src/tracker.ts";
+import { config } from "../../src/config.ts";
+import { TOTAL_SUPPLY } from "../../src/curve.ts";
 
 export interface ExitRules {
   /** sell when price >= entry * takeProfitX */

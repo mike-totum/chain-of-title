@@ -12,8 +12,8 @@
  * hold to end of data (what "held too long" looks like), 30 min time stop, tp 2x / sl 0.7, trailing exits.
  * Signals are also split by how old the token was on the AMM (fresh graduation vs hours-old survivor).
  */
-import { config } from "./config.ts";
-import { openDb } from "./db.ts";
+import { config } from "../src/config.ts";
+import { openDb } from "../src/db.ts";
 
 const args = new Map<string, string>();
 for (let i = 2; i < process.argv.length; i++) { const a = process.argv[i]; if (a.startsWith("--")) args.set(a.slice(2), process.argv[i + 1]?.startsWith("--") || process.argv[i + 1] === undefined ? "true" : process.argv[++i]); }

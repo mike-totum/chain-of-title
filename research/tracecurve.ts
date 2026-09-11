@@ -4,10 +4,10 @@
  *
  *   npm run tracecurve -- <mint> [<mint> ...]
  */
-import { config } from "./config.ts";
-import { openDb } from "./db.ts";
-import { decodeTrade } from "./feed/rpc.ts";
-import { bondingCurveAddress, rpc } from "./rpc-http.ts";
+import { config } from "../src/config.ts";
+import { openDb } from "../src/db.ts";
+import { decodeTrade } from "../src/feed/rpc.ts";
+import { bondingCurveAddress, rpc } from "../src/rpc-http.ts";
 
 const ARCHIVAL = /helius|mainnet-beta|quiknode|quicknode|triton|rpcpool|alchemy/i;
 const db = openDb(config.dbPath);

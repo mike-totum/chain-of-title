@@ -1,10 +1,10 @@
 /** who sold a PumpSwap pool down: decode the pool's transactions over a window (archival RPC) and list the largest sellers, flagging operator wallets.
  *   npm run poolsells -- <mint> <pool> [hours=12]                       # the last N hours
  *   npm run poolsells -- <mint> <pool> 2026-09-04T00:00 2026-09-04T03:00  # an explicit UTC window */
-import { config } from "./config.ts";
-import { openDb } from "./db.ts";
-import { decodeAmmTrade } from "./feed/pumpswap.ts";
-import { rpc } from "./rpc-http.ts";
+import { config } from "../src/config.ts";
+import { openDb } from "../src/db.ts";
+import { decodeAmmTrade } from "../src/feed/pumpswap.ts";
+import { rpc } from "../src/rpc-http.ts";
 const ARCHIVAL = /helius|mainnet-beta|quiknode|quicknode|triton|rpcpool|alchemy/i;
 const [mint, pool, a3, a4] = process.argv.slice(2);
 const db = openDb(config.dbPath);

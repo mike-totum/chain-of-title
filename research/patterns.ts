@@ -8,9 +8,9 @@
  * For each feature the table shows bucket, n, graduation rate, real-runner rate and lift vs the base
  * rate. The STRONGEST section lists buckets with the biggest positive and negative lift (min n).
  */
-import { config } from "./config.ts";
-import { openDb } from "./db.ts";
-import { isRealOutcome, organicDemand } from "./label.ts";
+import { config } from "../src/config.ts";
+import { openDb } from "../src/db.ts";
+import { isRealOutcome, organicDemand } from "../src/label.ts";
 
 const args = new Map<string, string>();
 for (let i = 2; i < process.argv.length; i++) {

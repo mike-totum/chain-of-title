@@ -11,8 +11,8 @@
  *   - by tweet position relative to launch
  * A "move before" well above 1.0 with a "move after" near 1.0 means posts follow price.
  */
-import { config } from "./config.ts";
-import { openDb } from "./db.ts";
+import { config } from "../src/config.ts";
+import { openDb } from "../src/db.ts";
 
 const args = new Map<string, string>();
 for (let i = 2; i < process.argv.length; i++) {

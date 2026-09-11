@@ -1,8 +1,8 @@
 /** Does a simple exit rule pay on [movement] signals? Replays each signal's real AMM path with a take-profit /
  *  stop-loss grid, splitting by top-buyer share and by whether the ticker belongs to a known factory family.
  *  npm run movegrid -- [--hours 48] [--fee 0.005] */
-import { config } from "./config.ts";
-import { openDb } from "./db.ts";
+import { config } from "../src/config.ts";
+import { openDb } from "../src/db.ts";
 
 const arg = (k: string, d: number) => { const i = process.argv.indexOf(k); return i > 0 ? Number(process.argv[i + 1]) : d; };
 const HOURS = arg("--hours", 48), FEE = arg("--fee", 0.005), MAXH = arg("--maxhold", 6);

@@ -16,8 +16,8 @@
  * Section 2 does the same for early buyer wallets: does a wallet's record on its earlier tokens predict
  * the next token it buys within 60 s of launch?
  */
-import { config } from "./config.ts";
-import { openDb } from "./db.ts";
+import { config } from "../src/config.ts";
+import { openDb } from "../src/db.ts";
 
 const args = new Map<string, string>();
 for (let i = 2; i < process.argv.length; i++) {

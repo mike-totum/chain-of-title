@@ -1,19 +1,32 @@
 # Chain of Title
 
-**A public archive of launch-time provenance for Solana tokens** — `chainoftitle.org`, free and CC0.
+**A public archive of launch-time provenance for Solana tokens** - `chainoftitle.org`, free and CC0.
 
 In property law, a chain of title is the unbroken documented history of ownership from origin: what you establish
-before believing a claim about what something is. The facts that identify a manufactured token — what share of supply
-the creator took in the first block, how many outside wallets actually bought, how the curve filled — are visible only
+before believing a claim about what something is. The facts that identify a manufactured token - what share of supply
+the creator took in the first block, how many outside wallets actually bought, how the curve filled - are visible only
 while it happens, and present-tense inspection cannot recover them once the float has been spread. So this records
 them as they occur, and answers questions against that record.
 
 Token pages carry that history; wallet pages are headed **Priors**, the operator's own record. `BRAND` in
 `src/site.ts` is the single place the name appears.
 
-The collector began as a real-time launch monitor with paper trading, and the sections below still describe that
-machinery — the trading thesis was tested against 139 entry/exit rules and is dead (`ASSUMPTIONS.md`), but the
-instrument that measured it is the same one that now records provenance. It answers two questions:
+This repository is the archive and the service that publishes it. The collector decodes every pump.fun launch from
+the program's own events within about a second, records what the launch was in its first block, and serves that
+record at `chainoftitle.org` and as one CC0 SQLite file anyone can download.
+
+**It began as a trading bot.** The thesis was tested against 139 entry/exit rule combinations and is dead: zero of
+19,412 bonding-curve positions ever reached 5x, because graduation caps the curve near 15x. That code is in
+[`research/`](research/), unrun, because the finding is cited on the live site and a claim that rests on a
+measurement should ship with the instrument that made it. Nothing in this repository places an order, holds a key,
+or touches a wallet. There is no execution path and there never was; every position in it is simulated.
+
+The instrument built to trade these launches turned out to be the only thing that could record them. What it
+records stops being observable within about thirty seconds, once the float is spread across wallets, and cannot be
+reconstructed afterwards by any amount of present-tense inspection. The archive is what the failed thesis left
+behind, and it is the part worth keeping.
+
+## What it does
 
 1. **Can it find tokens?** Every pump.fun launch is picked up within ~1 s by decoding
    the pump.fun program's own events from a Solana RPC websocket (free public endpoint by
@@ -28,14 +41,14 @@ instrument that measured it is the same one that now records provenance. It answ
 
 Two launchd agents are installed in `~/Library/LaunchAgents/`:
 
-- `com.pumpmonitor.monitor` — runs `npm start` under `caffeinate -i` (prevents idle sleep while it runs),
+- `com.pumpmonitor.monitor` - runs `npm start` under `caffeinate -i` (prevents idle sleep while it runs),
   starts at login, restarts on crash. Logs to `data/run.log`.
-- `com.pumpmonitor.daily` — runs `scripts/daily.sh` at 07:00: report, wallet analysis and backtest sweep
+- `com.pumpmonitor.daily` - runs `scripts/daily.sh` at 07:00: report, wallet analysis and backtest sweep
   for the last 24 h → `data/reports/YYYY-MM-DD.txt`, with a summary sent to your Telegram Saved Messages.
-- `com.pumpmonitor.curvepoll` — `npm run curvepoll`: reads every launch's bonding-curve account for 24 h
+- `com.pumpmonitor.curvepoll` - `npm run curvepoll`: reads every launch's bonding-curve account for 24 h
   (getMultipleAccounts, adaptive 2–60 min cadence) into `curve_snapshots`, independent of the websocket tracker, so the
   hour-1-to-hour-6 phase of slow tokens is recorded. Marks graduations it sees in `tokens`. Log: `~/Library/Logs/pumpmonitor/curvepoll.log`.
-- `com.pumpmonitor.history` — `npm run history -- --daemon`: rebuilds the full curve life of historical winners
+- `com.pumpmonitor.history` - `npm run history -- --daemon`: rebuilds the full curve life of historical winners
   (pump.fun's top coins by current and all-time-high market cap, ≥ $1M within 120 days, plus our own late graduators as
   controls) from chain history into `hist_tokens` / `hist_activity` / `hist_trades`. `npm run history -- --report` shows
   progress. Both use `SOLANA_RPC_URLS` (default: publicnode, then the official endpoint) with per-endpoint back-off.
@@ -60,7 +73,7 @@ A `Dockerfile` and `railway.json` are included.
 grows ~1 GB/day before pruning; start with 10 GB), and set the variables from your `.env`
 (`TWITTER_PROVIDER`, `TWITTERAPI_IO_KEY`, `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `X_LISTEN_SECONDS`, …).
 Copy `data/telegram.session` to the volume as `/data/telegram.session` (one-off, e.g. via `railway ssh`
-or a first deploy that runs `npm run telegram:login` interactively) — never run the same Telegram session
+or a first deploy that runs `npm run telegram:login` interactively) - never run the same Telegram session
 on the laptop and the server at the same time. Stop the laptop agent first:
 `launchctl bootout gui/$(id -u)/com.pumpmonitor.monitor`. Run the daily report as a Railway cron service
 using the same image with command `zsh scripts/daily.sh` (or `bash`), or keep running it locally against a
@@ -105,7 +118,7 @@ npm run report 6            # last 6 hours only
 | `survivor-trail` | graduated token trading ≥ 2.5× the graduation cap (~$200k+), dev < 50 % of supply, ≥ 30 buyers; enter on the next outside buy ≥ 0.5 SOL; 30 % trail armed at 1.3×, stop 0.7, 6 h | the 2026-09-03 PumpSwap replay: entries in this band are ~fair, and this exit turned 0.57× (held) into 1.13× on 41k samples; the edge is cutting losers, not picking |
 
 **Rip-cord exits** (kol-signal and grad-runner, from 2026-09-02 ~00:00 UTC): bank half at 2×, then let the rest
-ride on flow — exit when the dev sells, when SOL sold ≥ 2× SOL bought over 30 s while price is 25 % off its high, or on a
+ride on flow - exit when the dev sells, when SOL sold ≥ 2× SOL bought over 30 s while price is 25 % off its high, or on a
 45 % dump inside 10 s; floor 0.4×, 45 % trail after banking, 90 min time stop. Rationale: on 111 graduated tokens,
 runners and faders dipped almost identically before their peak, so a price stop cannot separate them; flow and time can.
 Partial exits are recorded in `positions.partial_sol_out / partial_at` and included in `sol_out` at close.
@@ -125,15 +138,15 @@ The product question: **what was this token at birth, and does what you are show
 The facts that identify a manufactured token are only visible while it happens. WOFI (2026-09-06) was created with the
 creator taking **79.3 % of supply and zero outside buyers**, then graduated. Hours later its pool held 2,043 real SOL
 against the 2,027 that constant product predicts for its 581x cap, and its largest holder was 4 % of supply. Every
-present-tense check passes. Liquidity reasoning, holder concentration, mint/freeze authority checks — all clean. The
+present-tense check passes. Liquidity reasoning, holder concentration, mint/freeze authority checks - all clean. The
 operator funded the pool with real SOL and spread the float, and the evidence of manufacture is simply gone.
 
 So the archive is the asset, not the checker. `npm run check` reports:
 
-1. **AT LAUNCH** — recorded live: creator share of supply, outside buyers on the curve, first-30s and same-block
+1. **AT LAUNCH** - recorded live: creator share of supply, outside buyers on the curve, first-30s and same-block
    buyers, seconds to graduation, whether the creator sold. Only obtainable by watching at the time.
-2. **NOW** — read from chain: pool reserves, implied cap, and what share of that cap is actually in the pool.
-3. **Verdict** — with the evidence for each line.
+2. **NOW** - read from chain: pool reserves, implied cap, and what share of that cap is actually in the pool.
+3. **Verdict** - with the evidence for each line.
 
 Where we did not watch the launch, it says so and returns `UNKNOWN` rather than a clean result, because a manufactured
 token is indistinguishable from a real one once its float has been spread. Coverage begins 2026-09-02 and is printed on
@@ -142,14 +155,14 @@ every lookup. `npm run verdict -- --hours 24` scores the whole recent universe t
 **Launch facts are permanent; pool balances are not.** HOOD and HCAT held 2,677 and 2,050 SOL when the collector last
 read them and about $20 each a few hours later. A pool balance is therefore only ever quoted with the time it was read
 (`tokens.vault_at`, written at the moment of the read and never inferred from another timestamp), and any claim resting
-on one — "a position can be sold near this price" — is made only against a balance read for that answer. `npm run check`
+on one - "a position can be sold near this price" - is made only against a balance read for that answer. `npm run check`
 reads the pool live; `npm run site` re-reads the pool of every token it is about to certify and leaves out any it could
 not read; a balance with no recorded read time is not quoted at all.
 
 ## Are the clean criteria any good? (`npm run labels`)
 
 The criteria live in one place, `src/provenance.ts`, so the site, the validator and anything built on top run the same
-code — a test that re-implements the rules it checks proves nothing about what visitors are shown.
+code - a test that re-implements the rules it checks proves nothing about what visitors are shown.
 
 ```bash
 npm run labels -- --build   # rebuild data/labels.json from independent evidence
@@ -157,18 +170,18 @@ npm run labels              # check; exits 1 if any known-manufactured token is 
 ```
 
 The gate is one-sided on purpose: a missed warning costs nothing, a wrong all-clear costs everything. Labels come from
-**creator-wallet reuse**, an axis none of the criteria read — a ticker family of 15+ graduated mints where each launch
+**creator-wallet reuse**, an axis none of the criteria read - a ticker family of 15+ graduated mints where each launch
 burns a fresh creator wallet (WOFI: 146 mints, 140 creators, 1.18 launches per creator). Creator share, buyer counts,
 graduation speed and pool balances play no part in assigning a label.
 
-Current: **664 tokens across 13 factory families — 659 flagged DANGER, 5 silent, 0 certified clean.** The five silent
+Current: **664 tokens across 13 factory families - 659 flagged DANGER, 5 silent, 0 certified clean.** The five silent
 ones are recall gaps and are listed by the tool. Re-run `--build` as new families appear; the set is drawn from our own
 database, so it is a precision test, not a census.
 
 ## The archive (`npm run archive`)
 
 The research database is ~5.3 GB, almost all of it `trades` and `wallet_token_stats`, which the product never reads.
-What the product needs — what each token *was* at birth — is **~34 MB for 123k launches**, roughly 10 MB/day. `npm run
+What the product needs - what each token *was* at birth - is **~34 MB for 123k launches**, roughly 10 MB/day. `npm run
 archive` writes that to a standalone `data/archive.db`: `launches`, `operators`, `operator_policy`, `pools`, and
 `coverage`. The public service can then serve a 34 MB file and never touch the heavy database, so a research query
 cannot take the site down.
@@ -181,13 +194,13 @@ only on a clean shutdown and 13,383 launches were wrongly classified as unobserv
 
 ## Detectors: how a token gets our attention
 
-The monitor watches every pump.fun launch from creation, but the verified winners did not happen at creation — they
+The monitor watches every pump.fun launch from creation, but the verified winners did not happen at creation - they
 happened hours or days later, on a curve we had already dropped or on PumpSwap after graduation. Three detectors now
 cover that, and all three write to `signals` so the daily report grades them like any caller.
 
 | detector | fires on | why |
 |---|---|---|
-| `[buyout]` | a buy >= `BUYOUT_MIN_SOL` (40) on a bonding curve we are **not** tracking | every launch is tracked from creation, so an untracked mint taking a large single buy *is* a dormant-curve buyout — the shape of Kshama, Squads, Simba, Axolotl and onoda. Detection is by behaviour; the farms burn a fresh wallet each time, so the wallet list caught only 13 of 988 buyouts in 72 h |
+| `[buyout]` | a buy >= `BUYOUT_MIN_SOL` (40) on a bonding curve we are **not** tracking | every launch is tracked from creation, so an untracked mint taking a large single buy *is* a dormant-curve buyout - the shape of Kshama, Squads, Simba, Axolotl and onoda. Detection is by behaviour; the farms burn a fresh wallet each time, so the wallet list caught only 13 of 988 buyouts in 72 h |
 | `[movement]` | any PumpSwap pool where net buying >= `MOVE_MIN_NET_SOL` (25) from >= `MOVE_MIN_BUYERS` (8) distinct buyers lifts the price between `MOVE_MIN_LIFT` (1.5x) and `MOVE_MAX_LIFT` (20x) inside 5 minutes, with no single wallet above `MOVE_MAX_TOP_SHARE` (60 %) of the buy volume | the AMM websocket already carries every trade on every pool (~5.3 M events per run) and only ~2 % were used. This sees a token that starts running after we dropped it, which nothing else could |
 | `[lategrad]` | an untracked bonding curve reading `LATE_GRAD_VSOL` (100) to `LATE_GRAD_VSOL_MAX` (140) vSOL, against ~115 at graduation | 15 of 19 reconstructed organic $1M+ winners had no large buy at all; they filled gradually, several over days (ZTH 6 d, WSOLP 7.6 d), long after the 6 h tracker window dropped them |
 | `[cluster]` | a wallet from a known operator farm (`npm run clusters`) buys | identity, not behaviour: useful for grading a farm and for the `avoid` policy, but it cannot lead |
@@ -229,10 +242,10 @@ npm run wallets -- --hours 48
 ```
 
 prints: the wallet universe and how concentrated it is; **bundlers** (wallets that buy in the creation
-block across many tokens) and whether their tokens graduate more; **smart wallets** — early buyers whose
+block across many tokens) and whether their tokens graduate more; **smart wallets** - early buyers whose
 graduation rate is a multiple of the base rate, with positive PnL and low "coverage" (a wallet that
 touches 20 %+ of all launches is an indiscriminate bot, not an insider); **creators** with repeat
-launches; and the **anatomy of graduations** — who the first 10 buyers were and whether they are repeat
+launches; and the **anatomy of graduations** - who the first 10 buyers were and whether they are repeat
 players. The top wallets are saved to `smart_wallets`, and the live `smart-wallet` strategy paper-buys
 whenever one of them buys within 10 minutes of a launch. Re-run the analysis daily; the strategy
 reloads the set every 10 minutes.
@@ -259,7 +272,7 @@ for free. Setup, once:
 
 1. Create an app at https://my.telegram.org → *API development tools*; put `api_id` / `api_hash`
    in `.env` as `TELEGRAM_API_ID` / `TELEGRAM_API_HASH`.
-2. `npm run telegram:login` — enter your phone number and the code Telegram sends. The session is
+2. `npm run telegram:login` - enter your phone number and the code Telegram sends. The session is
    saved to `data/telegram.session` (gitignored). Nobody else needs this file; treat it like a password.
 3. Add channel usernames to `channels.txt`.
 
@@ -280,14 +293,14 @@ Outcomes come from the pump.fun API with DexScreener as fallback and are cached.
 Three listening layers feed the same signal handler; none is trusted, all are measured per account in the
 report's "KOL-SIGNAL OUTCOMES BY ACCOUNT" table:
 
-1. **Telegram channels** in `channels.txt` — by default every channel `npm run telegram:find` found posting.
-2. **X accounts** in `kols.txt` — batched since-time search every `KOL_POLL_SECONDS`.
-3. **X street stream** — several broad searches (`X_LISTEN_QUERIES`, `|`-separated; defaults cover
+1. **Telegram channels** in `channels.txt` - by default every channel `npm run telegram:find` found posting.
+2. **X accounts** in `kols.txt` - batched since-time search every `KOL_POLL_SECONDS`.
+3. **X street stream** - several broad searches (`X_LISTEN_QUERIES`, `|`-separated; defaults cover
    pump.fun mentions, Solana memecoin chatter, pre-launch language, trench talk, bonding-curve talk and
    "100x / gem / runner" posts, retweets excluded) polled every `X_LISTEN_SECONDS`. **Every tweet is stored**
    in `tweets` (author, followers, engagement, mints, cashtags, hashtags) for pattern analysis.
    Worst case ~20 tweets × 6 queries × 720 polls/day ≈ $13/day on twitterapi.io; real usage is lower.
-4. **Buzz detection** — rolling counts per $TICKER / #hashtag. When `BUZZ_MIN_AUTHORS` distinct accounts
+4. **Buzz detection** - rolling counts per $TICKER / #hashtag. When `BUZZ_MIN_AUTHORS` distinct accounts
    mention a term within 10 minutes at ≥ `BUZZ_MIN_LIFT` × its 3-hour baseline, it fires: if a token with
    that symbol exists it becomes a signal, otherwise a 6-hour expectation that buys the first matching launch.
    `npm run buzz` shows what is rising now, which launches followed, and which accounts drive each term.
@@ -301,20 +314,20 @@ polling (`EXT_PRICE_SECONDS`) remains as a fallback for called tokens whose pool
 
 Put usernames in `kols.txt` and set a provider in `.env`:
 
-- `TWITTER_PROVIDER=twitterapi` + `TWITTERAPI_IO_KEY` — twitterapi.io, pay-as-you-go, no
+- `TWITTER_PROVIDER=twitterapi` + `TWITTERAPI_IO_KEY` - twitterapi.io, pay-as-you-go, no
   subscription. The watcher uses one batched search per poll interval (20 accounts per request)
   that returns only tweets newer than the last poll, so most requests hit the minimum charge
   (~$0.00015). At the default 60 s interval that is roughly **$0.20/day per 20 accounts**, plus
   $0.15 per 1 000 tweets actually returned. Do not lower `KOL_POLL_SECONDS` below ~30.
-- `TWITTER_PROVIDER=x` + `X_BEARER_TOKEN` — official X API v2. Read volume needs a paid tier.
+- `TWITTER_PROVIDER=x` + `X_BEARER_TOKEN` - official X API v2. Read volume needs a paid tier.
 
 Three ways a watched account's post becomes a `kol-signal` entry:
 
-1. **Direct** — the post contains a pump.fun mint or link → buy now.
-2. **Pre-announced** — the post contains `$TICKER` but no such token exists yet → remembered for
+1. **Direct** - the post contains a pump.fun mint or link → buy now.
+2. **Pre-announced** - the post contains `$TICKER` but no such token exists yet → remembered for
    6 h; the first launch with that symbol is bought at creation. This is the "be in place before
    the hitter lands" case.
-3. **Metadata link** — a new launch's own metadata points at a watched account's X profile or
+3. **Metadata link** - a new launch's own metadata points at a watched account's X profile or
    tweet → buy at creation.
 
 Signals from tokens that launched before the monitor started are handled too: the watcher

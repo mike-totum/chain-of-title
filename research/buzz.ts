@@ -7,8 +7,8 @@
  * far above their rate over the prior `baseline` minutes, with distinct authors, follower reach, whether
  * a token with that symbol launched (and how it did), plus the accounts driving each term.
  */
-import { config } from "./config.ts";
-import { openDb } from "./db.ts";
+import { config } from "../src/config.ts";
+import { openDb } from "../src/db.ts";
 
 const args = new Map<string, string>();
 for (let i = 2; i < process.argv.length; i++) {

@@ -74,7 +74,7 @@ Read this alongside any report before drawing conclusions. Everything here was c
 ## PumpSwap pool trust (2026-09-03)
 
 - For some pools (typically operator tokens with the dev holding most supply) the decoded PumpSwap trade amounts are
-  wrong by orders of magnitude — the same pools where DexScreener and pump.fun also report nonsense. Every mapped pool
+  wrong by orders of magnitude - the same pools where DexScreener and pump.fun also report nonsense. Every mapped pool
   is now checked once against its on-chain vault balances (`tokens.vault_sol`); decoded trades are used only if the
   first trade price is within 0.2–5x of the vault-implied price (`tokens.amm_trusted`). Untrusted pools are priced
   from their vaults every 60 s instead. Paper trades on untrusted pools before this fix (up to ~11:40 UTC 3 Sep) may
@@ -92,7 +92,7 @@ Read this alongside any report before drawing conclusions. Everything here was c
 
 - The kill filters and the team/dev-buy rules were derived from 2026-09-02 data. They are hypotheses until they
   repeat on later days; the daily report re-tests each of them. Hosts in the kill list can change as
-  launch bots move providers — re-run `npm run patterns` and update `KILL_HOSTS` when a new host dominates.
+  launch bots move providers - re-run `npm run patterns` and update `KILL_HOSTS` when a new host dominates.
 - `grad-runner` prices from DexScreener (20 s polling), so its fills are coarser than curve-phase fills and its
   paper results should be read with an extra slippage margin.
 
@@ -146,7 +146,7 @@ Read this alongside any report before drawing conclusions. Everything here was c
 
 - Entry: graduated token with a trusted AMM price at >= 2.5x the graduation cap, dev < 50 % of supply, >= 30 distinct buyers,
   on the next outside buy >= 0.5 SOL. Exit: 30 % trail armed at 1.3x, stop 0.7, 6 h, no take-profit, no dev-sell exit.
-- Source: `npm run ammfollow` on 96 h of decoded PumpSwap paths — 41k entries in that band averaged 1.13x under this exit
+- Source: `npm run ammfollow` on 96 h of decoded PumpSwap paths - 41k entries in that band averaged 1.13x under this exit
   (median 0.95, 42 % winners, 5 % >= 2x) versus 0.57x when held to the end of the data. The exit was chosen among six on
   the same data, so the 1.13x is in-sample; the paper strategy and the day-by-day table in ammfollow are the out-of-sample
   test. Profit, if real, accrues over many trades (the median trade loses slightly); size accordingly.
@@ -220,10 +220,10 @@ Three measurements on the live database prompted this; each is reproducible.
 - **Wallet-list following cannot work.** Of 988 curve buys of >= 40 SOL in the 72 h to 2026-09-05, the buyer was already
   in `operator_wallets` for **13**. 846 were added to the list only *after* their buy (`npm run clusters` seeds every
   live buyout, so the table looks 86 % "known" in hindsight) and 129 were never known. Farms burn a fresh wallet per
-  buyout, so `cluster-follow`'s identity gate could only ever fire on the residue — it entered once in 24 h.
+  buyout, so `cluster-follow`'s identity gate could only ever fire on the residue - it entered once in 24 h.
 - **The buyout detector was measuring the wash factory.** `npm run buyouts` (new) grades every large curve buy by what a
   follower would have made entering at the first AMM print after it. Over 96 h: 1,039 buyouts, 260/day, and **263 of the
-  270 with a followable market had dev >= 50 % of supply** — the instant-graduation factory (WOFI, PONS, USMS, RST, LQX,
+  270 with a followable market had dev >= 50 % of supply** - the instant-graduation factory (WOFI, PONS, USMS, RST, LQX,
   GOAF, WOTF) whose 100x-4000x "returns" are the pool-capital wash of 3 Sep, not a market. The 7 organic ones averaged
   0.86x. **Every one of the 270 was under 15 minutes old at the buyout**: not one dormant-curve buyout appears in the
   live data, because a dormant curve is by definition a token we had already dropped, and `tracker.onTrade` returns null
@@ -243,10 +243,10 @@ Changes, all in `src/index.ts` unless noted:
   PumpSwap trade, with no database writes, and fires when net buying >= `MOVE_MIN_NET_SOL` (25) from >= `MOVE_MIN_BUYERS`
   (8) distinct buyers lifts the price >= `MOVE_MIN_LIFT` (1.5x), at most once per pool per hour. On a hit the token is
   restored with a 12 h cap and stored in `signals` with source `movement`. This is the first detector that can see a
-  token which starts running *after* we dropped it — the shape of every verified winner.
+  token which starts running *after* we dropped it - the shape of every verified winner.
 - **Pool map is now complete and persistent.** Every `CreatePoolEvent` is recorded regardless of tracking, into the new
   `pool_map` table (`src/db.ts`), and preloaded at startup (3,070 pools on the first run). A token restored hours later
-  therefore has its pool immediately instead of waiting on the 400 ms lookup queue — the reason Simba was missed.
+  therefore has its pool immediately instead of waiting on the 400 ms lookup queue - the reason Simba was missed.
 - **Retries for the two silent mutes.** `onAmmTrade` discards every trade while `vaultPrice` or `decimals` are unknown,
   and both lookups were fire-and-forget: a single failed RPC call left a restored token mute for its whole watch. The
   60 s loop now retries both for any tracked token with a pool.
@@ -258,10 +258,9 @@ Changes, all in `src/index.ts` unless noted:
 
 **The wash factory found the movement detector within its first hour**, exactly as it had defeated every earlier
 price-and-volume test. Its first live hits included TRUMPCARD 388x, HOOD 522x and PONS 333x, each "+1500-1900 SOL net
-from 8 buyers" — the pool-capital wash of 3 Sep, where the operator buys ~99 % of its own pool with its own SOL and
+from 8 buyers" - the pool-capital wash of 3 Sep, where the operator buys ~99 % of its own pool with its own SOL and
 prints a market cap nobody can sell into. Two gates were added and kill it without touching a real move: a lift cap
-(`MOVE_MAX_LIFT`, 20x — nothing genuine moves 20x in five minutes) and a concentration test (`MOVE_MAX_TOP_SHARE`, 0.6 —
-no single wallet may be more than 60 % of the window's buy volume). The signal text now records the top buyer's share so
+(`MOVE_MAX_LIFT`, 20x - nothing genuine moves 20x in five minutes) and a concentration test (`MOVE_MAX_TOP_SHARE`, 0.6 - no single wallet may be more than 60 % of the window's buy volume). The signal text now records the top buyer's share so
 the gate can be re-tuned from data. Contrast the same hour's organic hit: PILL, +25 SOL from **261** buyers at 1.6x.
 
 `npm run movements` grades the new signal sources by forward return from the first fillable print. Neither is traded
@@ -281,7 +280,7 @@ often a position ever *reaches* a multiple:
 The curve row is a proof of impossibility, not a weak result: **zero of 19,412 positions ever reached 5x**. Graduation
 caps the curve near 15x and nothing approaches it. No structure that pays small bounded losses to catch a large winner
 can work on the curve, because the large winner does not exist there. That retro-explains every negative strategy in the
-report — they were required to lose, and they lost at almost exactly the fee. It also explains why exit tuning never
+report - they were required to lose, and they lost at almost exactly the fee. It also explains why exit tuning never
 helped: average peak is 1.20x against 0.97x realised, and the 0.23 gap is the ordinary cost of not selling the top.
 
 Post-graduation the tail exists and costs a twelfth as much to reach. This is **not** evidence of an edge: peak is
@@ -299,10 +298,10 @@ plausibly over-samples the more active pools. Re-run against a full day of compl
 ## Platform funders look exactly like farms (2026-09-06)
 
 The first buyout caught by the blind detector (PONST, 85.0 SOL onto a curve dormant 9.5 h, 04:35 UTC) traced to funder
-`AxiomRXZAq1...` — a vanity address spelling **Axiom**, a Solana trading terminal. The 07:00 `npm run clusters` would
+`AxiomRXZAq1...` - a vanity address spelling **Axiom**, a Solana trading terminal. The 07:00 `npm run clusters` would
 have enumerated its retail users into `operator_wallets` as an operator cluster and given `cluster-follow` a permanent
 false signal. To the tracer the two are the same shape: one payer seeding many wallets that trade the same tokens. The
-tell is the vanity address — operators do not grind a funder to spell a product name.
+tell is the vanity address - operators do not grind a funder to spell a product name.
 
 `traceFunder` now refuses to seed a platform (`isPlatformFunder`, covering Axiom, BullX, Photon, Trojan, GMGN, Bloom,
 Nova, Pepeboost, Maestro, Banana). The bad row was removed and the buyout wallet retained with `funder`/`cluster` NULL.
@@ -347,7 +346,7 @@ that the clean criteria have been tested against tokens known by independent evi
 
 - **`updated_at` was not the measurement time, and the site said it was.** `upsertToken` writes `updated_at` on every
   row update but only replaces `vault_sol` when a pool read actually succeeded (`COALESCE`). Quoting `updated_at` as
-  "Measured" therefore advanced the timestamp while the number stood still — a pool read fourteen hours ago could be
+  "Measured" therefore advanced the timestamp while the number stood still - a pool read fourteen hours ago could be
   presented as read two minutes ago. `tokens.vault_at` now records when a balance was actually read, is written only
   at that moment (`checkVault`), and moves with `vault_sol` or not at all. Existing rows are NULL: an unknown
   measurement time reads as unknown, never as fresh. **Any pool figure recorded before 2026-09-06 evening has no
@@ -368,12 +367,12 @@ The gate is one-sided on purpose: a known-manufactured token certified clean fai
 flag is reported and tolerated. A missed warning costs nothing, a wrong all-clear costs everything.
 
 Labels come from **creator-wallet reuse**, an axis none of the criteria read: a *ticker family* of >= 15 graduated
-mints, >= 0.9 distinct creators per mint, and <= 2 launches per creator wallet — identity burning at both the family
+mints, >= 0.9 distinct creators per mint, and <= 2 launches per creator wallet - identity burning at both the family
 and the token level. Creator share, curve buyer counts, graduation speed and pool balances play no part in the label.
 
 **The first version of the rule used the ticker alone and mislabelled 5 tokens**, all of which then "failed" the
 criteria. Inspection showed the labels were wrong, not the criteria: the `?` and `AMC` families' creators average 34
-and 57 launches each — serial launchers reusing a generic name, not an operation burning identities. WOFI's creators
+and 57 launches each - serial launchers reusing a generic name, not an operation burning identities. WOFI's creators
 average 1.18, WOTF's 1.10. Adding the creator-launch bound removed both families and the failures with them. Worth
 recording because the instinct on a red test is to loosen the criteria, which here would have been exactly wrong.
 
@@ -399,8 +398,7 @@ Two consequences, both fixed:
   `SOLANA_RPC_URLS` and per-endpoint back-off). `poolReserves` stays as-is for the live collector, which reads one
   token at a time and is paced for it.
 - **"Could not check" is now reported separately from "not clean."** Failing closed is right, but a headline of
-  "0 clean" implies we looked and found none, which is the same species of false claim as quoting a stale balance —
-  just pointing the other way. The front page carries a `could not check` figure beside the clean count, and the clean
+  "0 clean" implies we looked and found none, which is the same species of false claim as quoting a stale balance - just pointing the other way. The front page carries a `could not check` figure beside the clean count, and the clean
   table says plainly that absence from it means unchecked, not manufactured. `api/summary.json` gains `unverified24h`.
 
 Worth stating as a rule, since this is the third instance in two days: **infrastructure failures must never enter the
@@ -414,10 +412,10 @@ certified Squads; a 429 storm printed "0 clean". Each time the failure was silen
 pump.fun bonding curve is one account whose entire transaction history is bounded and, on an archival endpoint, fully
 readable: Helius returned all 1,000 signature pages for a curve created 120 days ago. Anyone with an archival key can
 rebuild creator share, curve buyers, fill time, buyout and dev sells for any token. What is genuinely unrecoverable is
-narrower — the off-chain launch metadata (name, image, socials behind an IPFS `uri`) that an operator can repoint or
+narrower - the off-chain launch metadata (name, image, socials behind an IPFS `uri`) that an operator can repoint or
 unpin. The real advantage is economics and speed: 126k launches already indexed and answerable in milliseconds against
 a per-token walk costing minutes and RPC spend, plus the operator graph, which needs corpus-wide analysis rather than
-per-token lookups. Do not claim "a competitor can never obtain yesterday" — it is false and checkable.
+per-token lookups. Do not claim "a competitor can never obtain yesterday" - it is false and checkable.
 
 `npm run backfill -- <mint>` rebuilds a launch record from chain and stores it with `tokens.rebuilt_at` /
 `rebuilt_complete`. Reconstructed trades go to `hist_trades`, never the live `trades` table, so observation and
@@ -425,7 +423,7 @@ reconstruction stay physically separable.
 
 **Two bugs found while validating it, both the house failure mode (an empty answer read as a real one):**
 
-- **`rpc()` returns `j.result`, which is `null` when a node does not hold the transaction — no exception.** Treating
+- **`rpc()` returns `j.result`, which is `null` when a node does not hold the transaction - no exception.** Treating
   that as a successful fetch made a rebuild missing 1,300 of 1,925 transactions report itself *complete*, and silently
   dropped the creator's own opening buy: it named the wrong creator and reported 0.0% creator supply against a true
   9.8%. A null is now a failed read.
@@ -437,12 +435,12 @@ Validated against `hist_tokens` ground truth on SCI-BOT (created 2026-05-10, 2,1
 curve trades and 586 outside buyers against the stored 560 and 238**.
 
 **That prompted an audit of `hist_tokens`: 188 of 2,729 rows (6.9%) were stored as `status = "done"` on an incomplete
-fetch** (mean fetch ratio across the corpus is 0.958, so this is not systemic — but SCI-BOT was at 0.32). `history.ts`
+fetch** (mean fetch ratio across the corpus is 0.958, so this is not systemic - but SCI-BOT was at 0.32). `history.ts`
 now marks any rebuild that could not read every transaction as `partial`. Any analysis resting on `hist_tokens` buyer
-counts or dev share — operator clustering, the reconstructed-winner set — should exclude `partial` rows and be re-run.
+counts or dev share - operator clustering, the reconstructed-winner set - should exclude `partial` rows and be re-run.
 
 **Performance is a product constraint, not a detail.** SCI-BOT took 324 s: 2,135 signatures, ~1,900 transactions, eight
-in flight. That is a $1M winner, the busiest kind of curve, and the median launch is far smaller — but it settles the
+in flight. That is a $1M winner, the busiest kind of curve, and the median launch is far smaller - but it settles the
 architecture. On-demand backfill is a **queued job**, not a synchronous request behind a search box. Cache forever:
 provenance, once rebuilt completely, never changes.
 
@@ -453,13 +451,13 @@ provenance, once rebuilt completely, never changes.
 dead end: the visitor gets a page explaining what is being read and why it takes minutes, which polls `/api/job/<mint>`
 and reloads when the record exists. A completed rebuild is written into `site/t/`, so the static tree self-heals and
 the next request never reaches this code. One worker at a time; the RPC endpoint is the constraint, not the CPU.
-Queue depth is capped at 40 — beyond that it says it is busy rather than promising work it will not do.
+Queue depth is capped at 40 - beyond that it says it is busy rather than promising work it will not do.
 
 Page rendering moved to `src/render.ts` so the generator and the service cannot drift; `provenance.ts` already held the
 criteria. Three bugs found by testing the path end to end, all of the same family:
 
 - **A rebuild could not correct a previous bad rebuild.** `store()` used `COALESCE(tokens.creator, excluded.creator)`,
-  which correctly protects a live observation but also preserved the *first, wrong* rebuild forever — SCI-BOT kept the
+  which correctly protects a live observation but also preserved the *first, wrong* rebuild forever - SCI-BOT kept the
   wrong creator and 0.0% creator supply through a `--force` re-run. A complete rebuild now replaces a prior rebuilt
   row, and still never overwrites a watched launch.
 - **Rebuilt tokens showed "outside buyers: unknown" and could never be judged.** `assess` counts curve buyers from
@@ -471,7 +469,7 @@ criteria. Three bugs found by testing the path end to end, all of the same famil
   coverage **or** a complete rebuild. Verified: USWS now carries both expected DANGER flags.
 
 Also: the largest buy of every rebuild was being written into `hist_trades` as a curve buyout regardless of size,
-inventing buyout records — including one that rounded to 0 SOL — which feed the wallet profiles on operator pages.
+inventing buyout records - including one that rounded to 0 SOL - which feed the wallet profiles on operator pages.
 Only buys of at least `BUYOUT_SOL` are recorded now, and the two bad rows were deleted.
 
 Note that a page already written into `site/t/` is served as-is, so a fix reaches existing pages only at the next
@@ -481,7 +479,7 @@ retroactive until the generator runs.
 
 ### Limits on the rebuild path (2026-09-07)
 
-Every on-demand rebuild spends archival RPC calls — thousands for a busy curve — on a request from the open internet,
+Every on-demand rebuild spends archival RPC calls - thousands for a busy curve - on a request from the open internet,
 against the same quota the collector depends on. Unbounded, one visitor can occupy the single worker indefinitely.
 The limits are generous for a person and useless for a script, and every refusal says plainly what happened and when
 to come back, because a refusal is an operational state and must never read as a finding about the token.
@@ -492,7 +490,7 @@ to come back, because a refusal is an operational state and must never read as a
   elsewhere, a wallet, a typo) is refused for one RPC call instead of thousands.
 - `MAX_SIGS_ON_DEMAND` 8,000 caps a single rebuild; the CLI is uncapped. Over the cap the record is marked incomplete
   with the count, not silently truncated.
-- Jobs are evicted after 6 h (or 5,000 entries) — results live in the database, not the queue.
+- Jobs are evicted after 6 h (or 5,000 entries) - results live in the database, not the queue.
 - `TRUST_PROXY=1` makes the service read `cf-connecting-ip` / `x-forwarded-for`. Off by default: those headers are
   caller-supplied, so trusting them when nothing is in front hands every visitor an unlimited supply of identities.
 
@@ -510,12 +508,12 @@ discoveries from posts. They render an honest UNKNOWN, but they should not be in
 
 Pre-rendering a page per token does not survive contact with the launch rate. At **~24,000 launches and ~1,465
 graduations a day**, rendering every launch is 8.8 M pages a year and graduations alone are 535 k. Seven days of
-graduations already produced **19,104 files and 112 MB** — past Cloudflare Pages' 20,000-file deployment cap, so the
+graduations already produced **19,104 files and 112 MB** - past Cloudflare Pages' 20,000-file deployment cap, so the
 approach had roughly a week left regardless of anything else.
 
 `serve.ts` already renders a page from a database row on request, so the static tree was an imitation of a cache. It is
 now an actual cache: pages are rendered per request and cached at the edge (`max-age=3600, stale-while-revalidate=86400`
-for a settled record, `no-store` while a rebuild is pending or the answer is UNKNOWN — a visitor must not be pinned to
+for a settled record, `no-store` while a rebuild is pending or the answer is UNKNOWN - a visitor must not be pinned to
 an answer we are in the middle of improving). `npm run site` writes **3 files, 32 KB**: the front page, the 404 and the
 summary JSON. `--pages` still writes the full tree for a portable offline copy of a bounded window.
 
@@ -524,22 +522,20 @@ summary JSON. `--pages` still writes the full tree for a portable offline copy o
 | | |
 |---|---|
 | collector database | 6.9 GB (13.2 M trade rows: 3.3 GB of data, 1.7 GB of indexes) |
-| record database | **39.9 MB — 323 bytes per launch** |
+| record database | **39.9 MB - 323 bytes per launch** |
 
 At 323 bytes a launch, ten million launches is ~3.2 GB and a hundred million ~32 GB. The per-row figure is the one that
 matters; the per-day figure only tells you how fast you reach it.
 
 It fits because nothing on the serving path needs trade rows any more: `tokens.curve_buyers` stores the distinct
-outside-buyer count so `assess` never scans `trades`, and `findBuyout` needs only curve buys of 40 SOL or more —
-**1,485 rows out of 13.2 million**. Table names match the source, so `serve.ts` runs against either file unmodified.
+outside-buyer count so `assess` never scans `trades`, and `findBuyout` needs only curve buys of 40 SOL or more - **1,485 rows out of 13.2 million**. Table names match the source, so `serve.ts` runs against either file unmodified.
 Deliberately not carried: per-trade history, wallet aggregates, tweets, paper positions, price checkpoints. Those are
 how the record was derived, not the record.
 
 ### Two failures caught on the way, both the house pattern
 
 - **A record database carrying only buyouts made an exculpatory claim.** `profile()` derives a wallet's open-market
-  behaviour from all of its trades, so with only the buyouts present a Priors page reported *"sold on the market: 0 —
-  not yet a net seller"* about a wallet that had sold **3,512 SOL into buyers**. A precomputed `wallet_flow` table (one
+  behaviour from all of its trades, so with only the buyouts present a Priors page reported *"sold on the market: 0 - not yet a net seller"* about a wallet that had sold **3,512 SOL into buyers**. A precomputed `wallet_flow` table (one
   row per curve-taking wallet) now carries it, and `profile()` prefers that row and never falls back to a zero.
   Verified: the 40 MB record returns numbers identical to the 6.9 GB source, correctly flagged DANGER.
 - **An empty database served "no record" for every token on Solana.** `.railwayignore` used `data/*` with a
@@ -553,17 +549,17 @@ how the record was derived, not the record.
 Railway project `pump-provenance`, service `web`, sharing the collector's image with `SERVICE=web` selecting the role
 in the Dockerfile CMD. `TRUST_PROXY=1` so the per-IP limits key on the real visitor rather than the platform proxy.
 The record database is baked into the image, which means on-demand rebuilds performed by the running service are lost
-on the next deploy — acceptable while rebuilds are cheap and re-runnable, but the reason to move it to a volume shared
+on the next deploy - acceptable while rebuilds are cheap and re-runnable, but the reason to move it to a volume shared
 with the collector once the rebuild queue carries real traffic.
 
 
 ### `git init` took the site down (2026-09-07)
 
-Initialising version control — done to make the project grant-eligible — broke production twice in a row, and the
+Initialising version control - done to make the project grant-eligible - broke production twice in a row, and the
 mechanism is worth recording because nothing about it is visible from either file on its own.
 
 Railway honours `.railwayignore`; once a git repository exists it honours `.gitignore` **as well**. `.gitignore`
-correctly excludes build products — `data/*.db` (the collector's database is 7 GB) and `site/` (generated pages) — and
+correctly excludes build products - `data/*.db` (the collector's database is 7 GB) and `site/` (generated pages) - and
 the container requires exactly those two things. So the deploy silently shipped an image with no archive, and then,
 after that was fixed, one with no pages. `git check-ignore -v data/record.db` names the culprit in one line, which is
 the command to reach for when a file mysteriously stops shipping.
@@ -575,11 +571,11 @@ silent, confident, catastrophic wrongness into an obvious outage.
 The reviewing failure is the one to learn from. Each check was correct and too narrow: secrets were verified absent
 from the commit, but not that the commit changed what ships; the record database was verified present on the second
 deploy, but not that the pages still were. **Verify that the system still works, not that the change worked.**
-`scripts/smoke.sh` (`npm run smoke`) now checks every route the site needs — pages, favicon, summary JSON, a token
-record, and the database download — against a deployed URL, asserting status and body content. A deploy is not
+`scripts/smoke.sh` (`npm run smoke`) now checks every route the site needs - pages, favicon, summary JSON, a token
+record, and the database download - against a deployed URL, asserting status and body content. A deploy is not
 finished until it passes.
 
 The underlying seam is still there and should be closed rather than patched: `.gitignore` and the deploy manifest now
 encode contradictory intentions about the same files, and re-including them by hand is fragile. The resolution is for
-the collector to write `record.db` to a volume that the web service reads, leaving the image carrying only code — which
+the collector to write `record.db` to a volume that the web service reads, leaving the image carrying only code - which
 also ends the situation where published data is only as fresh as the last manual deploy from a laptop.

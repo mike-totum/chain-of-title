@@ -44,7 +44,7 @@ measured and about $20 each hours later. Never quote `vault_sol` without `vault_
 curve as completing when its own feed reaches the graduation threshold. Curves cross that mark and fall
 back, and until 2026-09-09 nothing ever re-read the curve to check. On that date the curve account was
 read directly for every unconfirmed graduation the collector held: 943 had in fact completed and are now
-confirmed, and **5,187 returned `complete = 0`** — read and disconfirmed, not merely unwitnessed. Against
+confirmed, and **5,187 returned `complete = 0`** - read and disconfirmed, not merely unwitnessed. Against
 12,349 rows carrying `graduated = 1`, 6,945 are confirmed. **Count graduations with
 `graduated_confirmed_by IS NOT NULL`**, or simply `SELECT * FROM graduations`, which is a view over exactly that
 set. `WHERE graduated = 1` returns roughly 1.8x the true number.
@@ -60,7 +60,7 @@ graduation was never confirmed, not that it did not happen.
 
 ---
 
-## `tokens` (153,578 rows) — one row per launch
+## `tokens` (153,578 rows) - one row per launch
 
 | column | meaning |
 |---|---|
@@ -75,10 +75,10 @@ graduation was never confirmed, not that it did not happen.
 | `unique_buyers` | distinct buyers including post-graduation AMM activity. Not the same question as `curve_buyers`; prefer `curve_buyers` for provenance |
 | `snap30_buyers` | distinct outside buyers within 30 seconds of creation |
 | `bundled_buyers` | distinct non-creator buyers in the creation slot or the next one, a bundling heuristic |
-| `graduated` | 1 if the curve was **recorded** as completing — an inference from decoded trade events, never a reading of the curve. Wrong on most rows where `graduated_confirmed_by IS NULL`; see the warning above. Do not count it alone |
+| `graduated` | 1 if the curve was **recorded** as completing - an inference from decoded trade events, never a reading of the curve. Wrong on most rows where `graduated_confirmed_by IS NULL`; see the warning above. Do not count it alone |
 | `graduated_at` | when, ms since epoch |
-| `graduated_confirmed_by` | how completion was confirmed: `pool` (a PumpSwap pool exists, which cannot happen unless the curve completed), `curve_complete` (the curve account's own flag was read), or NULL for an inference from decoded trade events that was never confirmed. NULL is not disconfirmation — but it is no longer neutral either: where the curve account has since been read, the great majority of NULL rows returned `complete = 0`. **This column, not `graduated`, is the graduation flag** |
-| `curve_checked_at` | when we read the bonding curve account itself, ms since epoch. NULL means we hold no reading — which covers both a read we never attempted and one that failed, because a failed call writes nothing rather than recording our own RPC trouble as an observation about a token |
+| `graduated_confirmed_by` | how completion was confirmed: `pool` (a PumpSwap pool exists, which cannot happen unless the curve completed), `curve_complete` (the curve account's own flag was read), or NULL for an inference from decoded trade events that was never confirmed. NULL is not disconfirmation - but it is no longer neutral either: where the curve account has since been read, the great majority of NULL rows returned `complete = 0`. **This column, not `graduated`, is the graduation flag** |
+| `curve_checked_at` | when we read the bonding curve account itself, ms since epoch. NULL means we hold no reading - which covers both a read we never attempted and one that failed, because a failed call writes nothing rather than recording our own RPC trouble as an observation about a token |
 | `curve_complete` | what that reading said: `1` the curve had completed, `0` it had not, NULL the account no longer existed. Read it **with** `curve_checked_at`: the pair distinguishes "we looked and it had not completed" (a disconfirmation) from "we looked and learned nothing" from "we never looked". A NULL here is never a zero |
 | `pool` | PumpSwap pool address, when known |
 | `vault_sol` | SOL in the pool at the moment it was read |
@@ -89,11 +89,11 @@ graduation was never confirmed, not that it did not happen.
 | `venue` | launch venue. `pumpfun` throughout this release; the column exists because the record format is venue-neutral |
 | `updated_at` | last write to this row |
 | `uri` | the metadata URI declared in the creation transaction |
-| `image`, `description` | what the token served at that URI **when we read it**, which for most rows is at launch and for some is days later — always read `meta_at` before treating one as the other. Live capture began 2026-09-08; 2026-09-02 to 09-07 were recovered on 09-10, so a document there is what the URI resolved to on the 10th and cannot be assumed identical to what it served on the 2nd. This reverses an earlier decision, stated here as a refusal, that backfilling would be "manufacturing evidence about the past". It would be, if the fetch time were hidden. It is not hidden: `meta_at` carries it, the token page prints it, and the alternative was letting the documents be deleted at source while we held a principle about them. Several thousand were deleted before we reached them |
-| `meta_at` | when that read succeeded — and the only honest way to date the two columns above. It does **not** separate "we never looked" from "we looked and nobody served it": a NULL here means we do not hold a document, for whichever reason. The reason is recorded in the collector as `meta_error` and is not published, because it describes our fetch and not the launch |
-| `meta_lag_ms` | how long after the launch we read its document (`meta_at` − `created_at`). **Read this before treating `image` or `description` as a launch-time claim.** A document read eight days later is what the URI served on the eighth day; it may be identical to what it served at launch, or it may be the operator's later story, and nothing on-chain tells them apart because the creator owns the URI. Published as the lag rather than as a backfilled/not flag, because the lag is a fact and a flag would be a threshold we invented. The distribution is sharply bimodal — measured 2026-09-10: **80,448 rows under one minute, 69,597 over a day, 2,174 in between** — so any cut you choose between ten minutes and a day selects the same cohort, and you can see that rather than take our word for it |
+| `image`, `description` | what the token served at that URI **when we read it**, which for most rows is at launch and for some is days later - always read `meta_at` before treating one as the other. Live capture began 2026-09-08; 2026-09-02 to 09-07 were recovered on 09-10, so a document there is what the URI resolved to on the 10th and cannot be assumed identical to what it served on the 2nd. This reverses an earlier decision, stated here as a refusal, that backfilling would be "manufacturing evidence about the past". It would be, if the fetch time were hidden. It is not hidden: `meta_at` carries it, the token page prints it, and the alternative was letting the documents be deleted at source while we held a principle about them. Several thousand were deleted before we reached them |
+| `meta_at` | when that read succeeded - and the only honest way to date the two columns above. It does **not** separate "we never looked" from "we looked and nobody served it": a NULL here means we do not hold a document, for whichever reason. The reason is recorded in the collector as `meta_error` and is not published, because it describes our fetch and not the launch |
+| `meta_lag_ms` | how long after the launch we read its document (`meta_at` − `created_at`). **Read this before treating `image` or `description` as a launch-time claim.** A document read eight days later is what the URI served on the eighth day; it may be identical to what it served at launch, or it may be the operator's later story, and nothing on-chain tells them apart because the creator owns the URI. Published as the lag rather than as a backfilled/not flag, because the lag is a fact and a flag would be a threshold we invented. The distribution is sharply bimodal - measured 2026-09-10: **80,448 rows under one minute, 69,597 over a day, 2,174 in between** - so any cut you choose between ten minutes and a day selects the same cohort, and you can see that rather than take our word for it |
 | `image_sha256` | sha256 of the image bytes as we fetched them, when we hold them. The record carries the proof, never the picture: 64 hex characters against a few hundred KB, which is what keeps this file mirrorable |
-| `image_bytes`, `image_at` | size of those bytes, and when they were fetched — the fetch time, not the launch time |
+| `image_bytes`, `image_at` | size of those bytes, and when they were fetched - the fetch time, not the launch time |
 
 ### Why the picture is only kept for some launches
 
@@ -109,7 +109,7 @@ and because they are content-addressed the ~46% of launches reusing another laun
 A row with a NULL `image_sha256` is therefore a launch we have not reached **yet**, or one whose bytes nobody would
 serve us, rather than one outside the policy. Corrected 2026-09-10: this section previously described the
 graduated-only rule after capture had already been widened, and the schedule that fed it was under-sized for the
-wider scope — 900 fetches an hour against roughly 1,070 launches an hour, oldest rows starved because the pass
+wider scope - 900 fetches an hour against roughly 1,070 launches an hour, oldest rows starved because the pass
 always took the newest first. Both are fixed; the backlog it left is draining.
 
 This is a real limit and it is stated rather than hidden, because the gap it leaves is exactly the kind we
@@ -120,7 +120,7 @@ URLs are in the file and nothing stops you fetching them; the reason we did not 
 `image_error` exists in the collector's own database but is **not** published here: it records why *our* fetch
 failed, which is a fact about our infrastructure and not about the launch.
 
-## The launch documents — `documents.ndjson.gz`, alongside this file
+## The launch documents - `documents.ndjson.gz`, alongside this file
 
 `record.db` carries `meta_sha256` for every launch whose metadata document we hold, and does not carry the
 document. That lets you verify bytes you already have and not obtain any, which for the one artefact here that
@@ -135,7 +135,7 @@ untouched.
 | `/d/{mint}` | one launch's document, with its sha256 in the `x-content-sha256` header |
 
 Each line is `{sha256, bytes, launches, firstSeen, lastSeen, doc}`. `doc` is the document **as served, verbatim, as
-a string** — not a parsed object, because the bytes are what the hash commits to. Rows are sorted by hash, so the
+a string** - not a parsed object, because the bytes are what the hash commits to. Rows are sorted by hash, so the
 same corpus produces the same file and two mirrors can be compared directly.
 
 **Deduplicated by content, and the duplicate count is evidence.** `launches` is how many launches declared that
@@ -147,16 +147,16 @@ receive. It will match or we have a bug worth reporting. Nothing asks you to tru
 the record's commitment and the bytes are published separately and either agree or do not.
 
 **Why this matters more than it sounds.** `metadata.j7tracker.io` hosted 30,443 of these launches and now answers
-404 for every document it ever served — the host is up, the files are gone. For those launches, the bytes in this
+404 for every document it ever served - the host is up, the files are gone. For those launches, the bytes in this
 bundle are the only ones left anywhere, and no amount of money or archival RPC recovers what is not in it.
 
 **The gap, stated.** The manifest publishes `launchesWithDocumentRecorded` and `launchesWithBytesHeld` separately
-and they differ — 149,834 against 126,369 at the time of writing. The difference is launches fetched before the
+and they differ - 149,834 against 126,369 at the time of writing. The difference is launches fetched before the
 document itself was kept, when only five fields were extracted and the file discarded. Their URL is on the row and
 most are still fetchable; they are recorded as held because we did read them, and the bundle does not contain them
 because we did not keep what we read. Both numbers are published so neither can be mistaken for the other.
 
-## `runs` (59 rows) — when the collector was watching
+## `runs` (59 rows) - when the collector was watching
 
 `started_at`, `stopped_at`, `note`. Coverage is the union of these intervals. `stopped_at` carries
 the last moment a launch actually arrived, not a wall clock, so a collector that was running but
@@ -183,17 +183,17 @@ timestamp of the build that produced the file, and `watermark`.
 
 ---
 
-## `graduations` — a view, not a table
+## `graduations` - a view, not a table
 
 `SELECT * FROM graduations` is `tokens` restricted to `graduated_confirmed_by IS NOT NULL`: the launches whose
 completion we can actually evidence. It exists because the obvious query against the raw column returns a number
 about three quarters too large, and a warning in a data dictionary only helps the people who read it. The raw
 column is untouched and still there; this is an affordance beside it, not a replacement for it.
 
-## `corrections` — every correction, carried by the record
+## `corrections` - every correction, carried by the record
 
 Corrections used to live only as prose at `chainoftitle.org/corrections`. The stated reason this file is deposited
-under a DOI is that the record outlives the site — and the corrections did not. Someone who mirrors the file and
+under a DOI is that the record outlives the site - and the corrections did not. Someone who mirrors the file and
 never visits the site could not learn that a column they were counting is wrong. Now they can.
 
 | column | meaning |

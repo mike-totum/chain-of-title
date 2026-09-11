@@ -1,8 +1,8 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { TokenState, Tracker, CheckpointKey } from "./tracker.ts";
+import type { TokenState, Tracker, CheckpointKey } from "../src/tracker.ts";
 import type { Strategy, OperatorActivity } from "./strategies/index.ts";
-import { simulateBuy, simulateSell, price, FEE_BPS } from "./curve.ts";
-import { flow } from "./tracker.ts";
+import { simulateBuy, simulateSell, price, FEE_BPS } from "../src/curve.ts";
+import { flow } from "../src/tracker.ts";
 const feeOf = (t: TokenState) => t.feeBps ?? FEE_BPS;
 import { EventEmitter } from "node:events";
 

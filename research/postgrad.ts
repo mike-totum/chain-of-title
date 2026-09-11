@@ -10,9 +10,9 @@
  * outcomes (price at +15m/+60m vs graduation, peak after, verified on-chain real-runner label when known),
  * a rule search for entries at +`entry` seconds, and a rip-cord simulation on the AMM path.
  */
-import { config } from "./config.ts";
-import { openDb } from "./db.ts";
-import { isRealOutcome, organicDemand } from "./label.ts";
+import { config } from "../src/config.ts";
+import { openDb } from "../src/db.ts";
+import { isRealOutcome, organicDemand } from "../src/label.ts";
 
 const args = new Map<string, string>();
 for (let i = 2; i < process.argv.length; i++) {

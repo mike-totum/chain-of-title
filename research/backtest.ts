@@ -11,11 +11,11 @@
  *   share reaching 2x after entry, and a simulated exit PnL (fees, latency, TP/SL/trail/dev-sell/time-stop) on
  *   tokens whose full trade history was kept.
  */
-import { config } from "./config.ts";
-import { openDb } from "./db.ts";
+import { config } from "../src/config.ts";
+import { openDb } from "../src/db.ts";
 import { baseRules, sweepRules, type BtRule, type BtState } from "./backtest-rules.ts";
-import { TOTAL_SUPPLY } from "./curve.ts";
-import { labelRealRunners, REAL_MIN_MCAP_SOL, REAL_MIN_AGE_MS } from "./label.ts";
+import { TOTAL_SUPPLY } from "../src/curve.ts";
+import { labelRealRunners, REAL_MIN_MCAP_SOL, REAL_MIN_AGE_MS } from "../src/label.ts";
 
 const args = new Map<string, string>();
 for (let i = 2; i < process.argv.length; i++) {
