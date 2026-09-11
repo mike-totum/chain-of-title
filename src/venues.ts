@@ -79,6 +79,30 @@ import { bondingCurveAddress, decodeCurveAccount, type CurveState } from "./rpc-
  * would be subscribed and silently produce nothing, so it must not be added to VENUES until the extraction path
  * exists. That is the same trap this clause is about, which is why it is written down rather than assumed.
  */
+/**
+ * 8. THE EVENT DOES NOT NECESSARILY SAY WHICH LAUNCH IT IS ABOUT, AND THIS INTERFACE ASSUMED IT DID.
+ *
+ * Found 2026-09-11 while writing the LaunchLab decoder, and it is the same fault as clause 7 one layer down: an
+ * assumption true of pump.fun, invisible because pump.fun was the only venue, and load-bearing by the time a second
+ * venue would have exposed it.
+ *
+ * Every pump.fun event carries `mint`, and its TradeEvent carries the trading wallet. LaunchLab's carry neither. A
+ * `TradeEvent` names a `pool_state`; a `PoolCreateEvent` names a pool, a creator and the token's name, symbol and
+ * uri - and no mint anywhere. Identity lives in the instruction's accounts, and `logsSubscribe` delivers logs and a
+ * signature with no accounts at all. So `decodeCreate(d)` and `decodeTrade(d)`, which take a payload and return a
+ * record naming a mint, cannot be satisfied by this venue from the live feed.
+ *
+ * WHAT THE SHAPE ACTUALLY IS. A venue's event identifies a launch by SOMETHING - a mint for pump.fun, a pool for
+ * LaunchLab - and turning that into a mint may need a lookup the decoder cannot do synchronously. For LaunchLab the
+ * lookup is one `getAccountInfo` on the pool, whose account carries both mints, both decimal scales and the
+ * creator, cached forever after; roughly 9,400 reads a day at current launch rates, and nothing per trade. The
+ * interface has to admit that step rather than pretend the payload was self-describing.
+ *
+ * NOT RESOLVED HERE, DELIBERATELY. Making it async touches the ordering guarantee that a create is recorded before
+ * its trades, in the one process where a mistake loses launches permanently. `src/feed/launchlab.ts` therefore
+ * ships as decoders with a verified byte layout and no subscription, and `launchlab` is absent from VENUES below.
+ * A venue that cannot be identified from its own events must not be subscribed to on the hope that it works out.
+ */
 export type EventChannel = "logs" | "cpi";
 
 export interface LaunchVenue {
