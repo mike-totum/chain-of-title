@@ -12,7 +12,13 @@ ENV NODE_ENV=production DB_PATH=/data/pump.db TELEGRAM_SESSION_FILE=/data/telegr
 # The record path is a variable, not a literal. It was `--db data/record.db`, and `--db` beats the DB_PATH
 # environment variable, so pointing the service at its volume through DB_PATH changed nothing: the archive kept
 # landing on the container filesystem and the volume sat empty while everything looked correct.
-# Three services, one image. SERVICE=chainmints reads every block and records every token creation on the chain,
+# Three services, one image.
+#
+# The chainmints service runs TWO processes against one file: the scanner writing rows and the metadata resolver
+# updating them. Two writers on one SQLite database is the arrangement that has kept `npm run clusters` off the
+# collector for days - but the reason there is that a blocked write drops a launch permanently. Here both hold
+# short BEGIN IMMEDIATE transactions under the 10s busy_timeout, and the worst case is a retry: the scanner
+# re-reads overlapping ranges every pass anyway, and the resolver's work is idempotent. SERVICE=chainmints reads every block and records every token creation on the chain,
 # whatever launchpad made it; it writes its own database file so it never competes for the collector's write lock,
 # which is why it can be deployed and restarted without costing the collector a single launch.
-CMD ["sh", "-c", "if [ \"$SERVICE\" = web ]; then exec tsx --no-warnings=ExperimentalWarning src/serve.ts --db ${DB_PATH:-/data/record.db} --dir site; elif [ \"$SERVICE\" = chainmints ]; then exec tsx --no-warnings=ExperimentalWarning src/chainmints.ts --daemon; else exec tsx --no-warnings=ExperimentalWarning src/index.ts; fi"]
+CMD ["sh", "-c", "if [ \"$SERVICE\" = web ]; then exec tsx --no-warnings=ExperimentalWarning src/serve.ts --db ${DB_PATH:-/data/record.db} --dir site; elif [ \"$SERVICE\" = chainmints ]; then tsx --no-warnings=ExperimentalWarning src/chainmeta.ts --daemon & exec tsx --no-warnings=ExperimentalWarning src/chainmints.ts --daemon; else exec tsx --no-warnings=ExperimentalWarning src/index.ts; fi"]
