@@ -50,6 +50,7 @@
     "serve": "tsx --no-warnings=ExperimentalWarning src/serve.ts",
     "usage": "tsx --no-warnings=ExperimentalWarning src/usagereport.ts",
     "chainmints": "tsx --no-warnings=ExperimentalWarning src/chainmints.ts",
+    "chainmeta": "tsx --no-warnings=ExperimentalWarning src/chainmeta.ts",
     "servicedb": "tsx --no-warnings=ExperimentalWarning src/servicedb.ts",
     "preflight": "sh scripts/preflight.sh",
     "smoke": "sh scripts/smoke.sh",
