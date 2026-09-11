@@ -141,7 +141,19 @@ export function mintsInBlock(b: any, slot: number): ChainMint[] {
   return out;
 }
 
-const db = openDb(config.dbPath);
+/**
+ * Its OWN database file, and this is not a preference.
+ *
+ * `config.dbPath` is the collector's, and HANDOFF records what a second writer against it costs: the collector runs
+ * a 10 second busy_timeout, and a competing writer drops launches, which is the one failure that cannot be undone.
+ * `npm run clusters` has been stuck on the laptop for exactly this reason. These rows share nothing with the
+ * collector's tables, so they share nothing with its write lock either, and this can run as its own service beside
+ * the collector without ever restarting it.
+ *
+ * On the same volume, so the record build can attach it read-only later without a network hop.
+ */
+const DB = process.env.CHAINMINTS_DB ?? (process.env.DB_PATH ? process.env.DB_PATH.replace(/[^/]+$/, "chainmints.db") : "data/chainmints.db");
+const db = openDb(DB, { migrate: false });
 db.exec(`CREATE TABLE IF NOT EXISTS chain_mints (
   mint TEXT PRIMARY KEY,
   creator TEXT NOT NULL,
@@ -162,6 +174,21 @@ db.exec(`CREATE TABLE IF NOT EXISTS chain_mints (
   CHECK ((supply > 0) = (creator_share IS NOT NULL) OR supply = 0)
 )`);
 db.exec("CREATE INDEX IF NOT EXISTS chain_mints_slot ON chain_mints(slot)");
+/**
+ * Which slots were actually read, which is the difference between data and a record.
+ *
+ * Without this the table can answer "here are the launches we have" and cannot answer "did you watch this one" -
+ * and the second is the only question this archive exists to answer. A launch absent from `chain_mints` would be
+ * indistinguishable from a launch in a range nobody scanned, which is the same fault as reporting an unwatched
+ * launch as clean. `runs` does this job for the collector; this is the same discipline for a scanner that walks
+ * slots instead of holding a socket.
+ *
+ * Ranges are merged on write, so an overlapping pass extends a range rather than adding a row, and a gap stays
+ * visibly a gap.
+ */
+db.exec(`CREATE TABLE IF NOT EXISTS chain_scanned (
+  from_slot INTEGER NOT NULL, to_slot INTEGER NOT NULL, at INTEGER NOT NULL,
+  PRIMARY KEY (from_slot, to_slot))`);
 db.exec("CREATE INDEX IF NOT EXISTS chain_mints_creator ON chain_mints(creator)");
 db.exec("CREATE INDEX IF NOT EXISTS chain_mints_launch ON chain_mints(looks_like_launch, slot)");
 
@@ -182,6 +209,22 @@ function store(rows: ChainMint[]): number {
     db.exec("COMMIT");
   } catch (e) { db.exec("ROLLBACK"); throw e; }
   return n;
+}
+
+/** Merge a scanned range into `chain_scanned`, joining anything it touches or abuts. */
+function noteScanned(lo: number, hi: number): void {
+  db.exec("BEGIN");
+  try {
+    const touching = db.prepare(
+      "SELECT from_slot, to_slot FROM chain_scanned WHERE to_slot >= ? AND from_slot <= ?").all(lo - 1, hi + 1) as any[];
+    for (const r of touching) {
+      lo = Math.min(lo, Number(r.from_slot));
+      hi = Math.max(hi, Number(r.to_slot));
+      db.prepare("DELETE FROM chain_scanned WHERE from_slot = ? AND to_slot = ?").run(r.from_slot, r.to_slot);
+    }
+    db.prepare("INSERT OR REPLACE INTO chain_scanned (from_slot, to_slot, at) VALUES (?,?,?)").run(lo, hi, Date.now());
+    db.exec("COMMIT");
+  } catch (e) { db.exec("ROLLBACK"); throw e; }
 }
 
 async function pass(fromSlot: number, blocks: number): Promise<{ read: number; found: number; stored: number }> {
@@ -206,14 +249,21 @@ async function pass(fromSlot: number, blocks: number): Promise<{ read: number; f
 }
 
 (async () => {
+  console.log(`[chainmints] writing to ${DB}${DAEMON ? ", daemon" : ""}`);
   do {
     const head = Number(await rpc("getSlot", [{ commitment: "confirmed" }]));
     const started = Date.now();
     const { read, found, stored } = await pass(head, BLOCKS);
+    // Recorded only for slots this pass actually read. A block the endpoint refused is not coverage, and counting
+    // the requested range rather than the read one would publish a gap as though it had been watched.
+    if (read > 0) noteScanned(head - BLOCKS + 1, head);
     const secs = (Date.now() - started) / 1000;
     const launches = (db.prepare("SELECT COUNT(*) c FROM chain_mints WHERE looks_like_launch = 1").get() as any).c;
     const total = (db.prepare("SELECT COUNT(*) c FROM chain_mints").get() as any).c;
     const withUri = (db.prepare("SELECT COUNT(*) c FROM chain_mints WHERE uri IS NOT NULL").get() as any).c;
+    const cov = db.prepare("SELECT COUNT(*) n, MIN(from_slot) lo, MAX(to_slot) hi FROM chain_scanned").get() as any;
+    console.log(`[chainmints] coverage: ${cov.n} contiguous range${cov.n === 1 ? "" : "s"} from ${cov.lo} to ${cov.hi}` +
+      `${cov.n > 1 ? " - MORE THAN ONE RANGE MEANS A GAP" : ""}`);
     console.log(`[chainmints] ${read} blocks in ${secs.toFixed(0)}s (${(read / secs).toFixed(2)}/s), ` +
       `${found} mints seen, ${stored} new; held: ${total.toLocaleString()} mints, ` +
       `${launches.toLocaleString()} look like launches, ${withUri.toLocaleString()} with a metadata uri`);
