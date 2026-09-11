@@ -826,6 +826,18 @@ try {
     + "confirmed, record pages say so in those words, and findings.html publishes all three counts. Graduation "
     + "totals rise by 191 against any figure taken before 2026-09-11; that is a correction and not a change in the "
     + "market.");
+  ins.run("curve-check-rate-unsplit", at("2026-09-11"), "record", null,
+    "findings.html briefly reported the on-chain curve readings as a single rate - 'of the curves we read, 83% had "
+    + "not completed'. The sweep that produces those readings is targeted: it reads graduations we could not "
+    + "independently confirm almost exhaustively (98%) and only about a third of the confirmed ones, so the checked "
+    + "population is selected for being the doubtful half.",
+    "A reader would have taken 83% as the share of reported graduations that never happened. It is not: it is the "
+    + "share within a population we chose precisely because it was already in doubt. The figure described our own "
+    + "sampling and was published as a property of the market.",
+    "The rate is now split by population and each is labelled with the population it belongs to. Of confirmed "
+    + "graduations re-read, 31 of 2,717 were disproved (1.1%); of unconfirmed graduations, 5,187 of 5,378 had not "
+    + "completed (96.4%). The page states that neither is a rate over all graduations and why. The split figures "
+    + "were always the ones in the record - no reading changed, only what we said about them.");
   ins.run("uncheckable-figures", at("2026-09-09"), "record", null,
     "Every record page carried the sentence \"Everything here is read from the Solana chain and can be checked "
     + "against it\", and until 2026-09-09 the record withheld what was needed to check it. No launch row cited the "

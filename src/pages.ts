@@ -121,9 +121,25 @@ export function buildFacts(db: any, covered: (ts: number) => boolean, COV: Cover
        * is asking to be taken on trust — and because the size of the correction is the best available evidence
        * that the checking is real.
        */
+      /**
+       * The curve readings, split by whether the graduation was independently confirmed — because the checking is
+       * targeted and an unsplit rate is an artefact of that targeting.
+       *
+       * The sweep reads unconfirmed graduations almost exhaustively (98%) and only a third of confirmed ones, so
+       * the checked population is selected for being the doubtful half. Reporting "of the curves we read, 83% had
+       * not completed" states our own sampling as a property of the market. Split, the same readings say something
+       * both true and much stronger: the feed's graduation events divide into a set that survives an independent
+       * read and a set that overwhelmingly does not.
+       *
+       * An explicit 0 throughout. COALESCE(curve_complete,0) would fold in the rows read after the account had
+       * gone, which is "we looked and learned nothing" — see the column's schema note in servicedb.
+       */
+      confChecked: q("graduated = 1 AND graduated_confirmed_by IS NOT NULL AND curve_checked_at IS NOT NULL"),
+      confIncomplete: q("graduated = 1 AND graduated_confirmed_by IS NOT NULL AND curve_complete = 0"),
+      unconfTotal: q("graduated = 1 AND graduated_confirmed_by IS NULL"),
+      unconfChecked: q("graduated = 1 AND graduated_confirmed_by IS NULL AND curve_checked_at IS NOT NULL"),
+      unconfIncomplete: q("graduated = 1 AND graduated_confirmed_by IS NULL AND curve_complete = 0"),
       curveChecked: q("curve_checked_at IS NOT NULL"),
-      // An explicit 0. COALESCE(curve_complete,0) would fold in the rows we read and found the account already
-      // gone, which is "we looked and learned nothing" and not a disconfirmation — see the column's schema note.
       curveDisproved: q("curve_checked_at IS NOT NULL AND curve_complete = 0"),
       curveGone: q("curve_checked_at IS NOT NULL AND curve_complete IS NULL"),
     };
@@ -465,16 +481,28 @@ export function findingsBody(f: PageFacts, builtAt: number | null): string {
     */ ""}
   ${f.F.curveChecked ? `<div class="sec"><h2>What we found when we checked our own claims</h2>
     <span class="cnt">${fmt(f.F.curveChecked)} curves read on chain</span></div>
-  <p class="lede">A graduation reaches us as an event on a feed, and an event is not a curve. Where we have gone and
-  read the bonding curve account itself, <b>${fmt(f.F.curveDisproved)} of ${fmt(f.F.curveChecked)}</b>
-  (${pct(f.F.curveDisproved, f.F.curveChecked)}) had <b>not</b> finished. Those launches are not counted as
-  graduations anywhere on this site, and each one says so on its own page with the moment we read it.</p>
-  <p class="lede">We publish this rate because a register that corrects itself and will not say how often is asking
-  to be taken on trust. It is a statement about the feed and about our checking, not about the tokens: an unchecked
-  curve is not a disproved one, and the ${fmt(Math.max(0, f.F.confirmed - f.F.curveChecked))} we have not yet read
-  are recorded as unchecked rather than assumed either way.${f.F.curveGone
-    ? ` A further <b>${fmt(f.F.curveGone)}</b> were read after the account had already gone: we looked and learned
-       nothing, which is counted as neither.` : ""}</p>` : ""}
+  <p class="lede">A graduation reaches us as an event on a feed, and an event is not a curve. Where a graduation was
+  independently confirmed &mdash; by the pool existing, or by the curve account's own complete bit &mdash; reading
+  the curve again disproved <b>${fmt(f.F.confIncomplete)}</b> of the ${fmt(f.F.confChecked)} we re-read
+  (${pct(f.F.confIncomplete, f.F.confChecked)}). Those hold up.</p>
+  <p class="lede">The graduations we could <b>not</b> confirm are a different population. We have read the curve for
+  <b>${fmt(f.F.unconfChecked)}</b> of the ${fmt(f.F.unconfTotal)} of them, and
+  <b>${fmt(f.F.unconfIncomplete)}</b> &mdash; ${pct(f.F.unconfIncomplete, f.F.unconfChecked)} &mdash; had not
+  completed. A threshold crossed on a feed, and no curve behind it.</p>
+  ${/*
+      The split is the finding, and stating it unsplit was the error.
+      
+      This page briefly reported the two populations together as "of the curves we read, N% had not completed",
+      which is our own sampling published as a property of the market: the sweep reads unconfirmed graduations
+      almost exhaustively and only a third of confirmed ones, so the checked set is selected for being the doubtful
+      half. The corrected version says which population each rate belongs to, and the corrected version is the
+      stronger claim.
+    */ ""}
+  <p class="lede">We publish both rates because a register that corrects itself and will not say how often is asking
+  to be taken on trust. Neither is a rate over all graduations: we check the doubtful ones far more often than the
+  settled ones, deliberately, so an unsplit figure would describe our own sampling rather than the market.${
+    f.F.curveGone ? ` A further <b>${fmt(f.F.curveGone)}</b> were read after the account had already gone: we looked
+    and learned nothing, counted as neither.` : ""}</p>` : ""}
 
   <div class="sec"><h2>What this does not say</h2></div>
   <p class="lede"><b>These figures were computed on ${builtAt ? when(builtAt) : "an unrecorded date"}</b>, from the record this page was built
