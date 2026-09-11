@@ -127,7 +127,13 @@ export class RpcFeed extends EventEmitter {
   private reconnectTimer: NodeJS.Timeout | null = null;
   private watchdog: NodeJS.Timeout | null = null;
 
-  constructor(private url: string) {
+  /**
+   * The venue this feed observes. Defaults to pump.fun so every existing caller is unchanged, and exists so that
+   * adding a second venue is a second construction rather than an edit to this file - which is the whole point of
+   * the seam in venues.ts, and the reason that file had no importer until now.
+   */
+  venueId = "pumpfun";
+  constructor(private url: string, private program: string = PUMP_PROGRAM) {
     super();
   }
 
@@ -178,7 +184,7 @@ export class RpcFeed extends EventEmitter {
       this.backoffMs = 1000;
       this.lastMessageAt = Date.now();
       this.emit("status", `connected to ${this.url.replace(/\?.*$/, "")}`);
-      ws.send(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "logsSubscribe", params: [{ mentions: [PUMP_PROGRAM] }, { commitment: "processed" }] }));
+      ws.send(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "logsSubscribe", params: [{ mentions: [this.program] }, { commitment: "processed" }] }));
     };
     ws.onmessage = (ev) => {
       this.lastMessageAt = Date.now();
@@ -242,6 +248,7 @@ export class RpcFeed extends EventEmitter {
           vTokensInBondingCurve: vTokens,
           vSolInBondingCurve: vSol,
           marketCapSol: (vSol / vTokens) * 1_000_000_000,
+          venue: this.venueId,
           name: create.name,
           symbol: create.symbol,
           uri: create.uri,

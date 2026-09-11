@@ -193,6 +193,8 @@ export class Tracker extends EventEmitter {
     const preSignals = placeholder?.lateDiscovery ? placeholder.kolSignals : 0;
     const t: TokenState = {
       mint: e.mint,
+      // Stamped from the decoder that produced the event, never left to the column default. See venues.ts clause 4.
+      venue: e.venue,
       name: e.name,
       symbol: e.symbol,
       uri: e.uri,

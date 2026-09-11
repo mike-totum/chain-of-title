@@ -10,6 +10,7 @@ import { PumpSwapFeed } from "./feed/pumpswap.ts";
 import { Tracker, fetchMeta, fetchMetaResult } from "./tracker.ts";
 import { PaperBroker } from "./paper.ts";
 import { strategies, ALL_STRATEGIES, type OperatorActivity } from "./strategies/index.ts";
+import { VENUES } from "./venues.ts";
 import { rpc as rpcHttpCall } from "./rpc-http.ts";
 import { BUYOUT_SOL, TOKEN_COLUMNS, KEEP_TRADE_EVIDENCE, keepTweetEvidence, coverageWindows, assess } from "./provenance.ts";
 import { base58 } from "./feed/rpc.ts";
@@ -59,8 +60,20 @@ if (process.env.SEED_PATH) {
   }
 }
 
-const runId = (db.prepare("INSERT INTO runs (started_at) VALUES (?)").run(Date.now()) as any).lastInsertRowid;
-const feed = config.tradeSource === "pumpportal" ? new PumpPortalFeed(config.pumpportalApiKey) : new RpcFeed(config.solanaWsUrl);
+/**
+ * The venue this collector observes, taken from the registry rather than from a constant in the feed.
+ *
+ * venues.ts described the seam - the interface, the contract, pump.fun bound to it - and nothing imported it, so
+ * the plan for breadth was a document rather than a wiring. It is wired now, with exactly one venue in the list, so
+ * that the change is verifiable: every figure the site publishes must be identical before and after. Adding the
+ * second venue is then a second entry in VENUES and a second subscription, not an edit to the decode path.
+ */
+const VENUE = VENUES[0];
+
+const runId = (db.prepare("INSERT INTO runs (started_at, venue) VALUES (?, ?)").run(Date.now(), VENUE.id) as any).lastInsertRowid;
+const feed = config.tradeSource === "pumpportal" ? new PumpPortalFeed(config.pumpportalApiKey) : new RpcFeed(config.solanaWsUrl, VENUE.program);
+if (feed instanceof RpcFeed) feed.venueId = VENUE.id;
+
 const tracker = new Tracker({ watchMinutes: config.watchMinutes, deadAfterSeconds: config.deadAfterSeconds, watchMaxMinutes: config.watchMaxMinutes });
 const broker = new PaperBroker(db, tracker, strategies, config);
 const botNotify = telegramNotifier(config.telegramBotToken, config.telegramChatId);

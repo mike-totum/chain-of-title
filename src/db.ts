@@ -142,6 +142,11 @@ export function openDb(path: string, opts: { migrate?: boolean } = {}): Database
       team_id INTEGER, wallet TEXT, tokens_together INTEGER, graduated INTEGER, real INTEGER, updated_at INTEGER,
       PRIMARY KEY (team_id, wallet)
     );
+    -- Which venue each observation window covers. With one venue a single interval can answer "were you watching
+    -- this launch"; with two it cannot, and a venue we were not subscribed to must read as unwatched rather than as
+    -- clean. Stamped now, while the answer is known and uniform, so the history already distinguishes on the day a
+    -- second venue arrives - backfilling it afterwards would mean asserting coverage over windows nobody recorded.
+    -- venues.ts clause 3.
     CREATE TABLE IF NOT EXISTS runs (
       id INTEGER PRIMARY KEY AUTOINCREMENT, started_at INTEGER, stopped_at INTEGER, note TEXT
     );
@@ -246,6 +251,8 @@ export function openDb(path: string, opts: { migrate?: boolean } = {}): Database
    * recorded it for, which is precisely the move this project refuses to make about anyone else.
    */
   try { db.exec("ALTER TABLE tokens ADD COLUMN venue TEXT NOT NULL DEFAULT 'pumpfun'"); } catch {}
+  // Same reasoning for runs, and the same default: every window already recorded was a pump.fun window.
+  try { db.exec("ALTER TABLE runs ADD COLUMN venue TEXT NOT NULL DEFAULT 'pumpfun'"); } catch {}
   /**
    * How we know a curve completed: 'pool', 'curve_complete', or NULL.
    *
@@ -464,6 +471,16 @@ export function upsertToken(db: DatabaseSync, t: TokenState): void {
     t.kolSignals, t.pool, t.ammTrusted === null ? null : t.ammTrusted ? 1 : 0, t.vaultSol, t.vaultAt, t.finalized ? 1 : 0, Date.now(),
     // Not in the ON CONFLICT clause above: where a token launched is a launch fact and cannot change, the same reason
     // `created_at` is never updated. Defaulted here as well as in the schema so a second collector sets one field.
+    /**
+     * A backstop, and it must stay one.
+     *
+     * Live launches arrive stamped by the decoder that produced them (tracker.onCreate, from CreateEvent.venue), so
+     * this fallback fires only for rows built by other paths: a chain rebuild, a detector restoration, a test. Those
+     * are pump.fun today by construction. The day they are not, this line publishes another venue's launch as a
+     * pump.fun one and nothing says otherwise, which is why venues.ts clause 4 says to set it at decode and never
+     * rely on the default again. It is left here rather than made fatal because dropping a launch is worse than
+     * mislabelling one, and this is the ingesting process.
+     */
     t.venue ?? "pumpfun",
     t.graduatedConfirmedBy ?? null,
     // Appended last, matching the column list: this INSERT names its columns but binds positionally.

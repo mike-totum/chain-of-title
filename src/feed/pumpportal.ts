@@ -2,6 +2,16 @@ import { EventEmitter } from "node:events";
 
 /** Shape observed on wss://pumpportal.fun/api/data (method: subscribeNewToken) */
 export interface CreateEvent {
+  /**
+   * Which launch venue decoded this event, as `LaunchVenue.id`.
+   *
+   * Optional only because a second source (PumpPortal) predates the field. Every feed that decodes a program's logs
+   * sets it, and `upsertToken` writes it straight through, so a launch is stamped with the venue that produced it
+   * rather than inheriting a column default. `tokens.venue` is NOT NULL DEFAULT 'pumpfun' and that default is a trap
+   * for exactly one situation: the day a second venue's decoder forgets this field, its launches are published as
+   * pump.fun launches and nothing anywhere says otherwise. See clause 4 in venues.ts.
+   */
+  venue?: string;
   signature: string;
   mint: string;
   traderPublicKey: string; // creator / dev wallet
