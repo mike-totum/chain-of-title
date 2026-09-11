@@ -37,7 +37,8 @@ there is no archival node that sells it back, and **deletion is itself the event
 promotional channel quietly removing its posts about a token that later collapsed is evidence, and it is evidence
 that only exists if someone was watching at the time.
 
-What it is **not** is a classifier. Measured against the 88,133 messages already held: promoted launches are ~8x more
+What it is **not** is a classifier. Measured against the 88,133 **X posts** already held (not Telegram messages, of
+which this archive has never held more than three - see the note at the end of this file): promoted launches are ~8x more
 likely to have graduated, but among graduations the promoted ones are *cleaner* on every launch test - 29.2% had 30+
 outside buyers against 12.1% overall, and the average creator share was 8.1% against 19.2%. Promotion tracks
 attention, not manufacture. Anyone proposing to build a danger signal on it should read that again first.
@@ -92,3 +93,21 @@ Not decided, and needing counsel:
   unset. Routine deletion under a documented policy is defensible; deletion that continues after a dispute is
   foreseeable is spoliation. The collector's own pruner destroys millions of rows a day, so the gap between "should
   have stopped" and "stopped" is the thing that gets measured.
+
+## Telegram ingestion is configured and dead, measured 2026-09-11
+
+`TELEGRAM_ARCHIVE=1`, `TELEGRAM_SESSION`, `TELEGRAM_API_ID` and `TELEGRAM_API_HASH` are all set on the collector, and
+the collector holds **0 tg_messages**. It is not slow or partial. It stopped.
+
+`tg_gaps` holds 21 rows and **all 21 are still open** (`to_at IS NULL`). Twenty are
+`406: AUTH_KEY_DUPLICATED (caused by messages.GetHistory)`, every one of them stamped 2026-09-09T14:22Z; the
+twenty-first is `cannot resolve: No user has "solanagemschecked"` three minutes earlier. So the duplicate-session
+failure this file documents did not end when the laptop went dark. It killed the collector's session at that moment
+and nothing has been written since.
+
+Which is the shape this file already warns about and the reason the gap rows exist: a poller that is configured,
+running and ingesting nothing looks identical to a quiet week. The rows are the only reason it is knowable, and
+nobody had read them in two days.
+
+The X corpus is in the same state on the collector: **0 tweets** there, against 88,133 on the laptop. Whatever is
+holding that corpus, it is not the machine that publishes the archive.
