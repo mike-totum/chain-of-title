@@ -35,7 +35,57 @@ const trades5m = q("SELECT COUNT(*) c FROM trades WHERE ts >= ?", now - 300_000)
 const pools = q("SELECT COUNT(*) c FROM pool_map")?.c ?? 0;
 const priced1h = q("SELECT COUNT(*) c FROM tokens WHERE graduated=1 AND vault_sol IS NOT NULL AND updated_at >= ?", now - 3600_000)?.c ?? 0;
 
-type Check = { name: string; ok: boolean; detail: string };
+/**
+ * The capture pipelines, which had no check at all until 2026-09-11.
+ *
+ * Every check above is about launches, and launches are the one thing here that is NOT lost when a pipeline stops:
+ * the events stay on chain and an archival node rebuilds them. The material that is genuinely unrecoverable - the
+ * metadata document behind a URI the creator can repoint, the launch image, a promotional message before it is
+ * deleted - was collected by processes nothing watched.
+ *
+ * It cost exactly what that arrangement costs. The Telegram session died on 2026-09-09T14:22Z and wrote 21 gap rows
+ * saying so; nothing read them and it went two days unnoticed, because a poller that is configured and ingesting
+ * nothing looks precisely like a quiet week. These checks read the rows that already knew.
+ *
+ * A pipeline that is not configured is not a failure, and a pipeline that is configured and silent is. That is the
+ * distinction the whole section turns on.
+ */
+const has = (table: string): boolean => {
+  try { return !!q("SELECT 1 c FROM sqlite_master WHERE type='table' AND name=?", table); } catch { return false; }
+};
+const hasCol = (table: string, col: string): boolean => {
+  try {
+    return (db.prepare("SELECT name FROM pragma_table_info(?)").all(table) as any[]).some((r: any) => r.name === col);
+  } catch { return false; }
+};
+/** Optional query: returns undefined rather than throwing when the table is not in this database. */
+const opt = (table: string, sql: string, ...p: unknown[]): any => {
+  if (!has(table)) return undefined;
+  try { return q(sql, ...p); } catch { return undefined; }
+};
+
+const tgOn = process.env.TELEGRAM_ARCHIVE === "1";
+const tgLast = opt("tg_messages", "SELECT MAX(fetched_at) t, COUNT(*) c FROM tg_messages");
+const tgOpenGaps = opt("tg_gaps", "SELECT COUNT(*) c FROM tg_gaps WHERE to_at IS NULL")?.c;
+const tweetLast = opt("tweets", "SELECT MAX(fetched_at) t, COUNT(*) c FROM tweets");
+
+/**
+ * Capture rate over launches old enough to have been fetched, not over all history. A historical backlog is a known
+ * gap and not news; a fetcher that stopped today is. Denominator zero reports as unknown rather than as healthy.
+ */
+const capWindow = [now - 6 * 3600_000, now - 30 * 60_000];
+const metaCap = opt("tokens",
+  "SELECT COUNT(*) n, SUM(meta_json IS NOT NULL) got FROM tokens WHERE late_discovery=0 AND created_at BETWEEN ? AND ?",
+  capWindow[0], capWindow[1]);
+const imgCap = hasCol("tokens", "image_sha256") ? opt("tokens",
+  "SELECT COUNT(*) n, SUM(image_sha256 IS NOT NULL) got FROM tokens WHERE late_discovery=0 AND created_at BETWEEN ? AND ?",
+  capWindow[0], capWindow[1]) : undefined;
+
+const rate = (r: any): number | null => (r && r.n > 0 ? Number(r.got ?? 0) / Number(r.n) : null);
+const pctS = (x: number | null) => (x === null ? "n/a" : `${(100 * x).toFixed(0)}%`);
+
+/** `ok: null` means the check could not run. Never rendered as a pass: absence of data is not a finding. */
+type Check = { name: string; ok: boolean | null; detail: string };
 const checks: Check[] = [
   // Since the heartbeat is stamped with the last launch that actually arrived rather than with the wall clock
   // (`index.ts`), this now measures ingestion, not liveness - a collector that is up and deaf fails it. That is the
@@ -49,14 +99,54 @@ const checks: Check[] = [
   { name: "trades decoding", ok: trades5m > 0, detail: `${trades5m} trades stored in the last 5 min` },
   { name: "pool map growing", ok: pools > 0, detail: `${pools} pools known` },
   { name: "graduated tokens priced", ok: priced1h > 0, detail: `${priced1h} graduated tokens had vault balances read in the last hour` },
+
+  // --- the unrecoverable-capture pipelines ---
+  {
+    name: "telegram archiving",
+    ok: !tgOn ? null : (tgLast?.t ? (now - tgLast.t) < 6 * 3600_000 : false),
+    detail: !tgOn ? "TELEGRAM_ARCHIVE is not set here, so nothing is expected"
+      : !tgLast ? "configured, and this database has no tg_messages table at all"
+      : !tgLast.t ? `configured and has NEVER stored a message (${tgLast.c} rows) - a dead session looks exactly like a quiet week`
+      : `${tgLast.c} messages, last ${((now - tgLast.t) / 3600_000).toFixed(1)} h ago (expected < 6 h)`,
+  },
+  {
+    // The check that would have caught 2026-09-09 on the day. An open gap is the poller's own record that it failed.
+    name: "telegram gaps closed",
+    ok: tgOpenGaps === undefined ? null : tgOpenGaps === 0,
+    detail: tgOpenGaps === undefined ? "no tg_gaps table in this database"
+      : tgOpenGaps === 0 ? "no open gaps" : `${tgOpenGaps} OPEN gap rows - the poller recorded its own failure and nothing read it`,
+  },
+  {
+    name: "x archiving",
+    ok: !tweetLast ? null : (tweetLast.t ? (now - tweetLast.t) < 12 * 3600_000 : false),
+    detail: !tweetLast ? "no tweets table in this database"
+      : !tweetLast.t ? "tweets table exists and is empty"
+      : `${tweetLast.c} posts, last ${((now - tweetLast.t) / 3600_000).toFixed(1)} h ago (expected < 12 h)`,
+  },
+  {
+    // The metadata document is the only part of a launch record that no archival node can sell back.
+    name: "launch metadata captured",
+    ok: rate(metaCap) === null ? null : rate(metaCap)! >= 0.5,
+    detail: rate(metaCap) === null ? "no launches in the 30 min - 6 h window to judge by"
+      : `${pctS(rate(metaCap))} of ${metaCap.n} launches aged 30 min to 6 h have their metadata document (expected >= 50%)`,
+  },
+  {
+    name: "launch images captured",
+    ok: rate(imgCap) === null ? null : rate(imgCap)! >= 0.5,
+    detail: imgCap === undefined ? "this database has no image_sha256 column, so image evidence cannot be recorded here"
+      : rate(imgCap) === null ? "no launches in the 30 min - 6 h window to judge by"
+      : `${pctS(rate(imgCap))} of ${imgCap.n} launches aged 30 min to 6 h have an image hash (expected >= 50%)`,
+  },
 ];
-const healthy = checks.every((c) => c.ok);
+// A check that could not run is not a pass and not a failure. Only an explicit false is unhealthy.
+const healthy = checks.every((c) => c.ok !== false);
+const unknown = checks.filter((c) => c.ok === null).length;
 
 if (JSON_OUT) {
-  console.log(JSON.stringify({ healthy, checks, heartbeatAgeS, launches1h, trades5m, pools }, null, 2));
+  console.log(JSON.stringify({ healthy, unknown, checks, heartbeatAgeS, launches1h, trades5m, pools }, null, 2));
 } else {
-  console.log(`\ncollector: ${healthy ? "HEALTHY" : "UNHEALTHY"}\n`);
-  for (const c of checks) console.log(`  ${c.ok ? "ok  " : "FAIL"}  ${c.name.padEnd(24)} ${c.detail}`);
+  console.log(`\ncollector: ${healthy ? "HEALTHY" : "UNHEALTHY"}${unknown ? ` (${unknown} not checkable here)` : ""}\n`);
+  for (const c of checks) console.log(`  ${c.ok === null ? "----" : c.ok ? "ok  " : "FAIL"}  ${c.name.padEnd(24)} ${c.detail}`);
   if (!healthy) console.log(`\n  A failing check means coverage is being lost right now, and launch-time facts are not recoverable.`);
   console.log("");
 }
