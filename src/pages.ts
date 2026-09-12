@@ -117,8 +117,36 @@ export function buildFacts(db: any, covered: (launch: CoverableLaunch) => boolea
      * 2,513 to 2,470, and the share RISES from 42.8% to 46.9%. The error was not flattering the finding, it was
      * diluting it while separately accusing 43 launches that had buyers.
      */
+    /**
+     * A launch we can PROVE had an outside buyer stays in the denominator, even when its rows are gone.
+     *
+     * `curve_buyers IS NULL` alone excluded every launch whose trade rows did not survive, and that exclusion is
+     * not a random sample - it is biased in one direction, hard. A launch with many buyers has many trade rows, and
+     * many rows is exactly what finalize sampled and retention pruned, so the launches dropped from the population
+     * were disproportionately the launches WITH buyers. Measured on the record on 2026-09-12: 28.6% of launches
+     * with 20 or more creation-block buyers were excluded, against 6.4% of launches with none. Four times the rate.
+     *
+     * What is left after that exclusion skews toward quiet single-wallet buyouts, which are correctly zeros, so the
+     * published share rose from 43.4% to 77.3% with nothing whatsoever changing on chain. A share whose denominator
+     * is conditioned on our own housekeeping is a measurement of the housekeeping.
+     *
+     * `bundled_buyers > 0` fixes it because it is a FACT rather than an inference: a non-creator wallet bought on
+     * this curve in the creation block, counted live by a different code path, and no pruning can reach it. Such a
+     * launch is known to be non-zero - it can never enter the numerator, which is `curve_buyers = 0` - so leaving
+     * it out understated the denominator and nothing else. 366 of 625 excluded launches are in that state.
+     *
+     * `snap30_buyers` is deliberately NOT used here even though it would recover more. It counts post-graduation
+     * AMM buyers as well as curve buyers, and 302 launches carry a snap30 count as high as 806 beside `snap30_buys
+     * = 0` - arithmetically impossible for a curve, so that figure is pure AMM on those rows. An instrument that
+     * cannot tell a curve buyer from a market buyer cannot decide who bought the curve. bundled_buyers is
+     * curve-only, non-creator, and recorded at the block.
+     *
+     * What stays excluded is the 259 launches with no evidence either way. Those are genuinely unknown, and unknown
+     * is the one answer this column is allowed to give when it does not know.
+     */
     const LIVE = "graduated_confirmed_by IS NOT NULL AND COALESCE(late_discovery,0) = 0 AND rebuilt_at IS NULL"
-      + ` AND NOT (${cannotAttributeSql()}) AND curve_buyers IS NOT NULL`;
+      + ` AND NOT (${cannotAttributeSql()})
+      AND (curve_buyers IS NOT NULL OR COALESCE(bundled_buyers, 0) > 0)`;
     const watched = q(LIVE);
     return {
       launches: q("1=1"),
