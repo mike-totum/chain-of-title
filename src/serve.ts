@@ -195,13 +195,16 @@ type ChainNow = { mints: number; launches: number; documents: number; beyondPump
 const CHAIN_URL = process.env.CHAINMINTS_HEALTH_URL ?? "";
 let chain: ChainNow | null = null;
 let chainErr: string | null = null;
+const note = (m: string) => { if (chainErr !== m) console.log(`[chain] ${m}`); chainErr = m; };
 async function pollChain(): Promise<void> {
-  if (!CHAIN_URL) return;
+  if (!CHAIN_URL) { if (!chainErr) { chainErr = "CHAINMINTS_HEALTH_URL is not set"; console.log(`[chain] ${chainErr}`); } return; }
   try {
     const res = await fetch(CHAIN_URL, { signal: AbortSignal.timeout(8000) });
-    if (!res.ok) return;
+    // Every one of these was a bare `return`. Three silent exits on the one path whose whole job is to notice that
+    // a second source has stopped answering.
+    if (!res.ok) { note(`http ${res.status}`); return; }
     const j = await res.json() as any;
-    if (typeof j?.mints !== "number") return;
+    if (typeof j?.mints !== "number") { note(`no mints field: ${JSON.stringify(j).slice(0, 120)}`); return; }
     chainErr = null;
     chain = { mints: j.mints, launches: j.launches ?? 0, documents: j.documents ?? 0,
       beyondPumpfun: j.beyondPumpfun ?? 0, ranges: j.ranges ?? [], at: Date.now() };
@@ -209,8 +212,7 @@ async function pollChain(): Promise<void> {
     // Said once, not swallowed. A bare catch here is the fault this project has found five times today: a poller
     // that is configured and returning nothing looks exactly like a chain that is quiet. The previous reading is
     // still left to age out rather than being replaced with a zero.
-    if (!chainErr) console.log(`[chain] cannot reach ${CHAIN_URL}: ${(e as Error).message}`);
-    chainErr = (e as Error).message;
+    note(`cannot reach ${CHAIN_URL}: ${(e as Error).message}`);
   }
 }
 const chainNow = () => (chain && Date.now() - chain.at <= 5 * 60_000 ? chain : null);
@@ -1784,6 +1786,7 @@ const server = createServer(async (req, res) => {
           document: `/d/{mint}`,
           endpoints: [`/api/${API_VERSION}/token/{mint}`, `/api/${API_VERSION}/wallet/{address}`, `/api/${API_VERSION}/status`],
           rebuildsPerIpPerHour: PER_IP_PER_HOUR,
+          chainWide: chainNow() ?? { unavailable: chainErr ?? "no reading yet" },
           // What the certificate actually rests on, published rather than implied: how fresh a pool reading has to be,
           // and whether the job keeping them fresh is currently keeping up.
           readingMaxAgeSeconds: MAX_READING_AGE_MS / 1000,
