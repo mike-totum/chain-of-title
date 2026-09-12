@@ -56,6 +56,33 @@ export function openDb(path: string, opts: { migrate?: boolean } = {}): Database
     throw new Error(`${path} is a published record (it carries meta.built_at), and openDb() would migrate it - ` +
       `adding tables and columns, and changing its hash after publication. Open it with openDb(path, { migrate: false }).`);
   }
+  /**
+   * Refuse to migrate a scoped engagement workspace, for a sharper reason than the record's.
+   *
+   * A workspace is a client working file whose whole guarantee is that it contains nothing outside its scope (see
+   * engagement.ts). Migrating one would CREATE the tables that guarantee is built on refusing - `operator_policy`,
+   * `positions`, `smart_wallets` - inside a file that may be produced in discovery. They would arrive empty, so
+   * nothing leaks; what breaks is the file's account of itself, which is the only thing it has. A working file
+   * that carries a table named after the cluster labels we promised not to put in it invites exactly the question
+   * it exists to foreclose, and nobody could then tell an empty table from a purged one.
+   *
+   * Same class as the record guard above, and placed here for the same reason that one was: roughly forty tools
+   * in this repo open `config.dbPath`, every one honours a DB_PATH override, and the workspace is a SQLite file
+   * that looks like the collector's.
+   */
+  const looksLikeWorkspace = (() => {
+    try {
+      const t = db.prepare("SELECT COUNT(*) c FROM sqlite_master WHERE type='table' AND name='scope'").get() as any;
+      if (!t?.c) return false;
+      const m = db.prepare("SELECT COUNT(*) c FROM scope WHERE k='matter'").get() as any;
+      return !!m?.c;
+    } catch { return false; }
+  })();
+  if (looksLikeWorkspace) {
+    db.close();
+    throw new Error(`${path} is a scoped engagement workspace (it carries scope.matter), and openDb() would ` +
+      `migrate it - creating the very tables its scope refuses. Open it with openDb(path, { migrate: false }).`);
+  }
   db.exec(`
     PRAGMA journal_mode = WAL;
     PRAGMA busy_timeout = 10000;

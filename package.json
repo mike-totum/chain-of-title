@@ -67,7 +67,8 @@
     "backfillmeta": "tsx --no-warnings=ExperimentalWarning src/backfillmeta.ts",
     "imagesync": "tsx --no-warnings=ExperimentalWarning src/imagesync.ts",
     "decay": "tsx --no-warnings=ExperimentalWarning src/decay.ts",
-    "documents": "tsx --no-warnings=ExperimentalWarning src/documents.ts"
+    "documents": "tsx --no-warnings=ExperimentalWarning src/documents.ts",
+    "engagement": "tsx --no-warnings=ExperimentalWarning src/engagement.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

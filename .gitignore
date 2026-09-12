@@ -56,3 +56,14 @@ data/_README.md
 # Captured launch images are evidence that travels separately, never in the repository or the archive.
 data/images/
 data/images.err
+
+# Client working files. A scoped engagement workspace (SCOPE.md, src/engagement.ts) is a matter's evidence file:
+# it names a client's subject, its parties and their funders. It must never reach the public remote AND must never
+# reach production - `railway up` deploys the WORKING TREE, so an ignored file is the only kind that is safe to
+# have in this checkout at all.
+#
+# The rule above it is not enough and that was checked, not assumed: `data/*.db` does not cross a directory
+# separator, so `data/engagements/M-2026-001.db` was reported untracked by `git status` and would have been swept
+# up by the `git add -A` that has already taken the site down once.
+data/engagements/
+*.engagement.db
