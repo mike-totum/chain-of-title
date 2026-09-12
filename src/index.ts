@@ -22,6 +22,7 @@ import { startWatchdog, startHeartbeat, fmtAge } from "./watchdog.ts";
 import { TelegramWatcher } from "./signals/telegram.ts";
 import { createClient, loadChannels, telegramConfigured } from "./signals/telegram-client.ts";
 import type { KolSignal } from "./signals/twitter.ts";
+import { notDefinitiveSql } from "./ipfs.ts";
 
 const WSOL_MINT = "So11111111111111111111111111111111111111112";
 const log = (...a: unknown[]) => console.log(new Date().toISOString().slice(11, 19), ...a);
@@ -1043,6 +1044,28 @@ const META_SWEEP_CONCURRENCY = Number(process.env.META_SWEEP_CONCURRENCY ?? 12);
 /** How long a recorded failure stands before it is worth asking again. A refused gateway is not a dropped pin. */
 const META_RETRY_MS = Number(process.env.META_RETRY_HOURS ?? 6) * 3600_000;
 /**
+ * A host that answered 404 is not a host that refused us, and the sweep was treating them identically.
+ *
+ * MEASURED 2026-09-12 against the published record. 49,232 launches have a URI and no document. The oldest-end
+ * pick orders by `created_at ASC`, and 23,940 of those missing rows sort before 2026-09-08 - **20,075 of them
+ * `metadata.j7tracker.io`**, a host that deletes a launch's metadata about 48-72 hours after launch and then
+ * answers every request for it with a polite 404. Random sample, 25 per day: 0 of 75 survived at 3-5 days, 7 of
+ * 25 at 2 days, 50 of 50 at 0-1 days. Those documents are gone and no number of retries changes that.
+ *
+ * The cost was not the wasted requests in the abstract. It was that they sort FIRST, so every six hours the old
+ * end of the sweep re-asked for 20,075 documents that cannot come back before it could reach 2026-09-08, which is
+ * sitting at 23,614 missing documents of which a 300-row sample says ~91% are still being served. The one arm of
+ * this project with a real deadline was spending most of its budget on the part that had already expired.
+ *
+ * Definitive failures are retried on a seven-day clock rather than never: a pin can be restored and a host can
+ * change its mind, and "never ask again" is the kind of decision that quietly becomes permanent. Transient ones -
+ * timeouts, 429s, a gateway cooling down - keep the six-hour clock, because those are our problem and not the
+ * document's.
+ */
+const META_DEFINITIVE_RETRY_MS = Number(process.env.META_DEFINITIVE_RETRY_HOURS ?? 168) * 3600_000;
+/** Defined in `ipfs.ts`, beside the code that writes these error strings, so the two cannot drift apart. */
+const NOT_DEFINITIVE = notDefinitiveSql("meta_error");
+/**
  * The three-day window is gone, and it was doing real damage.
  *
  * It read as a sensible bound on a sweep running beside ingestion. What it actually did was make the loss permanent
@@ -1081,8 +1104,11 @@ async function sweepMissingMeta(): Promise<void> {
      */
     const pick = (order: "ASC" | "DESC", n: number) => db.prepare(`SELECT mint, uri FROM tokens
       WHERE meta_at IS NULL AND uri IS NOT NULL AND uri != ''
-        AND (meta_error IS NULL OR updated_at < ?)
-      ORDER BY created_at ${order} LIMIT ?`).all(Date.now() - META_RETRY_MS, n) as { mint: string; uri: string }[];
+        AND (meta_error IS NULL
+             OR (updated_at < ? AND ${NOT_DEFINITIVE})
+             OR updated_at < ?)
+      ORDER BY created_at ${order} LIMIT ?`)
+      .all(Date.now() - META_RETRY_MS, Date.now() - META_DEFINITIVE_RETRY_MS, n) as { mint: string; uri: string }[];
 
     const half = Math.max(1, Math.floor(META_SWEEP_BATCH / 2));
     const seen = new Set<string>();

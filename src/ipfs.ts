@@ -196,3 +196,30 @@ export function gatewayHealth(): { gateway: string; cooling: boolean }[] {
   const now = Date.now();
   return GATEWAYS.map((g) => ({ gateway: g, cooling: (cooldownUntil.get(g) ?? 0) > now }));
 }
+
+/**
+ * Which fetch failures are the DOCUMENT's and which are OURS - the distinction the retry policy turns on.
+ *
+ * This lives beside `fetchContent` because `fetchContent` is what writes these strings: it returns 404 and 410
+ * as-is rather than asking another gateway, on the reasoning that a CID one gateway cannot find is genuinely
+ * unpinned rather than unlucky. A classifier kept anywhere else would be a second copy of that judgement, free to
+ * drift the moment an error string changes - and the failure would be silent, because a misclassified error just
+ * means a document is retried on the wrong clock forever.
+ *
+ * DEFINITIVE means the host answered and told us the document is not there. Waiting does not help.
+ * TRANSIENT means we were refused, timed out, or ran out of gateways - our problem, and worth asking again soon.
+ *
+ * Measured 2026-09-12: 20,075 launches from `metadata.j7tracker.io` sat in the collector's sweep as permanent
+ * 404s, re-requested every six hours ahead of 23,614 recoverable documents, because both were "an error".
+ */
+export function isDefinitiveError(err: string | null | undefined): boolean {
+  if (!err) return false;
+  return /http 4(04|10)\b/.test(err) || err === "not a fetchable uri";
+}
+
+/**
+ * The same test as SQL, for the sweep's row picker. Takes the column name so a caller cannot accidentally point it
+ * at the wrong one, and is deliberately the NEGATIVE form the query needs, so no caller has to write the NOT.
+ */
+export const notDefinitiveSql = (col = "meta_error"): string =>
+  `${col} NOT LIKE '%http 404%' AND ${col} NOT LIKE '%http 410%' AND ${col} != 'not a fetchable uri'`;
