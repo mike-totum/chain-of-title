@@ -287,7 +287,10 @@ async function serveHealth(): Promise<void> {
       body = JSON.stringify({ mints: null, launches: null, unavailable: (e as Error).message, at: Date.now() });
     }
     res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" }).end(body);
-  }).listen(port, () => console.log(`[chainmints] health on :${port}`));
+    // Bound to :: explicitly. Railway's private network is IPv6-only, and a listener on the default interface
+    // accepts nothing from chainmints.railway.internal - the web service's poll simply timed out, which is how the
+    // site showed the collector's count alone with no indication a second source existed.
+  }).listen(port, "::", () => console.log(`[chainmints] health on [::]:${port}`));
 }
 
 (async () => {
