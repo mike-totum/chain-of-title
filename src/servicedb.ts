@@ -152,6 +152,7 @@ try { db.exec("ALTER TABLE rec.runs ADD COLUMN venue TEXT NOT NULL DEFAULT 'pump
 // database built before them, and the copy below names these columns, so without this every incremental build dies.
 try { db.exec("ALTER TABLE rec.tokens ADD COLUMN curve_account TEXT"); } catch {}
 try { db.exec("ALTER TABLE rec.tokens ADD COLUMN quote_mint TEXT"); } catch {}
+try { db.exec("ALTER TABLE rec.tokens ADD COLUMN curve_rows_dropped INTEGER"); } catch {}
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS rec.tokens (
@@ -171,6 +172,12 @@ db.exec(`
     -- Where this launch's curve lives when the mint does not determine it, and what the curve is priced in. NULL on
     -- both means the pump.fun case: a PDA anyone can recompute, quoted in SOL. See db.ts.
     curve_account TEXT, quote_mint TEXT,
+    -- How many curve trade rows this project deleted when the launch was finalized: 0 means the ledger below is
+    -- the complete set we watched, a positive number means that many were sampled away from the MIDDLE, and NULL
+    -- means the launch predates the column. Published because a reader citing the trade rows as evidence needs to
+    -- know whether they are a record or a sample, and until 2026-09-12 nothing here said which. It counts the
+    -- finalize sample only; retention prunes later and separately.
+    curve_rows_dropped INTEGER,
     -- The transaction the launch record was decoded from: the one carrying the creator's initial buy, and therefore
     -- the one dev_pct is computed from. This is what turns every row above from a figure a reader must take on
     -- trust into one they can decode for themselves against the chain.
@@ -555,7 +562,8 @@ try {
        unique_buyers, curve_buyers, snap30_buyers, bundled_buyers, graduated, graduated_at,
        pool, vault_sol, vault_at, last_price, rebuilt_at, rebuilt_complete, updated_at,
        venue, graduated_confirmed_by, create_sig, create_slot, uri, image, description, meta_at,
-       image_sha256, image_bytes, image_at, meta_sha256, meta_bytes, meta_lag_ms, curve_account, quote_mint)
+       image_sha256, image_bytes, image_at, meta_sha256, meta_bytes, meta_lag_ms, curve_account, quote_mint,
+       curve_rows_dropped)
     SELECT mint, name, symbol, creator, created_at, COALESCE(late_discovery,0), dev_pct,
            -- Every count of PEOPLE is NULL for a venue that cannot name one, not only the outside-buyer count.
            --
@@ -609,7 +617,10 @@ try {
            -- cut, and DATA.md publishes the distribution so they can see the choice barely matters.
            CASE WHEN meta_at IS NOT NULL AND created_at IS NOT NULL THEN meta_at - created_at END,
            -- Launch facts, carried as recorded. Both NULL for pump.fun and for every row predating them.
-           curve_account, quote_mint
+           curve_account, quote_mint,
+           -- What our own sampling removed from this launch's trade ledger. Carried as recorded, including the 0
+           -- that says nothing was removed - that zero is a statement of completeness and must not read as NULL.
+           curve_rows_dropped
     FROM main.tokens WHERE COALESCE(updated_at, 0) >= ${since}
       -- The quote asset is not a launch. Wrapped SOL was copied into the record as one and served as a token page.
       AND main.tokens.mint NOT IN ('So11111111111111111111111111111111111111112',
@@ -625,6 +636,12 @@ try {
       -- Launch facts: written once, never revised, and never blanked by a later writer that does not have them.
       curve_account=COALESCE(rec.tokens.curve_account, excluded.curve_account),
       quote_mint=COALESCE(rec.tokens.quote_mint, excluded.quote_mint),
+      -- Never decreases. A launch finalized twice (recoverOrphans after a restart) has lost the sum of both
+      -- passes, and a later build that cannot see the count must not replace a known loss with NULL - which is
+      -- the direction that would publish a sampled ledger as a complete one.
+      curve_rows_dropped=CASE WHEN excluded.curve_rows_dropped IS NULL THEN rec.tokens.curve_rows_dropped
+                              WHEN rec.tokens.curve_rows_dropped IS NULL THEN excluded.curve_rows_dropped
+                              ELSE MAX(excluded.curve_rows_dropped, rec.tokens.curve_rows_dropped) END,
       rebuilt_at=excluded.rebuilt_at, rebuilt_complete=excluded.rebuilt_complete, updated_at=excluded.updated_at`);
 
   // Buyouts only. Rebuilt in full each time: it is small and cheap, and a partial buyout table would understate a

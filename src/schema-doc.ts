@@ -11,7 +11,7 @@
  * stale page, and the cost of not failing is a schema that silently rots the first time someone adds a column.
  */
 import type { DatabaseSync } from "node:sqlite";
-import { esc } from "./render.ts";
+import { esc, columnAnchor } from "./render.ts";
 
 /**
  * What a reader actually needs to know about a column is not its type. It is whether they could reproduce it
@@ -75,6 +75,7 @@ const DOCS: Record<string, Record<string, Doc>> = {
     create_sig: { kind: "live", desc: "Signature of the transaction this launch was decoded from: the one carrying the creator's initial buy, and therefore the transaction dev_pct is computed from. Fetch it and you can check every launch figure in this row against the chain rather than trusting us. NULL means we did not record one: the launch predates the column (2026-09-09), or we found the token late and never saw its creation, or its trade rows were pruned before the backfill reached them. NULL is never a claim that no creation transaction exists." },
     create_slot: { kind: "live", desc: "The slot create_sig landed in. Present exactly when create_sig is." },
     graduated_confirmed_by: { kind: "ours", desc: "How graduation was confirmed: 'pool' (a PumpSwap pool was found), 'curve_complete' (the venue's own completion state: the bonding curve account's complete bit, or a pool status field the program emits with its trades, which is the same authority), or NULL for an inference from decoded trade volume that nobody ever confirmed. NULL means we say less, never that we say the opposite, but it is not neutral: where the curve account has since been read, the great majority of NULL rows returned complete=0. This column, not graduated, is the graduation flag." },
+    curve_rows_dropped: { kind: "ours", desc: "How many of this launch's bonding-curve trade rows THIS PROJECT deleted when the launch was finalized. Finalize keeps the first and last 100-400 curve rows and drops the middle, because trade rows are the bulk of the database and launch-time facts are the scarce material. Until 2026-09-12 that deletion left no trace, so a launch with 40 surviving rows looked identical to a launch that only ever had 40 - a difference that matters most to the reader who matters most, anyone citing the ledger as evidence. 0 means the complete watched ledger is present and is a statement of completeness, not an absence. A positive number means that many rows were sampled away, and which ones is knowable: the middle. NULL means the launch predates the column or was never finalized, never that nothing was dropped. It accounts for the finalize sample ONLY - retention prunes later and independently, so surviving rows can be fewer still; read this beside buys and say so. The trade that completes a curve is the last curve trade, and it was among the rows finalize deleted until 2026-09-12: see the curve-buyers-undercounted correction for what counting over the survivors published." },
     curve_buyers_live: { kind: "live", desc: "The same count as curve_buyers, taken by the collector as the trades arrived rather than recomputed afterwards from stored rows. Exists because the recomputation was being done over a table that finalize samples and retention prunes, which published a floor as a measurement. NULL means the launch predates the column (2026-09-12) or was found after it was already trading, never that nobody bought. Published in the record as curve_buyers; this column is in the collector's database and names the source." },
     curve_account: { kind: "chain", desc: "The account holding this launch's curve state, where the mint does not determine it. NULL is the pump.fun case and means the address is derivable: its bonding curve is a program-derived address computed from the mint, so anyone can recompute it and storing it would add nothing. A venue whose curve address is seeded with more than the mint - Raydium LaunchLab's pool takes the platform config and the quote mint as well - has it written down here, because it is otherwise unrecoverable and the curve could never be re-read. NULL is never 'we could not work it out'." },
     quote_mint: { kind: "chain", desc: "The asset this launch's curve is priced in. NULL means wrapped SOL, which is every pump.fun launch and every row written before this column existed. A Raydium LaunchLab pool names its quote asset per pool and most name something else, in which case no SOL figure is published for the launch at all: last_price is NULL and no trade rows are written, because a quantity of some other token in a column named for SOL is how a 40 SOL rule fires on 40 of something else. The launch, its creator and its share of supply are recorded either way." },
@@ -254,7 +255,9 @@ export function renderSchema(db: DatabaseSync): string {
     const rows = cols.map((c) => {
       const d = docs[c.name];
       if (!d) return "";
-      return `<tr><td class="mono id">${esc(c.name)}</td><td class="mut">${esc(c.type.toLowerCase())}</td>
+      // Addressable, so a record page can send a reader to the entry for the one column it could not fill in.
+      // `columnAnchor` is the single spelling of the id; nothing else builds one.
+      return `<tr id="${esc(columnAnchor(table, c.name))}"><td class="mono id">${esc(c.name)}</td><td class="mut">${esc(c.type.toLowerCase())}</td>
         <td><span class="kind k-${d.kind}">${d.kind}</span></td><td>${esc(d.desc)}</td></tr>`;
     }).join("");
 

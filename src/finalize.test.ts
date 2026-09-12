@@ -74,3 +74,41 @@ test("keepAll keeps everything, unchanged", () => {
   assert.equal(survivors(db).length, 10);
   db.close();
 });
+
+/**
+ * And that the launch says how much of its ledger we removed.
+ *
+ * Keeping both ends stops the worst loss but it is still a sample, and until 2026-09-12 the sampling left no trace:
+ * a launch with 40 surviving rows was indistinguishable from a launch that only ever had 40. That difference
+ * matters most to the reader who matters most - anyone citing the rows as evidence - so it is a published column
+ * rather than something to infer from a discrepancy between two tables.
+ */
+const dropped = (db: any) =>
+  (db.prepare("SELECT curve_rows_dropped d FROM tokens WHERE mint = ?").get(MINT) as any).d;
+
+test("a sampled ledger records how many rows were removed", () => {
+  const db = seed(Array.from({ length: 10 }, (_, i) => ({ ts: 1_000 + i * 1_000, sol: i })));
+  finalizeTokenTrades(db, state(), { keepAll: false, keepCurve: 3 });
+  assert.equal(dropped(db), 4, "ten rows, six kept (first three and last three), so four were removed");
+  db.close();
+});
+
+test("a complete ledger records 0, which is a claim and not an absence", () => {
+  // The distinction the column exists for. NULL means nobody measured; 0 means we measured and removed nothing.
+  // Collapsing them would make every complete ledger indistinguishable from every unexamined one.
+  const db = seed(Array.from({ length: 4 }, (_, i) => ({ ts: 1_000 + i * 1_000, sol: i })));
+  finalizeTokenTrades(db, state(), { keepAll: true });
+  assert.equal(dropped(db), 0);
+  db.close();
+});
+
+test("finalizing twice adds the losses rather than reporting only the last pass", () => {
+  // `recoverOrphans` finalizes again after a restart. Overwriting would describe a ledger as more complete than it
+  // is, which is the direction that matters: a sampled ledger published as whole.
+  const db = seed(Array.from({ length: 10 }, (_, i) => ({ ts: 1_000 + i * 1_000, sol: i })));
+  finalizeTokenTrades(db, state(), { keepAll: false, keepCurve: 3 });
+  assert.equal(dropped(db), 4);
+  finalizeTokenTrades(db, state(), { keepAll: false, keepCurve: 2 });
+  assert.equal(dropped(db), 6, "the second pass removed two more; the launch has lost six rows in total");
+  db.close();
+});

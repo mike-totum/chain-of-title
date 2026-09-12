@@ -152,12 +152,21 @@ export type Assessment = {
 };
 
 /**
- * Columns that exist on the record but not on the collector, selected only where they are present.
+ * Columns one of the two databases has and the other does not, selected only where they are present.
  *
  * `curve_checked_at` and `curve_complete` are written by the record build from the collector's `curve_checks`
  * table, so the collector's own `tokens` has neither. Putting them in TOKEN_COLUMNS would throw on every query the
  * collector answers - which is exactly how `meta_sha256` took the live lookup down for a day. Callers append
  * `optionalColumns(db)` instead, and code that reads them must treat undefined as "not checked".
+ *
+ * It now runs in both directions, and that is worth saying out loud because the name does not. `snap30_buys` and
+ * `dev_sold_at` are the opposite case: the collector has held them since the beginning and the published record has
+ * never carried them, because the record is deliberately small and neither is load-bearing for a verdict. They are
+ * here so the launch timeline can state them where they exist rather than not at all - the offline tree `npm run
+ * site` writes is built from the collector and has them - and so that adding them to the record later needs no
+ * change here. Undefined therefore means two different things depending on the file, and the timeline says neither:
+ * it omits the line. A column absent from the file is not an absence on the launch, and printing one as the other is
+ * the error this whole module exists to refuse.
  */
 /**
  * A graduation our own on-chain check disproved: the feed recorded the threshold, we read the curve account, and it
@@ -190,7 +199,42 @@ export const graduationDisproved = (t: any) => t.curve_checked_at != null && t.c
  * the failure, so there is now one spelling and every caller shares it.
  */
 
-export const OPTIONAL_TOKEN_COLUMNS = ["curve_checked_at", "curve_complete"];
+export const OPTIONAL_TOKEN_COLUMNS = ["curve_checked_at", "curve_complete", "snap30_buys", "dev_sold_at"];
+
+/**
+ * Why a column is empty on a particular launch. One clause each, quoted from that column's entry in `schema-doc.ts`.
+ *
+ * The record page has always been able to print "unknown" and has never been able to say which unknown. There are
+ * several and they are not interchangeable: a venue that publishes trades without the wallet that made them can
+ * never supply a buyer count, a launch whose curve rows retention took before anyone counted them could have
+ * supplied one and no longer can, and a launch nobody was watching supplies nothing at all. A reader who cannot
+ * tell those apart cannot tell our coverage from the launch's behaviour, which is the single distinction this whole
+ * archive turns on.
+ *
+ * Here rather than in the renderer because it is the same judgement `graduationDisproved` above is: what our own
+ * NULLs mean. Here rather than in `schema-doc.ts`, next to the descriptions it quotes, only because that module
+ * imports the renderer and the renderer would then import it back. **Edit a clause here and the column's entry in
+ * schema-doc.ts in the same change** - they are one text in two places, which is the arrangement this codebase has
+ * been bitten by more than once, so it is written down rather than assumed.
+ *
+ * None of these is a finding about a launch. Every one is a statement about our record, which is the only kind of
+ * statement an absence can support.
+ */
+export const NOT_RECORDED = {
+  /** `dev_sold`, `unique_buyers`, `curve_buyers`, `snap30_buyers`, `bundled_buyers` on a venue without wallets. */
+  unattributed: "this launch's venue publishes trade events that do not name the wallet that traded, so no count of "
+    + "people can be taken from them - which is not zero and not a clean result",
+  /** `curve_buyers` before the collector began counting live. See the curve-buyers-undercounted correction. */
+  curveRowsGone: "its trade rows had already been sampled at finalize or pruned by retention before anything counted "
+    + "them, so any count over the survivors would be a floor rather than a measurement",
+  /** `peak_price` and `peak_at`, which only ever hold what we actually saw. */
+  noPriceSeen: "we decoded no price for this launch at all - the column holds what we SAW, and a launch we stopped "
+    + "following has a peak that stops with us",
+  /** `snap30_buyers`: a snapshot taken thirty seconds in, and only for a launch still being followed. */
+  noSnapshot: "no thirty-second snapshot was taken, and that snapshot is meaningful only for an observed launch",
+  /** The last resort. Never dressed up as one of the causes above. */
+  unexplained: "we hold no value for it, and our record does not say which of the column's causes applies",
+} as const;
 
 /**
  * The name this database gives the trades column that says curve or amm.
@@ -222,6 +266,12 @@ export function optionalColumns(dbh: any): string {
 export const TOKEN_COLUMNS = `mint, symbol, name, creator, created_at, late_discovery, dev_pct, dev_sold, unique_buyers,
   snap30_buyers, bundled_buyers, graduated, graduated_at, pool, vault_sol, vault_at, last_price, updated_at,
   rebuilt_at, rebuilt_complete, curve_buyers, venue, graduated_confirmed_by, create_sig, create_slot,
+  -- The highest price we ever saw, and when. Read together or not at all: peak_at dates the reading exactly as
+  -- vault_at dates a balance, and peak_source says whether a transaction was decoded at that price or a
+  -- third-party feed merely reported one. All three are in both schemas, so they belong here rather than in
+  -- OPTIONAL_TOKEN_COLUMNS; they were selected by nothing until the launch timeline needed a moment to put in it,
+  -- which is this codebase's recurring shape - the column published, documented, and reachable only by machine.
+  peak_price, peak_at, peak_source,
   -- what the launch claimed to be, and our commitments to the documents behind it. Off-chain and mutable at the
   -- source, which is exactly why the record page shows them and why they are read from here rather than re-fetched.
   description, uri, image, meta_at, meta_sha256, meta_bytes, image_sha256, image_bytes`;
@@ -311,6 +361,64 @@ export function coverageFor(db: DatabaseSync): (launch: CoverableLaunch) => bool
     const ts = launch.created_at;
     return win.some((w) => ts >= w.a && ts <= w.b);
   };
+}
+
+/**
+ * The connection window this launch happened inside, and whether it held for as long as the launch record runs.
+ *
+ * `coverageFor` answers one question - were we watching at the creation - and that is all any page has ever asked.
+ * It is the smaller half of what `runs` can say. A launch record states moments hours apart: the creation, the
+ * thirty-second snapshot, a creator sale, the curve completing, the highest price. Coverage at the first of those is
+ * no coverage at all across the rest, and the whole worth of a gap record is that it turns "we recorded nothing
+ * here" into either "nothing happened while we watched" or "we were not there". Without this the reader cannot tell
+ * those apart, and they are opposite statements.
+ *
+ * So: the merged window containing the creation, the last moment this launch's own record carries, and whether the
+ * one covers the other. `spans` false is not a finding about the launch and is never presented as one - it means we
+ * must say less.
+ *
+ * `observedTo` is deliberately built from the feed's own observations only. `vault_at`, `curve_checked_at` and
+ * `meta_at` are all later readings taken by other machinery - an RPC poll, a document fetch - and a run window has
+ * nothing to do with whether those succeeded, so folding them in would test our coverage against the wrong clock.
+ */
+export interface ObservationSpan {
+  /** Start of the merged run window the creation falls inside. */
+  from: number;
+  /**
+   * Its end. Never `now`: the heartbeat writing `runs.stopped_at` stamps the last moment a launch actually arrived
+   * on that venue, so a collector that is alive and deaf records a gap rather than coverage. See index.ts.
+   */
+  to: number;
+  /** The last moment this launch's own record carries, or null when it carries nothing after its creation. */
+  observedTo: number | null;
+  /** True when the window covers `observedTo` as well as the creation: no recorded break across the launch. */
+  spans: boolean;
+}
+
+/**
+ * Null when no window we recorded covers the creation at all - which is the honest answer for a launch found late
+ * and for one reconstructed from chain history, and is not the same answer as "we were disconnected". The caller
+ * says unknown; it does not guess.
+ */
+export function observationSpan(
+  db: DatabaseSync,
+  t: CoverableLaunch & { graduated_at?: number | null; peak_at?: number | null; dev_sold_at?: number | null; snap30_buyers?: number | null },
+): ObservationSpan | null {
+  const v = t.venue || "pumpfun";
+  const win = coverageWindows(db, v);
+  const w = win.find((x) => t.created_at >= x.a && t.created_at <= x.b);
+  if (!w) return null;
+  /**
+   * The thirty-second snapshot counts as an observation and carries no timestamp of its own: the tracker takes it
+   * off a tick once the launch is thirty seconds old, so creation plus thirty seconds is where it happened. Left
+   * out, a launch whose only later fact is that snapshot would claim its observation ended at its creation.
+   */
+  const marks = [
+    t.snap30_buyers != null ? t.created_at + 30_000 : null,
+    t.graduated_at ?? null, t.peak_at ?? null, t.dev_sold_at ?? null,
+  ].filter((m): m is number => typeof m === "number" && m > t.created_at);
+  const observedTo = marks.length ? Math.max(...marks) : null;
+  return { from: w.a, to: w.b, observedTo, spans: observedTo === null || observedTo <= w.b };
 }
 
 // assess() runs once per token over every graduation in the window, so its statements are prepared once per database

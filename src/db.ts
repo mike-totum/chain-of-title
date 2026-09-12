@@ -104,7 +104,23 @@ export function openDb(path: string, opts: { migrate?: boolean } = {}): Database
       -- floor published as a measurement, and where the only survivor was the dev buy it read as ZERO OUTSIDE
       -- BUYERS - the strongest statement this archive makes against a launch. This column is what we actually
       -- observed, taken at the only moment it is free and exact. NULL means the launch predates it, never zero.
-      curve_buyers_live INTEGER
+      curve_buyers_live INTEGER,
+      -- How many curve trade rows THIS PROJECT deleted when the launch was finalized, so a reader can tell a
+      -- complete ledger from a sampled one instead of inferring it.
+      --
+      -- finalizeTokenTrades keeps the first and last 100-400 curve rows and drops the middle. That is a
+      -- deliberate trade - trades are the bulk of the database - but until now the deletion left no trace, so a
+      -- launch with 40 surviving rows was indistinguishable from a launch that only ever had 40. The difference
+      -- matters most to exactly the reader who matters most: anyone citing the ledger as evidence.
+      --
+      -- 0 means the complete watched curve ledger is present. A positive number means that many rows were sampled
+      -- away, and which ones is knowable: the middle. NULL means the launch predates this column or was never
+      -- finalized - never that nothing was dropped.
+      --
+      -- It accounts for the finalize sample ONLY. Retention prunes later and independently, so surviving rows can
+      -- still be fewer than buys minus this; a report has to read both and say so. See curve_buyers, which was
+      -- published as a measurement over exactly these survivors until 2026-09-12.
+      curve_rows_dropped INTEGER
     );
     CREATE INDEX IF NOT EXISTS tokens_created ON tokens(created_at);
     CREATE TABLE IF NOT EXISTS positions (
@@ -285,6 +301,7 @@ export function openDb(path: string, opts: { migrate?: boolean } = {}): Database
   try { db.exec("ALTER TABLE tokens ADD COLUMN curve_account TEXT"); } catch {}
   try { db.exec("ALTER TABLE tokens ADD COLUMN quote_mint TEXT"); } catch {}
   try { db.exec("ALTER TABLE tokens ADD COLUMN curve_buyers_live INTEGER"); } catch {}
+  try { db.exec("ALTER TABLE tokens ADD COLUMN curve_rows_dropped INTEGER"); } catch {}
 
   /**
    * trades.venue becomes trades.market.
@@ -679,8 +696,21 @@ export function finalizeTokenTrades(db: DatabaseSync, t: TokenState, opts: { kee
          UNION
          SELECT id FROM (SELECT id FROM trades WHERE mint = ? AND market = '${market}' ORDER BY ts DESC, id DESC LIMIT ?))`,
     ).run(t.mint, t.mint, keep, t.mint, keep);
-    keepEnds("curve", keepCurve);
+    const droppedCurve = Number(keepEnds("curve", keepCurve).changes ?? 0);
     keepEnds("amm", keepAmm);
+    /**
+     * Written down rather than left to be inferred, and accumulated rather than overwritten.
+     *
+     * `recoverOrphans` finalizes a token a second time after a restart, and each pass can drop more rows. Setting
+     * this would report only the last pass and describe a ledger that is more complete than it is; adding reports
+     * the launch's whole loss. COALESCE because the column is NULL for every launch that predates it.
+     */
+    db.prepare("UPDATE tokens SET curve_rows_dropped = COALESCE(curve_rows_dropped, 0) + ? WHERE mint = ?")
+      .run(droppedCurve, t.mint);
+  } else {
+    // Nothing was sampled away, and saying so is the point: 0 is a statement that this ledger is complete, which
+    // is a different and stronger thing than NULL. A launch kept whole should not read as a launch nobody measured.
+    db.prepare("UPDATE tokens SET curve_rows_dropped = COALESCE(curve_rows_dropped, 0) WHERE mint = ?").run(t.mint);
   }
 }
 

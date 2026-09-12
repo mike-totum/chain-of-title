@@ -6,13 +6,28 @@
  * appearance for no reason a reader could account for, on a site whose whole claim is that nothing is asserted without
  * a reason. The clean *criteria* are shared separately in `provenance.ts`; this module only decides how a record reads.
  */
-import type { Assessment } from "./provenance.ts";
+import type { Assessment, ObservationSpan } from "./provenance.ts";
 import { reportDate, type Report } from "./reports.ts";
-import { MIN_POOL_SOL, MAX_DEV_PCT } from "./provenance.ts";
-import { venuePhrase, venueLink } from "./venues.ts";
+import { MIN_POOL_SOL, MAX_DEV_PCT, NOT_RECORDED } from "./provenance.ts";
+import { venuePhrase, venueLink, venueById } from "./venues.ts";
 
 /** In property law, the unbroken documented history of ownership from origin. */
 export const BRAND = "Chain of Title";
+
+/**
+ * Where the published schema documents one column, so a record can cite the entry for a value it cannot state.
+ *
+ * A launch page naming `curve_buyers` as unrecorded has room for one clause about why. That column's entry on
+ * /data.html runs to a paragraph, because that is what the column deserves and what a reader chasing an absence
+ * actually wants; retyping a shortened copy of it onto the record page is how the two come to say different things
+ * about the same NULL. So the record page names the column, gives the one cause that applies to the launch in front
+ * of it, and links here for the rest.
+ *
+ * It lives in this module rather than in `schema-doc.ts` only because that file imports this one. The id is built
+ * in exactly one place either way, which is the point: an anchor spelled twice is a link that rots silently the
+ * first time either spelling changes, and a dead link on the page that says "check us" is worse than no link.
+ */
+export const columnAnchor = (table: string, column: string) => `c-${table}-${column}`;
 
 /**
  * Two interlocking links. Literal rather than clever, which is the right register for a registry, and it survives
@@ -33,6 +48,34 @@ export const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 34 
 export const esc = (s: unknown) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 export const fmt = (n: number, d = 0) => n.toLocaleString(undefined, { maximumFractionDigits: d });
 export const when = (ms: number) => new Date(ms).toISOString().slice(0, 16).replace("T", " ") + " UTC";
+/**
+ * The same moment with its seconds, for the launch timeline and nothing else.
+ *
+ * `when` drops them on purpose: a pool balance read at 14:07 is not a better fact for being read at 14:07:32, and a
+ * minute is the honest resolution for every reading on the site. A launch timeline is the one place the second
+ * carries information - four buyers in the creation block and a hundred and fifty by the thirty-second mark is a
+ * statement about seconds - so it gets its own formatter rather than a wider one that would quietly add a precision
+ * to every date on the site. The receipt-time caveat is printed beside the timeline, where it belongs.
+ */
+export const whenSec = (ms: number) => new Date(ms).toISOString().slice(0, 19).replace("T", " ") + " UTC";
+/**
+ * How long after the launch, to the second: "+0s", "+41s", "+11m 51s", "+2h 03m 14s", "+3d 04h".
+ *
+ * `dur` rounds to minutes and then to hours, which is right for a fill time in prose and wrong for an ordering: it
+ * renders a creation, a creation-block buy and a thirty-second snapshot as "0 min, 0 min, 1 min". Sorted rows whose
+ * offsets all read the same are not a timeline. Negative is possible and is printed as such rather than clamped -
+ * our timestamps are receipt times and two events decoded out of order is a thing that happens, and hiding it
+ * behind a "+0s" would assert an ordering the clock cannot support.
+ */
+export const offsetSec = (ms: number) => {
+  const sign = ms < 0 ? "-" : "+", s = Math.round(Math.abs(ms) / 1000);
+  const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  const p = (n: number) => String(n).padStart(2, "0");
+  if (d) return `${sign}${d}d ${p(h)}h`;
+  if (h) return `${sign}${h}h ${p(m)}m ${p(sec)}s`;
+  if (m) return `${sign}${m}m ${p(sec)}s`;
+  return `${sign}${sec}s`;
+};
 export const dur = (ms: number) => ms < 3600_000 ? `${Math.round(ms / 60_000)} min` : ms < 86400_000 ? `${(ms / 3600_000).toFixed(1)} h` : `${(ms / 86400_000).toFixed(1)} days`;
 export const ago = (ms: number) => ms < 90_000 ? "just now" : `${dur(ms)} ago`;
 /**
@@ -986,6 +1029,229 @@ export const ENTRY_WORD: Record<string, string> = {
   DANGER: "finding", CAUTION: "note", UNKNOWN: "not established", OK: "observation",
 };
 
+/**
+ * Why this launch has no creation transaction to cite, as the one cause that applies to it.
+ *
+ * `create_sig` is on 181,474 of 206,018 launches and it is the whole of the "check us" claim: every figure in the
+ * launch record, `dev_pct` above all, is decoded out of that one transaction. Where we do not hold it, the reader
+ * is owed the reason, and the reason differs by launch - schema-doc.ts names three. This row used to list two of
+ * them joined by "or", which reads as a shrug, and omitted the third entirely.
+ *
+ * The row proves which one applies in two of the three cases and the third is what is left over: a launch found
+ * after it was trading never had a creation for us to see, a reconstruction reads history rather than watching it,
+ * and everything else is a launch older than the column whose trade rows retention took before the backfill could
+ * reach them. Never a claim that no creation transaction exists - one obviously does, on chain, where anyone can
+ * find it; we simply did not write down which.
+ */
+function noCreateSig(t: any, origin: "observed" | "rebuilt"): string {
+  const stands = "The figures above stand on our own observation alone, which is weaker than a citation, and we"
+    + " would rather say so than leave the gap unmarked.";
+  if (t.late_discovery)
+    return `Not recorded. We found this token after it was already trading, so we never saw its creation and hold`
+      + ` no transaction of ours to cite. ${stands}`;
+  if (origin === "rebuilt")
+    return `Not recorded. This launch was reconstructed from the bonding curve's transaction history rather than`
+      + ` watched, and a reconstruction fills in the figures without ever writing down one creation transaction as`
+      + ` the source. The transactions it was read from are published in full in <span class="mono">hist_trades</span>.`;
+  return `Not recorded. This launch predates our keeping the creation transaction (2026-09-09), and its trade rows`
+    + ` had been pruned by retention before the backfill could recover the signature from them. ${stands}`;
+}
+
+/**
+ * What this record does not say about this launch, and which cause applies to each.
+ *
+ * The page could print "unknown" and could not say which unknown, which leaves the two halves of every absence
+ * indistinguishable: a count we could never have taken, and one we could have taken and lost. A register that does
+ * not separate those is publishing its own coverage as though it were the market's behaviour.
+ *
+ * Grouped by cause rather than listed column by column, because one cause usually accounts for all of them at once
+ * - a venue that does not name traders takes out five columns in a single sentence - and five repetitions of the
+ * same clause reads as five problems. Each column name links to its full entry in the published schema, which is
+ * the text of record; the clause here is quoted from it (see NOT_RECORDED in provenance.ts).
+ *
+ * A row rather than a panel. These are blanks in the entry above, so they belong at the foot of the entry and not
+ * in a box of their own, and where nothing on the list is blank there is no row at all - the alternative is a
+ * standing "nothing missing" line, which would be a completeness claim over the whole row and this only inspects
+ * the seven columns the page reasons from.
+ *
+ * `operator_wallets` and the funder tables are deliberately not here and are not coming. What we hold about a
+ * cluster is a claim about a pattern across many launches; printing it on one launch's page, automatically, at this
+ * scale, turns a register into an accusation engine. That decision is not a gap to be filled in later.
+ */
+function absences(t: any, a: Assessment): string {
+  const unattributed = venueById(t.venue || "pumpfun")?.tradeAttribution === "none";
+  const out: { col: string; cause: string }[] = [];
+  const miss = (col: string, cause: string) => out.push({ col, cause });
+  if (t.dev_pct == null) miss("dev_pct", NOT_RECORDED.unexplained);
+  /*
+   * `a.curveBuyers`, not `t.curve_buyers`. The stored column being NULL does not mean the page is showing nothing:
+   * `assess` falls back to counting the surviving curve-buy rows, and on a rebuilt launch to the whole-life buyer
+   * count. Listing the column as unrecorded while a figure for it sits four rows above is the page contradicting
+   * itself, which is worse than either statement alone.
+   */
+  if (a.curveBuyers === null) miss("curve_buyers", unattributed ? NOT_RECORDED.unattributed : NOT_RECORDED.curveRowsGone);
+  if (t.unique_buyers == null) miss("unique_buyers", unattributed ? NOT_RECORDED.unattributed : NOT_RECORDED.unexplained);
+  if (t.snap30_buyers == null) miss("snap30_buyers", unattributed ? NOT_RECORDED.unattributed : NOT_RECORDED.noSnapshot);
+  if (t.bundled_buyers == null) miss("bundled_buyers", unattributed ? NOT_RECORDED.unattributed : NOT_RECORDED.unexplained);
+  // The pair is read together or not at all, exactly as vault_sol and vault_at are, so half of it missing is the
+  // whole of it missing. peak_at without peak_price is a state the record build refuses to publish anyway.
+  if (t.peak_price == null || t.peak_at == null) miss("peak_price", NOT_RECORDED.noPriceSeen);
+  if (!out.length) return "";
+
+  const byCause = new Map<string, string[]>();
+  for (const m of out) byCause.set(m.cause, [...(byCause.get(m.cause) ?? []), m.col]);
+  const cite = (c: string) =>
+    `<a class="mono" href="../data.html#${esc(columnAnchor("tokens", c))}">${esc(c)}</a>`;
+  const clauses = [...byCause].map(([cause, cols]) =>
+    `${cols.map(cite).join(", ")} &mdash; ${esc(cause)}.`).join(" ");
+  return `<tr><td class="k">Not recorded</td><td>${clauses}
+    <div class="sub">Each is unknown rather than zero. An unknown never certifies a launch and never counts against
+    one; it is the record declining to state something. The column names link to their full entries in the
+    published schema, which is where the rest of the reason is written down.</div></td></tr>`;
+}
+
+/**
+ * The launch in order, to the second, out of the moments the row already holds.
+ *
+ * Every figure in the table above is a scalar with no time on it, and the record holds five timestamps it has never
+ * shown anybody: the creation, the thirty-second snapshot, a creator sale, the curve completing, the highest price
+ * we saw. Those are what distinguish a launch that filled over two days from one that filled in the block it was
+ * created in - which is the difference the archive exists to record - and they were reachable only by downloading
+ * the file.
+ *
+ * Composed from the row and nothing else: no query, no derivation, no arithmetic beyond the offset from creation.
+ * Rows for moments we do not hold are omitted rather than printed as zeroes or as dashes, which is the same rule
+ * the sentence in the table above follows and for the same reason - a fabricated zero on a timeline reads as an
+ * observed non-event.
+ *
+ * Sorted by the moment, not by importance, because a sorted list is the only thing that makes it a timeline rather
+ * than a second table of the same figures. Ties keep insertion order, which matters: the creation and the buys
+ * landing in its own block carry the same timestamp by construction.
+ */
+function orderOfEvents(t: any, origin: "observed" | "rebuilt", span?: ObservationSpan | null): string {
+  if (!t.created_at) return "";
+  const rows: { at: number | null; k: string; v: string }[] = [];
+  const at = (ms: number) => `<span class="mono">${whenSec(ms)}</span>${ms === t.created_at ? ""
+    : ` <span class="sub">${offsetSec(ms - t.created_at)}</span>`}`;
+
+  rows.push({ at: t.created_at, k: "Created", v: `${at(t.created_at)}${t.create_slot
+    ? `<div class="sub">Slot ${fmt(t.create_slot)}, which is the chain's own clock for this moment.</div>` : ""}` });
+
+  if (t.bundled_buyers != null)
+    rows.push({ at: t.created_at, k: "Creation block", v: t.bundled_buyers > 0
+      ? `<b>${fmt(t.bundled_buyers)}</b> wallet${t.bundled_buyers === 1 ? "" : "s"} bought in the block the token was
+         created in, before anyone outside could have seen it exist.`
+      : `No wallet bought in the block the token was created in.` });
+
+  if (t.snap30_buyers != null)
+    rows.push({ at: t.created_at + 30_000, k: "Thirty seconds in", v: `${t.snap30_buyers > 0
+      ? `<b>${fmt(t.snap30_buyers)}</b> distinct buyer${t.snap30_buyers === 1 ? "" : "s"}`
+      : `<b>No</b> buyer`}${
+      // Only where the file carries it: the published record does not, the collector does. See OPTIONAL_TOKEN_COLUMNS.
+      typeof t.snap30_buys === "number" ? `, across ${fmt(t.snap30_buys)} buy${t.snap30_buys === 1 ? "" : "s"}` : ""
+      }, within the first thirty seconds.<div class="sub">A snapshot taken off a tick at the thirty-second mark, so
+      it carries no moment of its own; it is placed here because that is where it happened.</div>` });
+
+  // Present on the collector and not in the published record, so this row appears on an offline build and not on the
+  // live site. The boolean is in the table above either way; what is optional here is the moment, never the fact.
+  if (typeof t.dev_sold_at === "number")
+    rows.push({ at: t.dev_sold_at, k: "Creator sold", v: at(t.dev_sold_at) });
+
+  /*
+   * `graduated_confirmed_by` travels with the moment it confirms, in that column's own words. The flag alone
+   * overstates graduations by about three quarters, so a completion time printed without saying who confirmed it
+   * would be the site's worst-documented number given a new and more authoritative-looking home.
+   */
+  const confirmed = t.graduated_confirmed_by === "pool"
+    ? `Confirmed: a PumpSwap pool was found for it.`
+    : t.graduated_confirmed_by === "curve_complete"
+      ? `Confirmed against the venue's own completion state.`
+      : `Not confirmed. An inference from decoded trade volume that nobody ever confirmed, and where the curve
+         account has since been read, the great majority of those returned incomplete.`;
+  if (t.graduated_at)
+    rows.push({ at: t.graduated_at, k: "Curve completed", v: `${at(t.graduated_at)}<div class="sub">${confirmed}</div>` });
+  else if (t.graduated)
+    rows.push({ at: null, k: "Curve completed", v: `Recorded as complete; we did not record when.
+      <div class="sub">${confirmed}</div>` });
+
+  if (t.peak_price != null && t.peak_at != null)
+    rows.push({ at: t.peak_at, k: "Highest price seen", v: `${at(t.peak_at)}
+      <div class="sub"><span class="mono">${esc(Number(t.peak_price).toExponential(3))}</span> SOL per token.
+      ${t.peak_source === "curve" || t.peak_source === "amm"
+        ? `Decoded from an on-chain transaction that executed at that price.`
+        : t.peak_source === "external"
+          ? `Reported by a third-party price feed with no trade witnessed, which is a materially weaker claim than a
+             decoded one.`
+          : t.peak_source === "recomputed"
+            ? `Recovered from the prices we still held when the launch was finalised, rather than witnessed as it
+               happened.`
+            : `Source not recorded, which is every row written before 2026-09-10 - never that the peak was
+               unsourced.`}
+      A peak only ratchets, so read it as a floor: it is what we saw, and a spike between observations is not
+      here.</div>` });
+
+  /*
+   * Two moments are not a timeline, and a launch that never graduated and never moved a price has exactly one. The
+   * section would then be its own creation date restated under a second heading.
+   */
+  if (rows.length < 2) return "";
+  rows.sort((x, y) => (x.at ?? Infinity) - (y.at ?? Infinity));
+
+  /**
+   * The clock, stated once and up front rather than hedged per row.
+   *
+   * These are receipt times - the moment our collector decoded the event, not the block's own timestamp - and to
+   * print seconds without saying so is to assert a precision the column does not carry. Events decoded in one batch
+   * share a timestamp, so ordering inside a batch is not established either. `create_slot` is the one figure here
+   * that is the chain's own clock, which is why it sits on the creation row.
+   */
+  const clock = `<p class="sub">Times are receipt times: the moment we decoded the event, not the block's own
+    timestamp. Events that arrived in one batch carry one timestamp, so ordering within a batch is not established,
+    and a second or two here is our latency rather than the chain's.</p>`;
+
+  return `<h2>Order of events</h2>
+    <table>${rows.map((r) => `<tr><td class="k">${r.k}</td><td>${r.v}</td></tr>`).join("")}</table>
+    ${clock}${coverageNote(t, origin, span)}`;
+}
+
+/**
+ * Whether the collector was connected for the whole of what is listed above it.
+ *
+ * This is the sentence that gives every absence on the page its meaning. "No buyer in the first thirty seconds" and
+ * "we were not listening for the first thirty seconds" are opposite statements and, until this line, the record
+ * printed the first when it could only support the second. `runs` has held the answer since the beginning and no
+ * page has ever read it for a single launch: it was used to decide whether a launch was judgeable at all, which is
+ * the coarsest question it can answer.
+ *
+ * The claim is made only where the window genuinely spans the launch's whole observation, and the other two cases
+ * say less rather than saying it more quietly. That asymmetry is deliberate: the failure mode here is a clean
+ * result about a token nobody saw, and it cannot be walked back.
+ *
+ * The window's end is never the present moment. index.ts stamps `runs.stopped_at` with the last launch that
+ * actually arrived on that venue, precisely so that a collector which is alive and deaf writes a truthful gap
+ * instead of a timer's reassurance - so a window here is proof of ingestion and not proof of uptime, and that is
+ * the whole reason it is worth printing.
+ */
+function coverageNote(t: any, origin: "observed" | "rebuilt", span?: ObservationSpan | null): string {
+  if (span === undefined) return "";
+  const label = venueById(t.venue || "pumpfun")?.label ?? "launch";
+  if (span === null)
+    return `<p class="callout">Coverage across this launch is not established: no observation window we recorded
+      covers ${whenSec(t.created_at)} on ${esc(label)}.${origin === "rebuilt"
+        ? ` This record was read back from chain history rather than watched, which is why.`
+        : ""} Nothing above rests on a claim that we were connected, and an absence above may be ours.</p>`;
+  const ran = `Our ${esc(label)} feed ran without a recorded break from <span class="mono">${whenSec(span.from)}</span>
+    to <span class="mono">${whenSec(span.to)}</span>`;
+  if (span.spans)
+    return `<p class="callout">Continuously connected across this launch. ${ran}, which contains every moment above.
+      The heartbeat behind that window is stamped with the last launch that actually arrived, so a collector that was
+      running and deaf records a gap rather than coverage &mdash; which is what makes an absence above an absence in
+      what happened rather than a hole in our watching.</p>`;
+  return `<p class="callout">Connected at the creation, and not demonstrably throughout. ${ran}, and the last moment
+    listed above falls after that. We cannot say we were connected for all of it, so anything not recorded after
+    <span class="mono">${whenSec(span.to)}</span> may be ours rather than the launch's.</p>`;
+}
+
 export function tokenBody(
   t: any, a: Assessment, r: Reading | null, origin: "observed" | "rebuilt", clean: boolean, now: number,
   priors?: Priors,
@@ -1070,7 +1336,7 @@ export function tokenBody(
     <tr><td class="k">Recorded from</td><td>${t.create_sig
       ? `${txLink(t.create_sig)}${t.create_slot ? ` <span class="sub">slot ${fmt(t.create_slot)}</span>` : ""}
          <div class="sub">The transaction this record was decoded from. Every figure above is in it. Fetch it and check us.</div>`
-      : `<span class="sub">Not recorded. This launch predates our keeping the creation transaction, or its trade rows were pruned before we backfilled it. The figures above stand on our contemporaneous observation alone, which is weaker, and we would rather say so.</span>`}</td></tr>`
+      : `<span class="sub">${noCreateSig(t, origin)}</span>`}</td></tr>${absences(t, a)}`
     : `<tr><td class="k">Launch</td><td>Not observed. ${t.late_discovery ? "Found only after it was already trading." : "The collector was down when it launched."}</td></tr>`;
 
   const selfBought = !!a.buyout && !!t.creator && a.buyout.wallet === t.creator;
@@ -1184,7 +1450,7 @@ export function tokenBody(
       var b=document.getElementById('cpb'),o=b.textContent;b.textContent='Copied';setTimeout(function(){b.textContent=o},1200)})}</script>
     ${provenance}
     ${a.flags.map((f) => `<div class="flag ${f.level}"><span class="tag ${f.level}">${ENTRY_WORD[f.level] ?? "entry"}</span>${esc(f.text)}</div>`).join("")}
-    <h2>At launch</h2><table>${rows}</table>${priorsBlock}${boBlock}${nowBlock}${claimed}
+    <h2>At launch</h2><table>${rows}</table>${orderOfEvents(t, origin)}${priorsBlock}${boBlock}${nowBlock}${claimed}
     <div class="sec"><h2>Check another</h2></div>${SEARCH}`;
 }
 
