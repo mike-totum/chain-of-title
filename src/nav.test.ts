@@ -9,7 +9,7 @@ import assert from "node:assert";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { navCurrent, NAV } from "./render.ts";
+import { navCurrent, NAV, reportBody } from "./render.ts";
 import { loadReports, reportDate } from "./reports.ts";
 
 test("the nav marks the section a reader is in, not only the exact page", () => {
@@ -62,4 +62,29 @@ test("a publication date reads as a date and never drifts a day", () => {
   assert.equal(reportDate("2026-09-11"), "11 September 2026");
   assert.equal(reportDate("2026-01-01"), "1 January 2026");
   assert.equal(reportDate("not a date"), "not a date");
+});
+
+test("a report that excludes nothing does not print the exclusion sentence", () => {
+  /**
+   * The generic provenance block says late-discovered and rebuilt rows "are excluded throughout". That is true of
+   * the buyer-behaviour reports and false of metadata-retention, whose query excludes no row for how it was found.
+   * Printing it anyway would assert an exclusion that did not happen, on the page whose whole claim is that a
+   * reader can check it - and nothing about the page would look wrong.
+   */
+  const r = loadReports("reports").find((x) => x.slug === "metadata-retention");
+  assert.ok(r, "the metadata-retention manifest must load; loadReports skips invalid ones silently");
+  const html = reportBody(r!);
+  assert.ok(!html.includes("are excluded throughout"),
+    "the generic exclusion sentence is printed over a report whose query makes no such exclusion");
+  assert.ok(html.includes("No rows are excluded for how they were discovered"));
+  assert.ok(html.includes("cannot be re-derived from any file"),
+    "a survival measurement must not print the generic 'run the query' promise, which is false for it");
+  /**
+   * 264 of 265 must not round to 100% on a page about what survives. Asserted on the ROW, not on the document:
+   * a first version searched the whole page for "100.0%" followed by "264", which matches across unrelated rows
+   * and failed on correct output - a test that reported a bug that was not there.
+   */
+  const row = html.split("<tr>").find((x) => x.includes("sdfgsdfsdf") && x.includes("265"));
+  assert.ok(row, "the survival table must carry the host that lost exactly one document");
+  assert.ok(row!.includes("99.6%"), `a loss was rounded away: ${row}`);
 });

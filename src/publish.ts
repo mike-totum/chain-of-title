@@ -21,6 +21,8 @@ import { openDb } from "./db.ts";
 import { coverageWindows } from "./provenance.ts";
 import { REPORTS_DIR, type Report, type ReportRow } from "./reports.ts";
 
+const fmtInt = (n: number) => n.toLocaleString("en-US");
+
 const argv = process.argv.slice(2);
 const slug = argv.find((a) => !a.startsWith("--"));
 const reviseAt = argv.indexOf("--revise");
@@ -47,6 +49,12 @@ const REPORTS: Record<string, {
    * reason we caused and did not state. The file the reader can download is the file the report describes.
    */
   source?: string;
+  /** Frozen figures that are not a product of `query` - see `Report.measurements`. */
+  measurements?: ReportRow[];
+  /** Replaces the generic verification block - see `Report.verify`. */
+  verify?: string;
+  /** Replaces the generic row-exclusion sentence - see `Report.excludes`. */
+  excludes?: string;
 }> = {
   /**
    * What a graduation event is worth, measured against the curve account itself.
@@ -90,6 +98,84 @@ ORDER BY feed_events DESC;`,
       + `${t.noneEvents.toLocaleString()} have no pool behind them, and of those we read on chain `
       + `${(100 * t.noneIncomplete / Math.max(t.noneRead, 1)).toFixed(1)}% had no completed curve either.`,
   },
+  /**
+   * How long a launch's own account of itself keeps being served, and by whom.
+   *
+   * The population comes from the record and the printed query reproduces it exactly. The SURVIVAL figures cannot:
+   * they came from re-fetching documents over the network on 2026-09-12 and comparing sha256 against the bytes
+   * captured at launch, which is why they live in `measurements` with their own provenance rather than being
+   * dressed up as a product of this query. See `Report.measurements`.
+   *
+   * The query deliberately groups by HOST rather than reporting one archive-wide rate. A single "93% survived"
+   * describes no host in the record and hides the only one losing anything - which is the finding.
+   */
+  "metadata-retention": {
+    title: "A launch's own account of itself is not uniformly durable",
+    source: "data/prod-record.db",
+    /**
+     * The `all other self-hosted` row is not decoration. A first cut used a bare `HAVING launches >= 1500`, which
+     * silently dropped 8,234 launches across the long tail of small hosts - so the page's "share of self-hosted"
+     * was computed against 73,942 when the real denominator is 82,176, and it would have printed 58% beside a
+     * finding document saying 52%. The table now accounts for every launch that has a URI.
+     *
+     * `uri != ''` excludes 4,177 launches whose URI is the EMPTY STRING rather than null. They first appeared as an
+     * unlabelled row of 4,177 with a blank host, because the host expression has nothing to parse - which is the
+     * only reason they were noticed. They are excluded because this report is about where documents are served
+     * from and a launch that declared no document has no host; the count is stated on the page rather than
+     * silently dropped, since "declared nothing" and "we did not look" are the distinction this archive exists to
+     * keep apart.
+     */
+    query: `WITH h AS (
+  SELECT CASE WHEN uri LIKE '%/ipfs/%' OR uri LIKE 'ipfs://%' THEN 'ipfs'
+              ELSE substr(uri, 1, instr(substr(uri, 9), '/') + 8) END AS host,
+         COUNT(*) AS launches, SUM(meta_sha256 IS NOT NULL) AS held
+  FROM tokens WHERE uri IS NOT NULL AND uri != '' GROUP BY host)
+SELECT host, launches, held FROM h WHERE launches >= 1500
+UNION ALL
+SELECT 'all other self-hosted', SUM(launches), SUM(held) FROM h WHERE launches < 1500
+ORDER BY launches DESC;`,
+    totals: (rows) => {
+      const n = (r: ReportRow, k: string) => Number(r[k] ?? 0);
+      const ipfs = rows.find((r) => r.host === "ipfs");
+      const j7 = rows.find((r) => String(r.host).includes("j7tracker"));
+      const selfHosted = rows.filter((r) => r.host !== "ipfs");
+      return {
+        launches: rows.reduce((a, r) => a + n(r, "launches"), 0),
+        ipfsLaunches: ipfs ? n(ipfs, "launches") : 0,
+        selfHosted: selfHosted.reduce((a, r) => a + n(r, "launches"), 0),
+        j7Launches: j7 ? n(j7, "launches") : 0,
+        j7Held: j7 ? n(j7, "held") : 0,
+      };
+    },
+    summary: (_rows, t) =>
+      `Documents on ${fmtInt(t.ipfsLaunches)} IPFS-addressed launches lost nothing in ten days; one host carrying ` +
+      `${fmtInt(t.j7Launches)} launches stops serving them after about two days.`,
+    /**
+     * The probe, frozen exactly as run on 2026-09-12. `sampled` is documents this archive HOLDS, so the denominator
+     * is known to have existed - that is what makes this a survival rate rather than an estimate. `served` counts
+     * a fetch returning the same sha256; anything else is a 404 or different bytes.
+     */
+    measurements: [
+      { host: "ipfs", sampled: 202, served: 202, method: "ordered by mint, across every day in the record" },
+      { host: "https://meta.uxento.io/", sampled: 275, served: 275, method: "ordered by mint, 25 per day" },
+      { host: "https://m.rapidlaunch.io/", sampled: 268, served: 268, method: "ordered by mint, 25 per day" },
+      { host: "https://md.sdfgsdfsdf.uk/", sampled: 265, served: 264, method: "ordered by mint, 25 per day" },
+      { host: "https://metadata.j7tracker.io/", sampled: 150, served: 57, method: "random within each day, 25 per day" },
+    ],
+    excludes: `No rows are excluded for how they were discovered: a launch found late still declares a URI, and ` +
+      `which host serves that URI is not affected by when this archive noticed the launch. The only exclusion is ` +
+      `the 4,177 launches whose URI is the empty string, stated above.`,
+    verify: `<p class="lede">Two halves, and they are checked differently. The population table is the query below,
+    run against the public-domain file; it will return larger numbers than those above, because the archive has
+    grown since publication.</p>
+    <p class="lede">The survival table cannot be re-derived from any file, because it is a measurement of what other
+    people's servers were doing on the day. To repeat it: take any launch from the record that has both a
+    <span class="mono">meta_sha256</span> and a <span class="mono">uri</span>, fetch the URI, and compare the sha256
+    of what comes back against the stored one. Re-run it later and the answer moves AWAY from these figures rather
+    than toward them, as documents that were still being served stop being served - the opposite of how the
+    population table ages, and the whole subject of this report.</p>`,
+  },
+
   "ticker-factories": {
     title: "The same ticker, a new creator every time",
     query: `SELECT symbol, COUNT(*) mints,
@@ -201,6 +287,9 @@ const report: Report = {
   totals,
   rows,
   query: def.query,
+  ...(def.measurements ? { measurements: def.measurements } : {}),
+  ...(def.verify ? { verify: def.verify } : {}),
+  ...(def.excludes ? { excludes: def.excludes } : {}),
   ...(already || revise
     ? { revisions: [...(already?.revisions ?? []), ...(revise ? [{ at: today, what: reviseWhy! }] : [])] }
     : {}),

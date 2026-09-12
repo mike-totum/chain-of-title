@@ -52,7 +52,12 @@ Requests for the older documents return HTTP 404. The host is reachable and answ
 answers 404 for launches older than roughly two to three days and serves the document for launches newer than
 that.
 
-This host accounts for **42,902 launches — 52% of every self-hosted metadata URI in the record.**
+This host accounts for **42,902 launches — 55% of every self-hosted metadata URI in the record.**
+
+(The denominator is 77,999 self-hosted launches. A first draft of this document said 52% against 82,176, which
+wrongly counted 4,177 launches whose URI is the empty string — they declare no document and so have no host. The
+figure was corrected before publication; it is recorded here rather than quietly amended because the arithmetic is
+checkable and a reader should be able to see which number was wrong.)
 
 ## What this archive holds, and what is already unavailable
 
@@ -120,7 +125,7 @@ cannot: it lives behind a URI the launch's creator controls, and nothing on chai
 holding a copy is worth anything therefore depends entirely on how long the original keeps being served — and that
 had not been measured.
 
-The answer is that for the 211,977 IPFS-addressed launches (72%) it currently makes little difference, and for one host covering 42,902
+The answer is that for the 211,977 IPFS-addressed launches (73% of those declaring a document) it currently makes little difference, and for one host covering 42,902
 launches the document is unavailable at source within about two days of launch.
 
 ---

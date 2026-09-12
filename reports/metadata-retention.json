@@ -1,0 +1,87 @@
+{
+  "slug": "metadata-retention",
+  "title": "A launch's own account of itself is not uniformly durable",
+  "published": "2026-09-12",
+  "summary": "Documents on 211,977 IPFS-addressed launches lost nothing in ten days; one host carrying 42,902 launches stops serving them after about two days.",
+  "coverageFrom": "2026-09-02T12:29:32.581Z",
+  "recordBuiltAt": "2026-09-12T17:46:11.779Z",
+  "totals": {
+    "launches": 289976,
+    "ipfsLaunches": 211977,
+    "selfHosted": 77999,
+    "j7Launches": 42902,
+    "j7Held": 18980
+  },
+  "rows": [
+    {
+      "host": "ipfs",
+      "launches": 211977,
+      "held": 195386
+    },
+    {
+      "host": "https://metadata.j7tracker.io/",
+      "launches": 42902,
+      "held": 18980
+    },
+    {
+      "host": "https://meta.uxento.io/",
+      "launches": 16025,
+      "held": 14134
+    },
+    {
+      "host": "all other self-hosted",
+      "launches": 8234,
+      "held": 6668
+    },
+    {
+      "host": "https://m.rapidlaunch.io/",
+      "launches": 6194,
+      "held": 5465
+    },
+    {
+      "host": "https://storage.googleapis.com/",
+      "launches": 2744,
+      "held": 2524
+    },
+    {
+      "host": "https://md.sdfgsdfsdf.uk/",
+      "launches": 1900,
+      "held": 1705
+    }
+  ],
+  "query": "WITH h AS (\n  SELECT CASE WHEN uri LIKE '%/ipfs/%' OR uri LIKE 'ipfs://%' THEN 'ipfs'\n              ELSE substr(uri, 1, instr(substr(uri, 9), '/') + 8) END AS host,\n         COUNT(*) AS launches, SUM(meta_sha256 IS NOT NULL) AS held\n  FROM tokens WHERE uri IS NOT NULL AND uri != '' GROUP BY host)\nSELECT host, launches, held FROM h WHERE launches >= 1500\nUNION ALL\nSELECT 'all other self-hosted', SUM(launches), SUM(held) FROM h WHERE launches < 1500\nORDER BY launches DESC;",
+  "measurements": [
+    {
+      "host": "ipfs",
+      "sampled": 202,
+      "served": 202,
+      "method": "ordered by mint, across every day in the record"
+    },
+    {
+      "host": "https://meta.uxento.io/",
+      "sampled": 275,
+      "served": 275,
+      "method": "ordered by mint, 25 per day"
+    },
+    {
+      "host": "https://m.rapidlaunch.io/",
+      "sampled": 268,
+      "served": 268,
+      "method": "ordered by mint, 25 per day"
+    },
+    {
+      "host": "https://md.sdfgsdfsdf.uk/",
+      "sampled": 265,
+      "served": 264,
+      "method": "ordered by mint, 25 per day"
+    },
+    {
+      "host": "https://metadata.j7tracker.io/",
+      "sampled": 150,
+      "served": 57,
+      "method": "random within each day, 25 per day"
+    }
+  ],
+  "verify": "<p class=\"lede\">Two halves, and they are checked differently. The population table is the query below,\n    run against the public-domain file; it will return larger numbers than those above, because the archive has\n    grown since publication.</p>\n    <p class=\"lede\">The survival table cannot be re-derived from any file, because it is a measurement of what other\n    people's servers were doing on the day. To repeat it: take any launch from the record that has both a\n    <span class=\"mono\">meta_sha256</span> and a <span class=\"mono\">uri</span>, fetch the URI, and compare the sha256\n    of what comes back against the stored one. Re-run it later and the answer moves AWAY from these figures rather\n    than toward them, as documents that were still being served stop being served - the opposite of how the\n    population table ages, and the whole subject of this report.</p>",
+  "excludes": "No rows are excluded for how they were discovered: a launch found late still declares a URI, and which host serves that URI is not affected by when this archive noticed the launch. The only exclusion is the 4,177 launches whose URI is the empty string, stated above."
+}

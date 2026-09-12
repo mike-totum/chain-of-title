@@ -52,6 +52,32 @@ export interface Report {
   /** The query printed beside the table, so a reader can run it themselves and compare against today. */
   query: string;
   /**
+   * A second frozen table whose figures did NOT come from `query`, with its own provenance in the prose.
+   *
+   * Added for the metadata-retention report, whose central measurement is a network probe: it re-fetched documents
+   * from their hosts and compared bytes. That is not expressible as SQL over the record, and putting it in `rows`
+   * would have filed a measurement of the outside world under a query that cannot produce it - the reader would
+   * run the printed query, get different columns, and have no way to tell which of us was wrong.
+   *
+   * A report using this must say, in its own prose, where these numbers came from and how to repeat them.
+   */
+  measurements?: ReportRow[];
+  /**
+   * Replaces the standard "check it yourself" block for a report whose verification is not one query.
+   *
+   * The generic block promises that re-running the query gives a LARGER answer because the archive has grown. For
+   * a survival measurement that promise is false in a way that matters: re-run it later and documents that were
+   * being served will have stopped being served, so the answer moves the other way and for a different reason. A
+   * report that prints a false instruction for checking it is worse than one that prints none.
+   */
+  verify?: string;
+  /**
+   * Replaces the standard sentence about which rows a report's query excludes. See the note in `reportBody`: the
+   * default describes the late-discovery exclusion the buyer-behaviour reports make, and a report that does not
+   * make it must not print it.
+   */
+  excludes?: string;
+  /**
    * Set only when a published report has been revised, and says what changed and when. A report that is corrected
    * silently is not a correction, it is a second version wearing the first one's date - see corrections.html.
    */

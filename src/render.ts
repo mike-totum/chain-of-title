@@ -2345,15 +2345,27 @@ export function reportBody(r: Report): string {
     ? `<p class="callout"><b>Revised.</b> ${r.revisions.map((v) => `${esc(v.at)}: ${esc(v.what)}`).join(" · ")}
        The publication date above is unchanged, because a revision is this report corrected rather than a new one.</p>`
     : "";
+  /**
+   * The exclusion sentence is a claim about a report's OWN query and must not be printed over one that does not
+   * make it. Both buyer-behaviour reports drop late-discovered and rebuilt rows, because a launch found late shows
+   * no outside buyers for a reason that is about us rather than about the launch. A report on which hosts still
+   * serve a document has no such bias to correct, and printing the sentence anyway would assert an exclusion that
+   * did not happen - on the page whose whole claim is that you can check it.
+   */
   const provenance = `<p class="lede">Coverage began <b>${r.coverageFrom ? when(Date.parse(r.coverageFrom)) : "unknown"}</b>
     and the figures were taken from the record built <b>${r.recordBuiltAt ? when(Date.parse(r.recordBuiltAt)) : "unknown"}</b>.
-    Launches before then were not watched. Rows a detector restored after the fact, and rows rebuilt from chain
+    Launches before then were not watched. ${r.excludes ?? `Rows a detector restored after the fact, and rows rebuilt from chain
     history, are excluded throughout: a launch found late shows no outside buyers because nobody was watching
-    it, which would flatter every figure here.</p>`;
+    it, which would flatter every figure here.`}</p>`;
+  /**
+   * The query table is always printed; only the prose above it varies. A report whose figures are not all a
+   * product of that query supplies its own explanation via `verify` - see the note on `Report.verify` for why
+   * printing the generic promise there would be worse than printing nothing.
+   */
   const check = `<div class="sec"><h2>Check it yourself</h2></div>
-    <p class="lede">One query against the public-domain file. Run it today and you will get a larger answer than the
+    ${r.verify ?? `<p class="lede">One query against the public-domain file. Run it today and you will get a larger answer than the
     table above, because the archive has grown since publication, and that is the difference between a report and
-    a live view, and it is why both exist. Disagreeing with either is the point of publishing them.</p>
+    a live view, and it is why both exist. Disagreeing with either is the point of publishing them.</p>`}
     <table><tr><td class="mono" style="white-space:pre-wrap">${esc(r.query)}</td>
       <td>the table above, verbatim, as it stood on ${esc(r.published)}. Bulk file:
       <a href="../data.html">record.db</a>; permanent copy at <span class="mono">doi:10.57967/hf/10338</span></td></tr>
@@ -2415,6 +2427,101 @@ export function reportBody(r: Report): string {
   <p class="lede">A curve can complete long after launch, so a single incomplete reading does not settle a launch
   forever; the readings are retaken on a cooldown and the published columns are rewritten from the collector on every
   build. The counts here are what those columns held on ${esc(r.published)}.</p>
+  ${provenance}
+  ${check}`;
+  }
+
+  /**
+   * Two tables with different provenance, and the page has to keep them apart.
+   *
+   * The population is the record's own; the survival figures are what other people's servers returned on one day.
+   * They are printed in separate sections, each labelled with where it came from, because a reader who mistakes
+   * the second for a property of the file will draw a conclusion the file cannot support.
+   *
+   * The prose states the observation - a URL returned 404 on a date - and never why. No claim is made that anything
+   * was deleted rather than merely not served, and no purpose is attributed to anyone. See the register stance.
+   */
+  if (r.slug === "metadata-retention") {
+    const t = r.totals;
+    const m = r.measurements ?? [];
+    const j7 = r.rows.find((x) => String(x.host).includes("j7tracker")) ?? {};
+    /**
+     * One decimal, and never round a loss up to 100%. `md.sdfgsdfsdf.uk` lost 1 of 265 and printed "100%", which
+     * on a page whose subject is what survives is the one rounding error that changes the reader's conclusion.
+     */
+    const pctOf = (a: number, b: number) => {
+      if (b <= 0) return "n/a";
+      const v = 100 * a / b;
+      return `${a < b && v > 99.9 ? "99.9" : v.toFixed(1)}%`;
+    };
+    const shortHost = (h: string) => h === "ipfs" ? "IPFS" : h.replace(/^https?:\/\//, "").replace(/\/$/, "");
+    return `
+  ${head}
+  <p class="lede">A launch's on-chain record carries a <span class="mono">uri</span> pointing at an off-chain
+  document: the name, symbol, description, socials and image the launch declared for itself. The chain keeps the
+  pointer. It does not keep what the pointer returns.</p>
+  <p class="lede">Across ${fmt(t.launches ?? 0)} launches this archive holds a URI for, the document was re-fetched
+  on ${esc(r.published)} and compared byte for byte against what was captured at launch. <b>Documents do not decay
+  at a uniform rate, and age is not what separates them - the host is.</b> Content-addressed documents lost nothing.
+  Three of the four largest self-hosting domains lost nothing. One did not.</p>
+
+  <p class="lede">A further <b>4,177</b> launches in this record declare an empty URI rather than a missing one.
+  They are excluded from the table below, because a launch that declared no document has no host to serve it - not
+  because nothing is known about them.</p>
+
+  <div class="sec"><h2>Where the documents live</h2><span class="cnt">from the record, as published ${esc(r.published)}</span></div>
+  <table class="data">
+    <tr><th>Host</th><th class="num">Launches</th><th class="num">Document held here</th></tr>
+    ${r.rows.map((x) => `<tr>
+      <td class="mono">${esc(shortHost(String(x.host)))}</td>
+      <td class="num">${fmt(Number(x.launches ?? 0))}</td>
+      <td class="num">${fmt(Number(x.held ?? 0))}</td></tr>`).join("")}
+  </table>
+
+  <div class="sec"><h2>Whether the host still serves it</h2><span class="cnt">measured over the network, ${esc(r.published)}</span></div>
+  <p class="lede">Every document sampled below is one this archive <b>holds the bytes of</b>, so each is known to
+  have existed. That is what makes this a survival rate rather than an estimate. A document counts as served only
+  if the fetch returned the same sha256.</p>
+  <table class="data">
+    <tr><th>Host</th><th class="num">Sampled</th><th class="num">Still served</th><th class="num">Share</th><th>Sampling</th></tr>
+    ${m.map((x) => `<tr>
+      <td class="mono">${esc(shortHost(String(x.host)))}</td>
+      <td class="num">${fmt(Number(x.sampled ?? 0))}</td>
+      <td class="num${Number(x.served ?? 0) < Number(x.sampled ?? 0) ? " thin" : ""}">${fmt(Number(x.served ?? 0))}</td>
+      <td class="num">${pctOf(Number(x.served ?? 0), Number(x.sampled ?? 0))}</td>
+      <td class="mut">${esc(String(x.method ?? ""))}</td></tr>`).join("")}
+  </table>
+
+  <div class="sec"><h2>One host, by the age of the launch</h2></div>
+  <p class="lede">Sampling 25 launches at random within each day, all of them documents this archive holds,
+  <span class="mono">metadata.j7tracker.io</span> returned the document for every launch under two days old and
+  HTTP 404 for every launch over three days old.</p>
+  <table class="data">
+    <tr><th>Launch date</th><th class="num">Age when measured</th><th class="num">Still served</th></tr>
+    <tr><td>2026-09-07</td><td class="num">5 days</td><td class="num thin">0 of 25</td></tr>
+    <tr><td>2026-09-08</td><td class="num">4 days</td><td class="num thin">0 of 25</td></tr>
+    <tr><td>2026-09-09</td><td class="num">3 days</td><td class="num thin">0 of 25</td></tr>
+    <tr><td>2026-09-10</td><td class="num">2 days</td><td class="num">7 of 25</td></tr>
+    <tr><td>2026-09-11</td><td class="num">1 day</td><td class="num">25 of 25</td></tr>
+    <tr><td>2026-09-12</td><td class="num">same day</td><td class="num">25 of 25</td></tr>
+  </table>
+  <p class="lede">That host carries <b>${fmt(Number(j7.launches ?? 0))}</b> launches in this record -
+  ${pctOf(Number(j7.launches ?? 0), t.selfHosted ?? 0)} of every self-hosted metadata URI in it. This archive holds
+  <b>${fmt(Number(j7.held ?? 0))}</b> of their documents.</p>
+
+  <div class="sec"><h2>What this does not say</h2></div>
+  <p class="lede"><b>It says nothing about why.</b> The observation is an HTTP status code against a URL over time.
+  This register records what a request returned and when. It does not infer a purpose or a policy, and none should
+  be read into the tables above.</p>
+  <p class="lede"><b>It is not established that anything was deleted.</b> What is established is that the host
+  returns 404. A document that is not served and a document that does not exist are different facts, and only the
+  first was observed.</p>
+  <p class="lede"><b>A 404 served only to us would look identical.</b> Against that: the same host, from the same
+  machine and in the same minutes, served every request for launches under two days old. That is evidence and not
+  proof.</p>
+  <p class="lede"><b>Every figure here has a ten-day ceiling.</b> The archive begins on 2026-09-02, so the
+  hosts that lost nothing lost nothing <i>in ten days</i> - which is not the same as durable, and this report should
+  not be cited as saying it is.</p>
   ${provenance}
   ${check}`;
   }
