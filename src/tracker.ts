@@ -34,6 +34,12 @@ export interface TokenState {
   /** False when this launch has no SOL price at all, so no SOL figure may be stated for it. */
   solQuoted?: boolean;
   /**
+   * False when this venue's trade events carry no wallet, so `curveBuyers` can never fill and its size is not a
+   * count of anything. Stamped from the venue at decode, like `venue` itself, because the set looks identical
+   * whether nobody bought or nobody could be named - and one of those is a finding while the other is a gap.
+   */
+  tradesNameWallets?: boolean;
+  /**
    * How we know the curve completed: "pool" or "curve_complete". Left undefined when `graduated` was inferred from
    * decoded trade events reaching the threshold, which is not proof - see `graduated_confirmed_by` in db.ts.
    */
@@ -72,6 +78,21 @@ export interface TokenState {
   buyVolSol: number;
   sellVolSol: number;
   buyers: Set<string>;
+  /**
+   * Distinct non-creator wallets that bought on the BONDING CURVE, counted as we watched it.
+   *
+   * `buyers` above is every buyer across the token's whole life and includes post-graduation market buyers, which is
+   * a different question and the wrong one for judging a launch. This set answers the one the archive actually
+   * publishes, and it exists because the published answer was being recomputed afterwards from `trades` - a table
+   * that is deliberately sampled at finalize (100-400 curve rows) and pruned on a retention timer. Counting rows
+   * that were thrown away by design gave a floor and published it as a count: 625 of 5,889 confirmed graduations,
+   * and 43 of them published as "zero outside buyers", which is the strongest thing this archive says about a
+   * launch. See the `curve-buyers-undercounted` correction.
+   *
+   * Free, exact, and independent of retention: the collector already has every curve trade in its hands as it
+   * arrives, and was discarding the only moment the question is cheap to answer.
+   */
+  curveBuyers: Set<string>;
   sellers: Set<string>;
   /** distinct non-dev wallets that bought within 2s of creation (bundle heuristic) */
   bundledBuyers: number;
@@ -211,11 +232,12 @@ export class Tracker extends EventEmitter {
       // Recorded only where the mint does not determine it, and the venue is asked rather than named: a venue whose
       // curve is a PDA (pump.fun) leaves this null, because the address is recomputable and storing it says nothing.
       // A non-null value means "this address is the only way back to the curve". See venues.ts CurveLocation.
-      curveAccount: venueById(e.venue ?? "pumpfun")?.curveLocation(e.mint).kind === "recorded"
+      curveAccount: venueById(e.venue ?? "pumpfun")?.curveLocation === "recorded"
         ? e.bondingCurveKey || null : null,
       quoteMint: e.quoteMint ?? null,
       // Absent means SOL. Only a venue that can be quoted in something else sends this, and it sends it explicitly.
       solQuoted: e.solQuoted ?? true,
+      tradesNameWallets: (venueById(e.venue ?? "pumpfun")?.tradeAttribution ?? "wallets") === "wallets",
       name: e.name,
       symbol: e.symbol,
       uri: e.uri,
@@ -245,6 +267,7 @@ export class Tracker extends EventEmitter {
       buyVolSol: 0,
       sellVolSol: 0,
       buyers: new Set(),
+      curveBuyers: new Set(),
       sellers: new Set(),
       bundledBuyers: 0,
       balances: new Map([[e.traderPublicKey, e.initialBuy]]),
@@ -315,6 +338,7 @@ export class Tracker extends EventEmitter {
       buyVolSol: 0,
       sellVolSol: 0,
       buyers: new Set(),
+      curveBuyers: new Set(),
       sellers: new Set(),
       bundledBuyers: 0,
       balances: new Map(),
@@ -378,6 +402,10 @@ export class Tracker extends EventEmitter {
       t.buyVolSol += e.solAmount;
       const isNew = !t.buyers.has(e.traderPublicKey);
       t.buyers.add(e.traderPublicKey);
+      // Only here, never in onAmmTrade: this handler sees bonding-curve trades and nothing else, which is what makes
+      // the set answer "bought on the curve" rather than "bought at some point". The creator is excluded because the
+      // published figure is OUTSIDE buyers, and a creator funding its own curve is the opposite of one.
+      if (e.traderPublicKey !== t.creator) t.curveBuyers.add(e.traderPublicKey);
       if (isNew) buyerRank = t.buyers.size; // 1 = first non-dev buyer
       // bundle heuristic: a distinct non-dev buyer in the creation slot or the next one (or within 2s when slots are unknown)
       const sameBlock = t.createdSlot && e.slot ? e.slot - t.createdSlot <= 1 : now - t.createdAt <= 2000;

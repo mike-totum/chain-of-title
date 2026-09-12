@@ -78,19 +78,53 @@ const log = (...a: unknown[]) => console.log(...a);
 // Counting distinct curve buyers per token is one sequential pass over `trades`, and the result never changes for a
 // token whose curve has finished. Tokens are refreshed when the count is missing, or when the token is recent enough
 // that its curve may still be active.
+/**
+ * The published outside-buyer count, as ONE expression used everywhere it is produced.
+ *
+ * Two sources, in order, and a NULL rather than a guess:
+ *
+ * 1. `curve_buyers_live` - the collector's own count, taken as the trades arrived. Exact, independent of what
+ *    survives in `trades`, and the right answer for every launch from 2026-09-12 on.
+ *
+ * 2. The trade rows, BUT ONLY WHERE THEY ARE ALL STILL THERE. This is the fix. `trades` is not a history: finalize
+ *    samples it to 100-400 curve rows per token and retention prunes it outright, both by design. Counting
+ *    survivors and publishing the result as a measurement gave a floor, and on a launch whose only surviving row
+ *    was the dev buy it gave **zero outside buyers** - the strongest thing this archive says against a launch, from
+ *    the absence of rows we deleted ourselves.
+ *
+ *    `tokens.buys` is the monotonic count of curve buys the collector actually watched, so the surviving curve-buy
+ *    rows are the whole history exactly when there are at least that many. Where there are fewer, the count is a
+ *    floor and the answer is NULL - unknown, which never certifies and never accuses.
+ *
+ * Validated against an independent instrument rather than reasoned about. Of the 5,264 confirmed graduations whose
+ * rows this test calls complete, ZERO have a count below their own `bundled_buyers` - a curve-only, non-dev,
+ * distinct figure recorded live by a different code path. Of the 43 published as zero where the test calls the rows
+ * incomplete, 41 are contradicted by that same figure. The test admits what it should and refuses what it should.
+ *
+ * `main.` is spelled out because this runs with the record attached as `rec`, where an unqualified `tokens` in a
+ * subquery is ambiguous to a reader even where SQLite resolves it.
+ */
+const CURVE_BUYERS = (tbl = "tokens") => `COALESCE(
+  ${tbl}.curve_buyers_live,
+  (SELECT CASE WHEN COUNT(*) >= COALESCE(${tbl}.buys, 0)
+               THEN COUNT(DISTINCT CASE WHEN COALESCE(tr.is_dev, 0) = 0 THEN tr.wallet END) END
+     FROM trades tr
+    WHERE tr.mint = ${tbl}.mint AND tr.market = 'curve' AND tr.side = 'buy'))`;
+
 const RECENT_MS = 48 * 3600_000;
 log(READ_ONLY ? "counting curve buyers into the record (source is read-only)…" : "counting curve buyers…");
 const t0 = Date.now();
 if (!READ_ONLY) db.exec(`
-  UPDATE tokens SET curve_buyers = (
-    SELECT COUNT(DISTINCT tr.wallet) FROM trades tr
-    WHERE tr.mint = tokens.mint AND tr.market = 'curve' AND tr.side = 'buy' AND COALESCE(tr.is_dev, 0) = 0
-  )
+  UPDATE tokens SET curve_buyers = ${CURVE_BUYERS()}
   WHERE ${FULL ? "1=1" : `curve_buyers IS NULL OR updated_at >= ${Date.now() - RECENT_MS}`}
-    AND EXISTS (SELECT 1 FROM trades tr2 WHERE tr2.mint = tokens.mint)
-    -- A launch on a venue that cannot name a trader is never counted. Its dev buy IS attributable and does produce
-    -- one row, so the EXISTS above passes and the count would come back 0 - a number about the absence of a table
-    -- rather than about the launch. See CANNOT_ATTRIBUTE above.
+    -- The EXISTS that used to be here is gone, and its absence is the point. It asked "are there any trade rows",
+    -- which a launch's own dev buy satisfies, so a token whose curve trades had all been pruned still got counted -
+    -- and counted 0. Completeness is now decided inside the expression, against tokens.buys, which is a fact about
+    -- what we watched rather than about what survived.
+    --
+    -- A launch on a venue that cannot name a trader is never counted at all: the expression would find its dev buy,
+    -- call one row complete against buys=0, and return 0 - a number about the absence of a table rather than about
+    -- the launch. See CANNOT_ATTRIBUTE above.
     AND NOT (${CANNOT_ATTRIBUTE})
 `);
 if (!READ_ONLY) {
@@ -471,7 +505,37 @@ try {
  * timestamp beside it was not.
  */
 
-const since = FULL ? 0 : Number((db.prepare("SELECT v FROM rec.meta WHERE k='watermark'").get() as any)?.v ?? 0);
+/**
+ * A correction to a published column has to reach the rows that are already published, and a watermark stops it.
+ *
+ * `curve_buyers` was wrong on rows written months ago. The expression that produces it is fixed above, but an
+ * incremental build only re-copies rows the collector has touched recently, so every historical row would keep the
+ * number the old expression gave it - a correction issued in the corrections table and not applied to the data it
+ * is about, which is worse than not issuing it.
+ *
+ * So a repair is a named, once-only full re-carry: the id goes in `rec.meta` when it completes, and a record file
+ * that already carries the id skips it. A fresh record has nothing to repair and is stamped as done without work.
+ * Adding a future repair is one entry here, which is the point - this is the third time a column changed meaning
+ * after publication and the first two were fixed by remembering to pass --full.
+ */
+const REPAIRS = [
+  {
+    id: "repair:curve-buyers-completeness",
+    why: "recomputing every outside-buyer count: the old one was taken over trade rows that finalize and retention "
+       + "had already thrown away, so it published a floor as a measurement and an absence as zero",
+  },
+] as const;
+const repairPending = (() => {
+  try {
+    const done = new Set((db.prepare("SELECT k FROM rec.meta").all() as { k: string }[]).map((r) => r.k));
+    return REPAIRS.filter((r) => !done.has(r.id));
+  } catch { return []; }
+})();
+for (const r of repairPending) log(`[repair] ${r.id}: ${r.why}`);
+
+const since = FULL || repairPending.length
+  ? 0
+  : Number((db.prepare("SELECT v FROM rec.meta WHERE k='watermark'").get() as any)?.v ?? 0);
 log(`carrying launches ${since ? `changed since ${new Date(since).toISOString()}` : "(full rebuild)"}…`);
 
 db.exec("BEGIN");
@@ -509,8 +573,11 @@ try {
            -- Same guard on the way into the record, and it has to be here too: production builds with --read-only,
            -- so the UPDATE above never runs on the collector and THIS is the expression that decides what the
            -- public file says. CASE before COALESCE, because COALESCE would compute the count first.
-           ${nullForUnattributed(READ_ONLY ? `COALESCE(curve_buyers, (SELECT COUNT(DISTINCT tr.wallet) FROM trades tr
-             WHERE tr.mint = main.tokens.mint AND tr.market='curve' AND tr.side='buy' AND COALESCE(tr.is_dev,0)=0))` : "curve_buyers")},
+           -- Recomputed here rather than read from the column, because production builds with --read-only and the
+           -- UPDATE above never runs on the collector: THIS is the expression that decides what the public file
+           -- says. It was a COALESCE onto an unguarded COUNT, which is how a count over pruned rows reached the
+           -- published record as a measurement.
+           ${nullForUnattributed(CURVE_BUYERS("main.tokens"))},
            ${nullForUnattributed("snap30_buyers")},
            ${nullForUnattributed("bundled_buyers")},
            graduated, graduated_at,
@@ -858,6 +925,12 @@ try {
   db.exec(`INSERT INTO rec.meta (k, v) VALUES ('watermark', '${Date.now()}'), ('built_at', '${Date.now()}'),
       ('built_by', '${builtBy}'), ('built_pid', '${process.pid}')
     ON CONFLICT(k) DO UPDATE SET v = excluded.v`);
+  // Marked done inside the same transaction as the copy it repaired: a build that dies after the copy and before
+  // this would lose the mark and repeat the work, which is merely slow, while the reverse - marking it done and
+  // then rolling the copy back - would leave the record permanently uncorrected and calling itself repaired.
+  for (const r of repairPending)
+    db.prepare("INSERT INTO rec.meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v")
+      .run(r.id, String(Date.now()));
   db.exec("COMMIT");
 } catch (e) { db.exec("ROLLBACK"); throw e; }
 
@@ -974,6 +1047,44 @@ try {
     + "for reconstruction. No figure in the record changes - only what was claimed about how else they could be "
     + "obtained. What this file adds is that the reading was contemporaneous, which is a smaller claim than the one "
     + "withdrawn and the one that is true.");
+  ins.run("curve-buyers-undercounted", at("2026-09-12"), "column", "curve_buyers",
+    "curve_buyers, the distinct outside-buyer count, was recomputed after the fact by counting wallets in the "
+    + "trades table. That table is not a history of a launch and was never meant to be one: finalize keeps a sample "
+    + "of 100 to 400 curve trades per token and retention prunes what is left on a timer, both deliberately and "
+    + "both documented. The count was taken over whatever had survived and published as a measurement. SQL's COUNT "
+    + "over no rows returns 0 rather than NULL, so a launch whose only surviving row was the creator's own first "
+    + "buy was published as having had zero outside buyers. Across the 206,018 launches in the published record, "
+    + "3,504 carried an outside-buyer count lower than their own bundled_buyers - the distinct non-creator buyers "
+    + "in the creation block, recorded live at launch by a different code path, and necessarily a floor on the "
+    + "total. Those rows disagreed with themselves on their own pages. Of the 5,878 confirmed graduations watched "
+    + "from creation, 616 had counts taken from an incomplete set of rows and 43 of those were published as zero. "
+    + "One example: EFSy2VB3gymYe6tmTzkvqVuqcYQziqogCN4jcN23pump recorded 1,160 curve buys and 15 distinct "
+    + "non-creator buyers in its creation block alone, and its page said it completed its bonding curve with zero "
+    + "outside buyers on record.",
+    "Zero outside buyers is the strongest thing this archive says about a launch. It raises a DANGER finding, it is "
+    + "the front page's headline, and it is the sentence a reader repeats. For those launches it was asserted from "
+    + "the absence of rows this project had itself deleted - absence of data published as a finding, in the "
+    + "direction that accuses, which is the one direction the method page says we will not go. A reader who checked "
+    + "such a page against the chain would have found the buyers and been right to trust the chain over us. "
+    + "Separately and in the opposite direction, launches carrying counts that were floors sat in the denominator "
+    + "of the headline share, diluting a finding that is in fact stronger than the one published.",
+    "The collector now counts distinct non-creator curve buyers as the trades arrive and stores the result in "
+    + "curve_buyers_live, which no sampling or retention can reach; that is the published figure for every launch "
+    + "from 2026-09-12. For launches before it, the trade rows are counted only where they are demonstrably all "
+    + "still present - at least as many surviving curve-buy rows as the buys counter recorded live - and the answer "
+    + "is NULL otherwise. NULL means unknown: it never certifies and never accuses. The rule was checked against "
+    + "the independent instrument rather than assumed, over the whole archive: of the 3,504 rows that contradicted "
+    + "their own bundled_buyers, 3,504 are now NULL and not one new contradiction was created. The scope was "
+    + "bounded with bundled_buyers and with the buys counter, both of which count bonding-curve trades only, and "
+    + "deliberately NOT with snap30_buyers, which counts every buyer in the first 30 seconds including market "
+    + "buyers after a fast graduation. 409 published zeros look contradicted by that column and 366 of them "
+    + "recorded no curve buy whatsoever, which is a buyout followed by a market and not a hidden buyer. Read "
+    + "correctly it leaves the same 43 rows this correction withdraws. 14,022 launches "
+    + "move from a number to unknown and 4,772 lose a zero. The headline population falls from 5,878 to 5,262 "
+    + "confirmed graduations and the no-buyer count from 2,513 to 2,470, so the published share RISES from 42.8% "
+    + "to 46.9%. No launch that was correctly reported changes. What cannot be recovered is the true count for a "
+    + "launch whose rows were already pruned; those stay NULL permanently, and that is the cost of having counted "
+    + "them late rather than as they happened.");
   amend.run("disproved-fix-did-not-travel", at("2026-09-11"), "column", "graduated",
     "The correction below said the predicate that folded 'we read the curve account and it was gone' into 'we read "
     + "it and it had not completed' now requires an explicit 0. That was true of the shared helper and false of the "

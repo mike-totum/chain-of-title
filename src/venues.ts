@@ -160,19 +160,23 @@ export type EventChannel = "logs" | "cpi";
  */
 export type TradeAttribution = "wallets" | "none";
 
-/** Where a launch's curve state lives, which is not always a function of the mint. */
-export type CurveLocation =
-  /** A PDA computable from the mint alone (pump.fun). */
-  | { kind: "derived"; address: string }
-  /**
-   * The account exists, but its address is not determined by the mint, so it comes from the launch record's own
-   * `pool` column. LaunchLab's pool PDA is seeded with the platform config and the quote mint, neither of which the
-   * mint fixes. This is a third answer, not a failure, and it exists because returning null for it would have
-   * collapsed into "the venue has no curve" - which clause 7's note on `curveAddress` already forbade in writing.
-   */
-  | { kind: "recorded" }
-  /** The venue has no curve account at all; completion can only be confirmed from a market. */
-  | { kind: "none" };
+/**
+ * Where a launch's curve state lives, which is not always a function of the mint.
+ *
+ * `derived` - a PDA computable from the mint alone (pump.fun), so it is never stored: anyone can recompute it.
+ * `recorded` - the account exists, but its address is not determined by the mint, so it has to be written down or
+ *   it is lost. LaunchLab's pool PDA is seeded with the platform config and the quote mint, neither of which the
+ *   mint fixes. This is a third answer, not a failure, and it exists because returning null for it would have
+ *   collapsed into "the venue has no curve" - which clause 7's note on `curveAddress` already forbade in writing.
+ * `none` - the venue has no curve account at all; completion can only be confirmed from a market.
+ *
+ * A PROPERTY OF THE VENUE, NOT A FUNCTION OF THE MINT, which is what it was first written as. Asking "does this
+ * venue's curve address have to be stored" is a question about the venue, and answering it by deriving a PDA meant
+ * a sha256 per launch to produce an address the caller discarded - and a throw on any mint that is not valid
+ * base58, which is how a test of this exposed it. The address itself is `curveAddress` and is asked for only when
+ * somebody wants the address.
+ */
+export type CurveLocation = "derived" | "recorded" | "none";
 
 /** Decoders that work from an event payload alone. Only a venue whose events name the launch has these. Clause 9. */
 export interface PayloadDecoders {
@@ -206,8 +210,10 @@ export interface LaunchVenue {
   feed(url: string): RpcFeed;
   /** See clause 9. Absent for a venue whose events do not name the launch they are about. */
   readonly payload?: PayloadDecoders;
-  /** Where this launch's curve account lives, if it has one. */
-  curveLocation(mint: string): CurveLocation;
+  /** Where this venue's curve accounts live, if it has them. */
+  readonly curveLocation: CurveLocation;
+  /** The curve account's address, when the mint determines it. Null for any venue whose `curveLocation` is not "derived". */
+  curveAddress(mint: string): string | null;
   /** Decode that account. Null means the bytes were not a curve, never that the curve is incomplete. */
   decodeCurve(b64: string): CurveState | null;
 }
@@ -228,7 +234,8 @@ export const pumpfun: LaunchVenue = {
   tradeAttribution: "wallets",
   feed: (url) => new RpcFeed(url, PUMP_PROGRAM),
   payload: { decodeCreate, decodeTrade },
-  curveLocation: (mint) => ({ kind: "derived", address: bondingCurveAddress(mint) }),
+  curveLocation: "derived",
+  curveAddress: bondingCurveAddress,
   decodeCurve: decodeCurveAccount,
 };
 
@@ -252,9 +259,10 @@ export const launchlab: LaunchVenue = {
   tradeAttribution: "none",
   feed: (url) => new LaunchLabFeed(url),
   // The pool PDA is seeded with the platform config and the quote mint. The mint alone does not fix it, so the
-  // address comes from the launch record's own `pool` column rather than from a derivation. Not "we could not work
+  // address is read off the launch record's own `curve_account` column rather than derived. Not "we could not work
   // it out": the account is known, and this says where it is known FROM.
-  curveLocation: () => ({ kind: "recorded" }),
+  curveLocation: "recorded",
+  curveAddress: () => null,
   decodeCurve: decodeLaunchLabCurve,
 };
 

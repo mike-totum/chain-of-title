@@ -104,15 +104,21 @@ export function buildFacts(db: any, covered: (launch: CoverableLaunch) => boolea
      * the exclusion is visible rather than buried.
      */
     /**
-     * And the population is scoped to the venues that can answer the question, which is new with the second venue.
+     * And the population is scoped to the launches the question can actually be asked of.
      *
-     * `curve_buyers` is NULL for a venue whose events carry no wallet (venues.ts clause 10), so those launches can
-     * never be in the numerator. Leaving them in the denominator would quietly deflate the headline share by a
-     * population it is arithmetically impossible to count - a number that looks like a measured fall in
-     * manufacturing and is only a change in who we watch. One population, and it is the one the question applies to.
+     * Two exclusions, one reason. `curve_buyers` is NULL for a venue whose events carry no wallet (venues.ts clause
+     * 10), and NULL for a launch whose trade rows were sampled or pruned before anyone counted them. Neither can
+     * ever be in the numerator, so neither may sit in the denominator: a share computed over a population its own
+     * numerator cannot reach is not a measurement of anything. Leaving them in would read as a fall in manufacturing
+     * and be nothing but a change in what we can count.
+     *
+     * This is what the `curve-buyers-undercounted` correction changes on this page. Measured over the published
+     * record: the headline population drops from 5,878 to 5,262 confirmed graduations, the no-buyer count from
+     * 2,513 to 2,470, and the share RISES from 42.8% to 46.9%. The error was not flattering the finding, it was
+     * diluting it while separately accusing 43 launches that had buyers.
      */
     const LIVE = "graduated_confirmed_by IS NOT NULL AND COALESCE(late_discovery,0) = 0 AND rebuilt_at IS NULL"
-      + ` AND NOT (${cannotAttributeSql()})`;
+      + ` AND NOT (${cannotAttributeSql()}) AND curve_buyers IS NOT NULL`;
     const watched = q(LIVE);
     return {
       launches: q("1=1"),

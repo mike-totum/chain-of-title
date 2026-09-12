@@ -1159,15 +1159,16 @@ let everCache: { watched: number; noBuyer: number } | null = null;
 function everFinding(): { watched: number; noBuyer: number } {
   if (everCache) return everCache;
   /**
-     * And the population is scoped to the venues that can answer the question, which is new with the second venue.
-     *
-     * `curve_buyers` is NULL for a venue whose events carry no wallet (venues.ts clause 10), so those launches can
-     * never be in the numerator. Leaving them in the denominator would quietly deflate the headline share by a
-     * population it is arithmetically impossible to count - a number that looks like a measured fall in
-     * manufacturing and is only a change in who we watch. One population, and it is the one the question applies to.
-     */
-    const LIVE = "graduated_confirmed_by IS NOT NULL AND COALESCE(late_discovery,0) = 0 AND rebuilt_at IS NULL"
-      + ` AND NOT (${cannotAttributeSql()})`;
+   * The same population `buildFacts` uses, and it has to stay the same one: this is the front page's headline and
+   * that is findings.html's, and two numbers for one claim is how a reader learns not to trust either.
+   *
+   * `curve_buyers IS NULL` is excluded from BOTH halves. It is null for a venue whose events name no trader
+   * (venues.ts clause 10) and for a launch whose trade rows were sampled or pruned before anyone counted them, and
+   * neither can ever be in the numerator. A share taken over a population its numerator cannot reach measures
+   * nothing. See the `curve-buyers-undercounted` correction.
+   */
+  const LIVE = "graduated_confirmed_by IS NOT NULL AND COALESCE(late_discovery,0) = 0 AND rebuilt_at IS NULL"
+    + ` AND NOT (${cannotAttributeSql()}) AND curve_buyers IS NOT NULL`;
   const c = (w: string) => (db.prepare(`SELECT COUNT(*) c FROM tokens WHERE ${w}`).get() as any).c as number;
   try { everCache = { watched: c(LIVE), noBuyer: c(`${LIVE} AND curve_buyers = 0`) }; }
   catch { everCache = { watched: 0, noBuyer: 0 }; }

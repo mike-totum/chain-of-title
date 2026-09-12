@@ -96,7 +96,15 @@ export function openDb(path: string, opts: { migrate?: boolean } = {}): Database
       -- What this launch's curve is priced in. NULL means SOL, which every row predating the column is, and every
       -- pump.fun launch is by construction. A LaunchLab pool names its quote asset per pool and most name something
       -- else, so a SOL figure for those would be a quantity of another token wearing SOL's name.
-      quote_mint TEXT
+      quote_mint TEXT,
+      -- Distinct non-creator wallets we watched buy on the bonding curve, counted live as the trades arrived.
+      --
+      -- The published outside-buyer count was recomputed afterwards from the trades table, which finalize samples
+      -- down to 100-400 curve rows per token and retention then prunes outright. A count over what survived was a
+      -- floor published as a measurement, and where the only survivor was the dev buy it read as ZERO OUTSIDE
+      -- BUYERS - the strongest statement this archive makes against a launch. This column is what we actually
+      -- observed, taken at the only moment it is free and exact. NULL means the launch predates it, never zero.
+      curve_buyers_live INTEGER
     );
     CREATE INDEX IF NOT EXISTS tokens_created ON tokens(created_at);
     CREATE TABLE IF NOT EXISTS positions (
@@ -276,6 +284,7 @@ export function openDb(path: string, opts: { migrate?: boolean } = {}): Database
    */
   try { db.exec("ALTER TABLE tokens ADD COLUMN curve_account TEXT"); } catch {}
   try { db.exec("ALTER TABLE tokens ADD COLUMN quote_mint TEXT"); } catch {}
+  try { db.exec("ALTER TABLE tokens ADD COLUMN curve_buyers_live INTEGER"); } catch {}
 
   /**
    * trades.venue becomes trades.market.
@@ -442,8 +451,8 @@ export function upsertToken(db: DatabaseSync, t: TokenState): void {
       create_sig, create_slot,
       dev_pct, dev_sold, dev_sold_at, buys, sells, buy_vol_sol, sell_vol_sol, unique_buyers, unique_sellers, bundled_buyers,
       snap30_buyers, snap30_buys, snap30_sells, snap30_vol, graduated, graduated_at, p_1m, p_5m, p_15m, p_60m,
-      twitter, telegram, website, image, description, meta_at, kol_signals, pool, amm_trusted, vault_sol, vault_at, finalized, updated_at, venue, graduated_confirmed_by, meta_json, meta_bytes, curve_account, quote_mint)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      twitter, telegram, website, image, description, meta_at, kol_signals, pool, amm_trusted, vault_sol, vault_at, finalized, updated_at, venue, graduated_confirmed_by, meta_json, meta_bytes, curve_account, quote_mint, curve_buyers_live)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(mint) DO UPDATE SET
       name=excluded.name, symbol=excluded.symbol, launch_price=excluded.launch_price, last_price=excluded.last_price,
       -- The three move together or not at all: a peak is a price, a moment, and where it came from. Splitting them
@@ -459,6 +468,12 @@ export function upsertToken(db: DatabaseSync, t: TokenState): void {
       buy_vol_sol=MAX(COALESCE(excluded.buy_vol_sol,0), COALESCE(tokens.buy_vol_sol,0)),
       sell_vol_sol=MAX(COALESCE(excluded.sell_vol_sol,0), COALESCE(tokens.sell_vol_sol,0)),
       unique_buyers=MAX(COALESCE(excluded.unique_buyers,0), COALESCE(tokens.unique_buyers,0)),
+      -- Monotonic like its neighbours, and for the same reason: a token restored by a detector starts with an empty
+      -- set and would otherwise overwrite the launch history with a zero. NULL on both sides stays NULL, because a
+      -- launch nobody counted live is unknown rather than zero - MAX(NULL, NULL) is NULL and that is deliberate.
+      curve_buyers_live=CASE WHEN excluded.curve_buyers_live IS NULL THEN tokens.curve_buyers_live
+                             WHEN tokens.curve_buyers_live IS NULL THEN excluded.curve_buyers_live
+                             ELSE MAX(excluded.curve_buyers_live, tokens.curve_buyers_live) END,
       unique_sellers=MAX(COALESCE(excluded.unique_sellers,0), COALESCE(tokens.unique_sellers,0)),
       bundled_buyers=MAX(COALESCE(excluded.bundled_buyers,0), COALESCE(tokens.bundled_buyers,0)),
       snap30_buyers=COALESCE(tokens.snap30_buyers, excluded.snap30_buyers),
@@ -528,6 +543,17 @@ export function upsertToken(db: DatabaseSync, t: TokenState): void {
     // Launch facts, written once. Neither is in the ON CONFLICT clause: where a launch's curve lives and what it is
     // priced in cannot change, the same reason `created_at` and `venue` are never updated.
     t.curveAccount ?? null, t.quoteMint ?? null,
+    /**
+     * Only where the number is a count of something, which is narrower than "the set has a size".
+     *
+     * Two ways it is not. A token a detector restored hours later has a set holding whatever arrived after the
+     * restore, which is not the launch's buyer count. And on a venue whose trade events name no wallet the set can
+     * never fill at all, so its size is 0 for every launch there - the invented zero this whole column exists to
+     * stop, reproduced one layer down. Caught by running the collector and reading the column, not by review.
+     *
+     * NULL is the honest value in both cases: we did not count it. `venues.ts` clause 10.
+     */
+    t.lateDiscovery || t.tradesNameWallets === false ? null : t.curveBuyers.size,
   );
 }
 

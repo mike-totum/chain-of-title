@@ -236,8 +236,17 @@ test("servicedb guards every published count of people", () => {
   const src = readFileSync(new URL("./servicedb.ts", import.meta.url), "utf8");
   const copy = src.slice(src.indexOf("INSERT INTO rec.tokens"));
   assert.ok(copy.length > 0, "servicedb.ts no longer has a rec.tokens copy; this test is checking nothing");
+  /**
+   * A column need not be published under its own name. `curve_buyers` is produced by a named expression, because a
+   * count over trade rows that finalize and retention have already thinned is a floor rather than a measurement and
+   * the expression is what decides whether there is an answer at all. Listing the producer here keeps this test
+   * specific: an unguarded `CURVE_BUYERS(...)` still fails, and so does an unguarded bare column.
+   */
+  const PRODUCED_BY: Record<string, string> = { curve_buyers: "CURVE_BUYERS(" };
   for (const col of PERSON_COLUMNS) {
+    const producer = PRODUCED_BY[col];
     const guarded = copy.includes(`nullForUnattributed("${col}")`)
+      || (producer ? copy.includes(`nullForUnattributed(${producer}`) : false)
       || new RegExp(`nullForUnattributed\\([^)]*\\b${col}\\b`, "s").test(copy);
     assert.ok(guarded,
       `${col} reaches the published record unguarded. On a venue whose events carry no wallet it is an empty set ` +
