@@ -22,7 +22,15 @@ status=$(curl -s --max-time 20 "$U/api/v1/status" | tr -d '\n' | tr -s ' ')
 [ -n "$status" ] || { echo "FAIL  $U/api/v1/status unreachable"; exit 1; }
 
 as_of=$(printf '%s' "$status" | sed -n 's/.*"asOf": *{ *"ms": *\([0-9]*\).*/\1/p')
-launches=$(printf '%s' "$status" | sed -n 's/.*"launches": *\([0-9]*\).*/\1/p')
+# The FIRST launches key only. /api/v1/status gained a nested chainWide.launches, and `.*` is greedy, so this
+# matched the LAST one: the probe reported 24,026 launches against an archive holding 281,033. It still passed,
+# because the PASS/FAIL below is on age rather than on this number - which is worse, not better. A watchdog that
+# prints a wrong figure while saying PASS teaches whoever reads the alert that the figure is noise. Same fault and
+# same fault as scripts/preflight.sh, which hit it first - but NOT the same fix. preflight pipes the raw JSON and
+# sed matches per line, so `head -1` picks the right line there. Here `status` was already collapsed to ONE line by
+# `tr -d '\n'` above, so a greedy `.*` takes the last match within that line and `head -1` has nothing to choose
+# between. Verified by running it: the head -1 version still printed 24,264. Match the key itself instead.
+launches=$(printf '%s' "$status" | grep -o '"launches": *[0-9]*' | head -1 | grep -o '[0-9]*$')
 [ -n "$as_of" ] || { echo "FAIL  could not read asOf from $U/api/v1/status"; exit 1; }
 
 now=$(date +%s)
