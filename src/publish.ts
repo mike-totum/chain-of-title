@@ -111,6 +111,13 @@ ORDER BY feed_events DESC;`,
    */
   "metadata-retention": {
     title: "A launch's own account of itself is not uniformly durable",
+    /**
+     * A DOWNLOADED COPY OF THE PUBLISHED RECORD, not the local research database:
+     *   curl -o data/prod-record.db https://chainoftitle.org/data/record.db
+     * `data/record.db` on a dev machine is a stale research artefact - it held 206,018 launches against 290,096
+     * live when this was published - and a report quoting it would state figures no reader could reproduce from
+     * the file the page tells them to download. The file the reader can get is the file the report describes.
+     */
     source: "data/prod-record.db",
     /**
      * The `all other self-hosted` row is not decoration. A first cut used a bare `HAVING launches >= 1500`, which
