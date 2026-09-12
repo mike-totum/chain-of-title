@@ -483,7 +483,22 @@ if (held < 1000) {
 let win = coverageWindows(db);
 // Per venue, not per clock. A launch on a venue we were not subscribed to must read as unwatched, never as
 // clean, and with one venue in VENUES this returns exactly what the old whole-archive predicate did.
-const covered = coverageFor(db);
+/**
+ * Rebuilt on every record adoption, and `let` for that reason alone.
+ *
+ * This was `const`, and on 2026-09-12 it took the front page down. `coverageFor(db)` closes over the handle it is
+ * given and caches its windows per venue; `reloadRecord` swaps `db` and closes the old handle 30 seconds later. So
+ * this closure held the boot handle forever - harmless for as long as its cache was already warm, because a warm
+ * cache never touches the connection again.
+ *
+ * Then a second venue's launches reached the served record for the first time. `byVenue` had no entry for
+ * `launchlab`, so the closure queried the connection it was built on, which had been closed since the first
+ * adoption, and every home render threw `database is not open`. Two correct-looking things: reload-in-place
+ * re-derives everything bound to the old connection, and per-venue coverage caches lazily. Neither is wrong. The
+ * bug was that this was not on the list of things re-derived, and nothing checked the list was complete -
+ * `serve.reload.test.ts` now does.
+ */
+let covered = coverageFor(db);
 /**
  * Each venue's own coverage start, for the sentence that would otherwise assert one date for all of them.
  *
@@ -548,6 +563,10 @@ function reloadRecord(): void {
     // The same floor the boot guard applies. A record that cannot be a real archive is not adopted, and the process
     // keeps serving what it already had rather than exiting into the loop this function exists to end.
     if (n < 1000) { db = previous; console.log(`[record] refusing to adopt a record holding ${n} launches`); return; }
+    // FIRST, before anything reads coverage: this closure holds the connection it was built on and caches per
+    // venue, so a stale one answers correctly until it meets a venue it has not cached and then throws on a closed
+    // handle. Rebuilt here rather than invalidated, because a cache keyed on the old connection is not salvageable.
+    covered = coverageFor(db);
     held = n;
     observed = count("SELECT COUNT(*) c FROM tokens WHERE COALESCE(late_discovery,0)=0");
     win = coverageWindows(db);
