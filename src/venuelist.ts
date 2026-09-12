@@ -62,9 +62,13 @@ export const KNOWN_PROGRAMS: readonly KnownProgram[] = [
     kind: "engine",
     note: "Named in Raydium's own program-address documentation and shipped as `raydium_launchpad` in their IDL "
       + "repository. Multi-tenant: 2,231 PlatformConfig accounts are registered against it, each a front-end with "
-      + "its own brand and fee split, so one entry covers letsbonk.fun, cook.meme, boop.fun and the rest. Those "
+      + "its own brand and fee split, so one entry covers letsbonk.fun, cook.meme, StonkFun and the rest. Those "
       + "names are permissionless self-asserted strings and are deliberately not published as identity - some "
-      + "configs claim to be pump.fun, which does not run on this program.",
+      + "configs claim to be pump.fun, which does not run on this program. boop.fun was named here until "
+      + "2026-09-12 and does not belong: it runs its own program, boop8hVGQGqehUK2iVEMEnMrL5RbjywRzHKBmBE7ry4, "
+      + "declared as the address in its own IDL repository and verified executable on chain. It launched "
+      + "nothing in any window we sampled, so the error cost no coverage - but a front-end attributed to the "
+      + "wrong program is a claim about identity, which is the one thing this page exists to get right.",
     source: "https://docs.raydium.io/reference/program-addresses",
     confirmed: "2026-09-11",
   },

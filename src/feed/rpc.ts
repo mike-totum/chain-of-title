@@ -312,12 +312,39 @@ export class RpcFeed extends EventEmitter {
   }
 
   protected handleLogs(signature: string, logs: string[], slot: number): void {
+    // Only what this program emitted. TRADE_DISC is byte-identical to LaunchLab's, so without this a transaction
+    // touching both venues has each decoder reading the other's events. See payloadsFrom.
+    this.handleEvents(signature, payloadsFrom(logs, this.program), slot);
+  }
+
+  /**
+   * The same decode, driven by payloads that need not have come from a log line.
+   *
+   * Split out of `handleLogs` because a venue can emit its events somewhere this feed was not looking. Meteora's
+   * Dynamic Bonding Curve emits no `Program data:` lines at all - `emit_cpi!` exclusively, measured at 0 of 12
+   * transactions with log events against 11 of 12 with CPI data - so its events live only in
+   * `meta.innerInstructions`, which `logsSubscribe` does not carry. That is an ingestion problem and not a decoding
+   * one: strip Anchor's 8-byte CPI event tag and the remainder is byte-identical in layout to a log payload, an
+   * event discriminator followed by borsh fields. So the decoders below take those buffers unchanged, and a
+   * CPI-sourced feed subclasses this rather than reimplementing the emit logic - the same reason `handleLogs` is
+   * protected and `venueId` is a field.
+   *
+   * It is not only Meteora. `emit_cpi!` is Anchor's own recommended mechanism, and log lines are dropped outright
+   * on oversized transactions even on pump.fun, so a channel that reads inner instructions closes a silent gap in
+   * venue one as well as opening venue three.
+   *
+   * ATTRIBUTION IS THE CALLER'S JOB HERE, and a CPI caller can do it better than `payloadsFrom` can. That function
+   * infers the emitting program from the invoke/success frames in a log array and deliberately KEEPS a payload it
+   * cannot attribute, because dropping our own events loses launches permanently while decoding a foreign one
+   * writes a rare wrong row. A caller reading inner instructions has the enclosing instruction's own programId, so
+   * it knows exactly who emitted the payload and should require a match rather than assume one. Be stricter there;
+   * keep the fallback pointing the same way, so that a shape we failed to parse is never the reason ingestion stops.
+   */
+  protected handleEvents(signature: string, payloads: Buffer[], slot: number): void {
     const now = Date.now();
     let create: DecodedCreate | null = null;
     const trades: DecodedTrade[] = [];
-    // Only what this program emitted. TRADE_DISC below is byte-identical to LaunchLab's, so without this a
-    // transaction touching both venues has each decoder reading the other's events. See payloadsFrom.
-    for (const d of payloadsFrom(logs, this.program)) {
+    for (const d of payloads) {
       if (d.subarray(0, 8).equals(TRADE_DISC)) {
         const t = decodeTrade(d);
         if (t) trades.push(t);
