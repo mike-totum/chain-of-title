@@ -25,8 +25,14 @@ import { openDb } from "./db.ts";
 import { r2Config, putKey, headKey, getKey, type R2Config } from "./r2.ts";
 import { BUYOUT_SOL } from "./provenance.ts";
 
-/** Every column, because the point of the archive is that it is complete. */
-const COLUMNS = ["id", "mint", "wallet", "side", "sol", "tokens", "price", "ts", "slot", "sig", "age_ms", "buyer_rank", "is_dev", "venue"];
+/**
+ * Every column, because the point of the archive is that it is complete.
+ *
+ * `market` was called `venue` until 2026-09-11 and this list was not renamed with it, so every pass since has
+ * thrown on the very first SELECT and logged `[offload] FAILED, nothing deleted`. The archive was saved by the
+ * query being broken, which is not a guard. `offload.test.ts` now asserts this list against the table itself.
+ */
+export const TRADE_COLUMNS = ["id", "mint", "wallet", "side", "sol", "tokens", "price", "ts", "slot", "sig", "age_ms", "buyer_rank", "is_dev", "market"];
 
 export interface OffloadOptions {
   retainDays?: number;
@@ -42,6 +48,77 @@ export interface OffloadOptions {
 
 export interface OffloadResult {
   parts: number; rows: number; bytes: number; deleted: number; skipped: string; cutoff: number;
+}
+
+/**
+ * Rows the published record is built from, which must never leave this disk. TRUE means keep.
+ *
+ * `servicedb` builds `rec.trades` from buyout-sized curve buys plus the AMM trades on those same (wallet, mint)
+ * pairs. They are the evidence behind every operator page. The first version of this offloader did not know that
+ * and took some of them with the bulk, so the next record carried 4,260 trade rows against the 4,955 already
+ * published - and the web service's shrink guard correctly refused the pull, which left the public archive
+ * 29,419 launches behind until it was found. The bulk is commodity data anyone can re-derive; these few thousand
+ * rows are the part that is ours, and they are small enough that keeping them forever costs nothing.
+ *
+ * Exported and named rather than inlined because it is the guard that decides a DELETE, and a guard nothing can
+ * call is a guard nothing can test. It read `r.venue` until 2026-09-12 - a column renamed the day before - which
+ * is `undefined` on every row, so it recognised NOTHING as evidence. Only the equally stale `TRADE_COLUMNS` above
+ * kept that from mattering: the SELECT threw first, and the pass died before the delete. Repairing the column
+ * list alone would have made the query succeed with this predicate still blind, and the very next pass would have
+ * exported and then deleted every buyout row in the archive - the single most probative record a launch has, the
+ * row `BUYOUT_SOL` exists for and the buyout detectors and `assess` are built on. That is why the test drives this
+ * function with rows read back through `TRADE_COLUMNS`: half a rename fails it.
+ *
+ * THE THIRD CLAUSE IS NOT PART OF THAT REPAIR, and it is the larger half of this fix. The default was inverted on
+ * 2026-09-12 - it was "delete on a timer, exempting what has bitten us", it is now "if a row can be used, deleting
+ * it needs a reason" - and `KEEP_TRADE_EVIDENCE` grew a clause holding the whole curve ledger of every launch that
+ * GRADUATED. This is the fourth trade-deletion path and the only one that does not read that fragment, so without
+ * the clause it would keep exporting-and-deleting locally exactly the population the other three now protect: the
+ * 12,525 launches every report, finding and outside-buyer count is about. The rows would still exist in the bucket,
+ * which is not the same as being here - `servicedb` rebuilds `rec.trades` and recounts `curve_buyers` from what the
+ * collector currently holds, so a launch whose ledger has been moved to R2 publishes as a launch with an incomplete
+ * one. Deletion by another route, arriving through the path nobody suspects.
+ *
+ * `graduated = 1` or a confirmation, matching the fragment exactly: the inferred flag overstates graduation and we
+ * know it, but confirmation can arrive after this pass would have run, and a ledger that is gone can never be
+ * confirmed, measured or reported on again.
+ */
+export function evidenceFilter(db: any): (r: any) => boolean {
+  const keep = new Set<string>();
+  for (const b of db.prepare(
+    `SELECT DISTINCT wallet, mint FROM trades WHERE market='curve' AND side='buy' AND sol >= ?`).all(BUYOUT_SOL) as any[])
+    keep.add(`${b.wallet} ${b.mint}`);
+  /**
+   * Asked per mint against the primary key and memoised, rather than read as one set of graduated mints up front.
+   * A pass sees at most maxParts * partRows rows, so the cache is bounded by the pass; a `SELECT mint FROM tokens
+   * WHERE graduated = 1` is a full scan of a table with millions of rows on a process that drops two websockets
+   * when it stops answering, and this function cannot yield.
+   */
+  const gradQ = db.prepare(
+    "SELECT 1 g FROM tokens WHERE mint = ? AND (COALESCE(graduated, 0) = 1 OR graduated_confirmed_by IS NOT NULL)");
+  const grad = new Map<string, boolean>();
+  const graduated = (mint: string): boolean => {
+    let v = grad.get(mint);
+    if (v === undefined) { v = !!gradQ.get(mint); grad.set(mint, v); }
+    return v;
+  };
+  return (r: any) =>
+    (r.market === "curve" && r.side === "buy" && Number(r.sol) >= BUYOUT_SOL) ||
+    (r.market === "amm" && keep.has(`${r.wallet} ${r.mint}`)) ||
+    (r.market === "curve" && graduated(String(r.mint)));
+}
+
+/**
+ * The column names an archived object carries, mapped onto the columns this database actually has.
+ *
+ * Every object uploaded before 2026-09-11 has `venue` as its last header field, because that was the column's name
+ * when it was written. `restoreOffloaded` builds its INSERT from that header, so after the rename the restore path
+ * - the only way back for rows that exist nowhere else - threw `no such column: venue` on the first object and
+ * took the whole restore down with it. The objects are correct; the name in them is historical, and a rename in
+ * this schema must not invalidate the archive's own files.
+ */
+export function restoreColumns(header: string[]): string[] {
+  return header.map((c) => (c.trim() === "venue" ? "market" : c.trim()));
 }
 
 /**
@@ -116,26 +193,11 @@ export async function offloadTrades(db: any, o: OffloadOptions = {}): Promise<Of
   if (lowest == null) return { ...empty, skipped: "no trades on disk" };
   const oldest = { a: lowest, b: highest };
 
-  /**
-   * Rows the published record is built from, which must never leave this disk.
-   *
-   * `servicedb` builds `rec.trades` from buyout-sized curve buys plus the AMM trades on those same (wallet, mint)
-   * pairs. They are the evidence behind every operator page. The first version of this offloader did not know that
-   * and took some of them with the bulk, so the next record carried 4,260 trade rows against the 4,955 already
-   * published - and the web service's shrink guard correctly refused the pull, which left the public archive
-   * 29,419 launches behind until it was found. The bulk is commodity data anyone can re-derive; these few thousand
-   * rows are the part that is ours, and they are small enough that keeping them forever costs nothing.
-   */
-  const keep = new Set<string>();
-  for (const b of db.prepare(
-    `SELECT DISTINCT wallet, mint FROM trades WHERE market='curve' AND side='buy' AND sol >= ?`).all(BUYOUT_SOL) as any[])
-    keep.add(`${b.wallet} ${b.mint}`);
-  const isEvidence = (r: any) =>
-    (r.venue === "curve" && r.side === "buy" && Number(r.sol) >= BUYOUT_SOL) ||
-    (r.venue === "amm" && keep.has(`${r.wallet} ${r.mint}`));
+  // Which rows may never leave this disk. Built once per pass; see `evidenceFilter`.
+  const isEvidence = evidenceFilter(db);
 
   const rowsIn = db.prepare(
-    `SELECT ${COLUMNS.join(", ")} FROM trades WHERE id >= ? AND id < ? AND ts IS NOT NULL AND ts < ? ORDER BY id LIMIT ?`);
+    `SELECT ${TRADE_COLUMNS.join(", ")} FROM trades WHERE id >= ? AND id < ? AND ts IS NOT NULL AND ts < ? ORDER BY id LIMIT ?`);
   const nextIdAfter = db.prepare("SELECT MIN(id) a FROM trades WHERE id >= ?");
   const ins = o.dryRun ? null : db.prepare(`INSERT OR REPLACE INTO trade_offloads
     (key, day, id_from, id_to, rows, bytes, sha256, ts_min, ts_max, uploaded_at, deleted_at, deleted_rows)
@@ -182,9 +244,9 @@ export async function offloadTrades(db: any, o: OffloadOptions = {}): Promise<Of
      * Built in slices with a yield between them. A single map+join over 150,000 rows produces ~40 MB of string in
      * one uninterruptible go; the feeds notice.
      */
-    const pieces: string[] = [COLUMNS.join(",") + "\n"];
+    const pieces: string[] = [TRADE_COLUMNS.join(",") + "\n"];
     for (let i = 0; i < rows.length; i += 10_000) {
-      pieces.push(rows.slice(i, i + 10_000).map((r) => COLUMNS.map((c) => cell(r[c])).join(",")).join("\n") + "\n");
+      pieces.push(rows.slice(i, i + 10_000).map((r) => TRADE_COLUMNS.map((c) => cell(r[c])).join(",")).join("\n") + "\n");
       await yieldToLoop();
     }
     const csv = pieces.join("");
@@ -262,7 +324,8 @@ export async function restoreOffloaded(db: any, o: { log?: (s: string) => void }
     const body = await getKey(cfg, t.key);
     if (!body) { log(`[restore] ${t.key} is not in the store; skipping`); continue; }
     const lines = gunzipSync(body).toString("utf8").trim().split("\n");
-    const header = lines[0].split(",");
+    // Through `restoreColumns`, because an object written before 2026-09-11 names the column `venue`.
+    const header = restoreColumns(lines[0].split(","));
     const ins = db.prepare(`INSERT OR IGNORE INTO trades (${header.join(", ")}) VALUES (${header.map(() => "?").join(",")})`);
     let n = 0;
     for (let i = 1; i < lines.length; i++) {

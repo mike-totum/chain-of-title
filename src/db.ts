@@ -769,7 +769,33 @@ export function recoverOrphans(db: DatabaseSync, olderThanMs = 10 * 60_000): num
     if (tr.length) {
       const createdSlot = tr.find((x) => x.is_dev && x.age_ms === 0)?.slot ?? tr[0].slot ?? 0;
       const fake = { mint: r.mint, createdSlot, lastPrice: last, graduated, launchPrice: r.launch_price, peakPrice: peak, createdAt: r.created_at } as unknown as TokenState;
-      finalizeTokenTrades(db, fake, { keepAll: graduated || (r.launch_price > 0 && peak >= 2 * r.launch_price) || (r.kol_signals ?? 0) > 0 });
+      /**
+       * The budgets are passed, and the one that was missing is `keepAmm`.
+       *
+       * This call named only `keepAll`, so it took the defaults - `keepCurve = 100` and `keepAmm = 0`. A budget of
+       * zero is not a sample, it is a DELETE of every AMM row the launch has, and it ran on every orphan a restart
+       * left behind that was not interesting enough to keep whole. Among those rows are the post-graduation trades
+       * of wallets that took a buyout, which is exactly what `wallet_flow.amm_sell` is computed from - so a wallet
+       * that sold thousands of SOL into buyers was published as a wallet that never sold. Absence of data reading
+       * as a finding, in the direction that makes an operator look clean, which is the direction this project
+       * cannot afford. It is the same fault `KEEP_TRADE_EVIDENCE`'s second clause and the first-and-last-N change
+       * in `finalizeTokenTrades` were each written to fix, arriving a third time through the caller.
+       *
+       * 1500 because that is what the live path gives a comparable token: `index.ts` passes
+       * `keepAmm: t.graduated ? 6000 : 1500`, and an orphan that reaches this branch is by definition not
+       * graduated - `keepAll` above is true for every graduated one. A recovered launch and a cleanly finalized
+       * launch should not hold different amounts of the same evidence because the process happened to restart.
+       *
+       * `keepCurve: 400` rather than the live expression it mirrors (`t.buyers.size >= 8 ? 400 : 100`), because
+       * recovery cannot evaluate that test honestly: `t.buyers` counted distinct buyers as they arrived, and all
+       * this has is rows that a previous finalize pass may already have sampled, so counting them would understate
+       * the launch and pick the smaller budget. Over-keeping wastes disk; under-keeping is unrecoverable.
+       */
+      finalizeTokenTrades(db, fake, {
+        keepAll: graduated || (r.launch_price > 0 && peak >= 2 * r.launch_price) || (r.kol_signals ?? 0) > 0,
+        keepCurve: 400,
+        keepAmm: 1500,
+      });
     }
     n++;
   }
