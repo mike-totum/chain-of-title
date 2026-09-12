@@ -48,6 +48,15 @@ export interface OffloadOptions {
 
 export interface OffloadResult {
   parts: number; rows: number; bytes: number; deleted: number; skipped: string; cutoff: number;
+  /**
+   * Rows the evidence filter kept back, so a pass says what it PROTECTED and not only what it moved.
+   *
+   * Added 2026-09-12 while dry-running the repaired offloader: the output reported four objects and 143,206 rows
+   * and said nothing about the guard, so the one number that would show the guard engaging was the one number
+   * missing. A pass that reported `held: 0` would look identical to a healthy pass, which is exactly the state
+   * this file was in for a day - the predicate blind, the column list broken, and nothing to read either from.
+   */
+  held: number;
 }
 
 /**
@@ -167,7 +176,7 @@ export async function offloadTrades(db: any, o: OffloadOptions = {}): Promise<Of
   const partRows = o.partRows ?? Number(process.env.TRADES_PART_ROWS ?? 40_000);
   const maxParts = o.maxParts ?? Number(process.env.TRADES_MAX_PARTS ?? 4);
   const cutoff = Date.now() - retainDays * 86400_000;
-  const empty: OffloadResult = { parts: 0, rows: 0, bytes: 0, deleted: 0, skipped: "", cutoff };
+  const empty: OffloadResult = { parts: 0, rows: 0, bytes: 0, deleted: 0, held: 0, skipped: "", cutoff };
 
   const cfg = o.dryRun ? null : r2Config();
   if (!cfg && !o.dryRun) return { ...empty, skipped: "R2 is not configured; set R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET" };
@@ -195,6 +204,7 @@ export async function offloadTrades(db: any, o: OffloadOptions = {}): Promise<Of
 
   // Which rows may never leave this disk. Built once per pass; see `evidenceFilter`.
   const isEvidence = evidenceFilter(db);
+  let heldTotal = 0;
 
   const rowsIn = db.prepare(
     `SELECT ${TRADE_COLUMNS.join(", ")} FROM trades WHERE id >= ? AND id < ? AND ts IS NOT NULL AND ts < ? ORDER BY id LIMIT ?`);
@@ -229,6 +239,8 @@ export async function offloadTrades(db: any, o: OffloadOptions = {}): Promise<Of
     const idFrom = Number(rows[0].id), idTo = Number(rows[rows.length - 1].id);
     // Evidence rows stay. They are still counted in the window we advance past, so the pass makes progress.
     const held = rows.filter(isEvidence);
+    heldTotal += held.length;
+    res.held = heldTotal;
     rows = rows.filter((r) => !isEvidence(r));
     if (!rows.length) { cursor = idTo + 1; part--; await yieldToLoop(); continue; }
     // Folded rather than spread: `Math.min(...rows)` on a 250,000-row part exceeds the argument limit and throws
@@ -359,6 +371,9 @@ if (isMain) {
   console.log(`  parts   ${r.parts}`);
   console.log(`  rows    ${r.rows.toLocaleString()}`);
   console.log(`  bytes   ${(r.bytes / 1048576).toFixed(1)} MB compressed`);
+  // The guard's own figure. A pass that moved rows and held none is either a quiet window or a blind predicate,
+  // and until this line existed there was no way to tell those apart from the output.
+  console.log(`  held    ${r.held.toLocaleString()} rows kept back as evidence`);
   if (!dryRun) console.log(`  deleted ${r.deleted.toLocaleString()} rows from the local database`);
   console.log(`  cutoff  ${new Date(r.cutoff).toISOString()} (rows older than this are eligible)`);
   if (r.skipped) console.log(`  note    ${r.skipped}`);

@@ -1724,7 +1724,8 @@ if (process.env.TRADES_OFFLOAD === "1") {
       const { offloadTrades } = await import("./offload.ts");
       const r = await offloadTrades(db, { log: (s) => log(s) });
       if (r.parts) log(`[offload] pass complete: ${r.parts} objects, ${r.rows.toLocaleString()} rows, ` +
-        `${(r.bytes / 1048576).toFixed(1)} MB stored, ${r.deleted.toLocaleString()} rows freed locally`);
+        `${(r.bytes / 1048576).toFixed(1)} MB stored, ${r.deleted.toLocaleString()} rows freed locally, ` +
+        `${r.held.toLocaleString()} held as evidence`);
       else if (r.skipped) log(`[offload] nothing to do: ${r.skipped}`);
     } catch (e) {
       // Loudly, and without deleting anything: the pass throws before the delete on any upload it cannot verify.
