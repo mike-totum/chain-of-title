@@ -152,12 +152,21 @@ export type Assessment = {
 };
 
 /**
- * Columns that exist on the record but not on the collector, selected only where they are present.
+ * Columns one of the two databases has and the other does not, selected only where they are present.
  *
  * `curve_checked_at` and `curve_complete` are written by the record build from the collector's `curve_checks`
  * table, so the collector's own `tokens` has neither. Putting them in TOKEN_COLUMNS would throw on every query the
  * collector answers - which is exactly how `meta_sha256` took the live lookup down for a day. Callers append
  * `optionalColumns(db)` instead, and code that reads them must treat undefined as "not checked".
+ *
+ * It now runs in both directions, and that is worth saying out loud because the name does not. `snap30_buys` and
+ * `dev_sold_at` are the opposite case: the collector has held them since the beginning and the published record has
+ * never carried them, because the record is deliberately small and neither is load-bearing for a verdict. They are
+ * here so the launch timeline can state them where they exist rather than not at all - the offline tree `npm run
+ * site` writes is built from the collector and has them - and so that adding them to the record later needs no
+ * change here. Undefined therefore means two different things depending on the file, and the timeline says neither:
+ * it omits the line. A column absent from the file is not an absence on the launch, and printing one as the other is
+ * the error this whole module exists to refuse.
  */
 /**
  * A graduation our own on-chain check disproved: the feed recorded the threshold, we read the curve account, and it
@@ -190,7 +199,7 @@ export const graduationDisproved = (t: any) => t.curve_checked_at != null && t.c
  * the failure, so there is now one spelling and every caller shares it.
  */
 
-export const OPTIONAL_TOKEN_COLUMNS = ["curve_checked_at", "curve_complete"];
+export const OPTIONAL_TOKEN_COLUMNS = ["curve_checked_at", "curve_complete", "snap30_buys", "dev_sold_at"];
 
 /**
  * The name this database gives the trades column that says curve or amm.
@@ -222,6 +231,12 @@ export function optionalColumns(dbh: any): string {
 export const TOKEN_COLUMNS = `mint, symbol, name, creator, created_at, late_discovery, dev_pct, dev_sold, unique_buyers,
   snap30_buyers, bundled_buyers, graduated, graduated_at, pool, vault_sol, vault_at, last_price, updated_at,
   rebuilt_at, rebuilt_complete, curve_buyers, venue, graduated_confirmed_by, create_sig, create_slot,
+  -- The highest price we ever saw, and when. Read together or not at all: `peak_at` dates the reading exactly as
+  -- `vault_at` dates a balance, and `peak_source` says whether a transaction was decoded at that price or a
+  -- third-party feed merely reported one. All three are in both schemas, so they belong here rather than in
+  -- OPTIONAL_TOKEN_COLUMNS; they were selected by nothing until the launch timeline needed a moment to put in it,
+  -- which is this codebase's recurring shape - the column published, documented, and reachable only by machine.
+  peak_price, peak_at, peak_source,
   -- what the launch claimed to be, and our commitments to the documents behind it. Off-chain and mutable at the
   -- source, which is exactly why the record page shows them and why they are read from here rather than re-fetched.
   description, uri, image, meta_at, meta_sha256, meta_bytes, image_sha256, image_bytes`;
