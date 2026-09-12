@@ -427,7 +427,18 @@ tracker.on("finalize", (t) => {
   runFor(t.venue)?.feed.unsubscribeTrades(t.mint);
   trades.flush();
   const entered = broker.everEntered(t.mint, ["kol-signal", "smart-wallet", "team-wallet", "grad-runner", "survivor-trail", "early-momentum", "strict-momentum"]);
-  const interesting = t.kolSignals > 0 || entered || (t.graduated && t.lastPrice >= 2 * (t.gradPrice ?? Infinity));
+  /**
+   * Whether to keep this launch's trade ledger whole rather than sample it.
+   *
+   * `t.graduated` is new here, and it is the larger half of the same decision the pruner's KEEP_TRADE_EVIDENCE now
+   * makes: a graduated launch is what every report, finding and outside-buyer count is ABOUT, so its ledger is the
+   * evidence rather than working data. Sampling it to 400 rows a side discarded 26.7% of the curve buys on
+   * graduated launches, including - by construction - the trade that completed the curve, which is the single most
+   * probative row a launch has. Keeping it costs 116 MB/day across the archive; see KEEP_TRADE_EVIDENCE for the
+   * volume headroom that buys.
+   */
+  const interesting = t.kolSignals > 0 || entered || t.graduated
+    || (t.graduated && t.lastPrice >= 2 * (t.gradPrice ?? Infinity));
   try {
     finalizeTokenTrades(db, t, { keepAll: interesting, keepCurve: t.graduated || t.buyers.size >= 8 || (t.launchPrice > 0 && t.peakPrice >= 2 * t.launchPrice) ? 400 : 100, keepAmm: t.graduated ? 6000 : 1500 }); // graduated tokens keep enough AMM trades for the post-graduation replay (npm run ammreplay)
   } catch (e) {

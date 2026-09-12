@@ -68,12 +68,45 @@ export function keepTweetEvidence(db: { prepare(sql: string): { get(...a: unknow
   return "AND id NOT IN (SELECT tweet_id FROM token_promotion_hit WHERE tweet_id IS NOT NULL)";
 }
 
+/**
+ * What retention must never delete from `trades`, as one SQL fragment used by every pruner.
+ *
+ * THE DEFAULT CHANGED ON 2026-09-12, and the change is the burden of proof rather than a threshold. It was: delete
+ * curve rows on a timer, and exempt the few we had been bitten by. It is now: if a row can be used, deleting it
+ * needs a reason. Mike's words, and they are the right test for an archive - the rows are the evidence, and every
+ * exemption added here so far was added AFTER a published figure had already been computed over rows we had thrown
+ * away ourselves.
+ *
+ * So the whole curve ledger of any launch that GRADUATED is kept. That is the population every report, every
+ * finding and every outside-buyer count is about: 12,525 launches holding 2.67 million curve trades, against the
+ * 206,000 launches and 2.6 million trades A DAY that the archive sees in total. It is 4.5% of the deletion and
+ * approximately all of the value.
+ *
+ * `graduated = 1` rather than `graduated_confirmed_by IS NOT NULL`, deliberately, and it costs 42.5 GB/year against
+ * 26.7. The inferred flag overstates graduation by roughly three quarters and we know it - but confirmation can
+ * arrive after the pruner would have run, and a launch whose ledger is gone can never be confirmed, measured or
+ * reported on again. Keeping rows for a launch that turns out not to have graduated wastes disk. Deleting rows for
+ * one that did is unrecoverable. Those are not symmetric and the exemption points at the recoverable side.
+ *
+ * WHAT THIS COSTS AND WHO HAS TO ACT ON IT: 116 MB/day. The volume is 25 GB and steady state was about 15 GB, so
+ * the remaining headroom is roughly 86 days from this commit. A full disk drops launches, which is the one failure
+ * that cannot be undone - so this is a change that BUYS TIME to move the ledger somewhere cheap, not one that
+ * settles the question. Gzipped these rows measure 138 bytes rather than 410, so the same ledger is about 1.8
+ * GB/year on object storage. Watch the volume.
+ */
 export const KEEP_TRADE_EVIDENCE = `AND NOT (
     (market = 'curve' AND side = 'buy' AND sol >= ${BUYOUT_SOL})
     OR (market = 'amm' AND EXISTS (
           SELECT 1 FROM trades b
            WHERE b.wallet = trades.wallet AND b.mint = trades.mint
              AND b.market = 'curve' AND b.side = 'buy' AND b.sol >= ${BUYOUT_SOL}))
+    -- The curve ledger of a launch that graduated, in full. The launch record IS the trade rows: an outside-buyer
+    -- count, a buyout, a fill time and the order of events are all computed from them, and every one of those was
+    -- at some point published as a measurement taken over whatever had survived the timer.
+    OR (market = 'curve' AND EXISTS (
+          SELECT 1 FROM tokens tk
+           WHERE tk.mint = trades.mint
+             AND (COALESCE(tk.graduated, 0) = 1 OR tk.graduated_confirmed_by IS NOT NULL)))
   )`;
 /** Above this share of supply in the first block, the creator is the market. */
 export const MAX_DEV_PCT = 20;
