@@ -16,7 +16,6 @@ data/reports/
 
 # Small derived data that IS worth versioning, because it is how claims are checked and reproduced:
 !data/labels.json
-!data/operator-clusters.json
 !data/x-mute.json
 
 # Caller lists. Local operating files, never published: they name identifiable X accounts and
@@ -67,3 +66,10 @@ data/images.err
 # up by the `git add -A` that has already taken the site down once.
 data/engagements/
 *.engagement.db
+
+# Hand-traced operator clusters: 50 named wallet addresses under a funder, with our own note characterising what
+# that group did. Committed in the first public commit (2026-09-07) and removed 2026-09-12 for the same reason
+# kols.txt and channels.txt are held back above: it is an unverified adverse characterisation of identifiable
+# parties, written before we learned that trading terminals fund their users from one address exactly as a wallet
+# farm funds its own. `clusters.ts` reads it only as a local seed and guards with existsSync, so nothing breaks.
+data/operator-clusters.json

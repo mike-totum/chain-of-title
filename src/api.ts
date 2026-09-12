@@ -173,7 +173,14 @@ export function walletRecord(w: string, p: Profile, line: string | null, cov: Co
     // `verdictLine` returns null rather than reaching for something to say.
     summary: line,
     operatorCluster: p.cluster,
-    operatorPolicy: p.policy,
+    /**
+     * `operatorPolicy` is REMOVED, 2026-09-12. It served `operator_policy.policy` - this project's own trading
+     * grade of a cluster, one of follow / watch / avoid - as a field of a public API response about a named
+     * address. It is an opinion we formed for a purpose this project has abandoned, and a register does not
+     * publish its opinion of a party. See the `cluster-policy-published` correction. `operatorCluster` stays:
+     * which wallets share a funder is an observation, and the page that shows it says in terms that a shared
+     * funder is a lead and not a finding.
+     */
     curveBuyouts: inArchive ? p.buyouts.length : null,
     tokensTouched: inArchive ? p.tokens : null,
     /** All SOL figures are "in this archive", not "ever". A wallet's record here starts when our coverage does. */

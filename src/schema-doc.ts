@@ -184,15 +184,6 @@ const DOCS: Record<string, Record<string, Doc>> = {
     k: { kind: "ours", desc: "Key. The published record carries built_at (when this file was assembled), built_by (which machine and script: 'local' or the cloud service name, never a personal hostname), built_pid, and watermark (how far the incremental copy had reached)." },
     v: { kind: "ours", desc: "Value, as text. Timestamps are epoch ms." },
   },
-  operator_policy: {
-    cluster: { kind: "ours", desc: "Cluster label, joining to operator_wallets." },
-    policy: { kind: "ours", desc: "What the cluster's behaviour looks like across its plays. Our reading of a pattern, not a fact about the chain." },
-    hold_plays: { kind: "ours", desc: "Plays where the cluster held rather than distributed." },
-    dist_plays: { kind: "ours", desc: "Plays where it distributed into buyers." },
-    plays: { kind: "ours", desc: "Total plays observed for the cluster." },
-    note: { kind: "ours", desc: "Anything qualifying the reading above." },
-    updated_at: { kind: "ours", desc: "When the row was last written, epoch ms." },
-  },
 };
 
 const TABLE_NOTE: Record<string, string> = {
@@ -206,7 +197,6 @@ const TABLE_NOTE: Record<string, string> = {
   runs: "The coverage windows. What we were awake for.",
   pool_map: "Which PumpSwap pool belongs to which token.",
   operator_wallets: "Wallets grouped by who funded them.",
-  operator_policy: "What each cluster's plays look like taken together.",
   corrections: "Every correction this project has issued against its own record, so a reader who mirrors this file and never visits the site still learns what was wrong. Append-only: a correction is superseded by a new row naming it, never edited.",
   graduations: "A view, not a table: the launches whose curve completion was actually confirmed. `SELECT * FROM graduations` is the defensible answer to a question `tokens.graduated` overstates.",
   meta: "What built this file, and when. A record that cannot account for its own origin is a strange thing for a provenance project to publish.",

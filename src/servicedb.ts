@@ -135,7 +135,7 @@ if (!READ_ONLY) {
 // ---------- 2. build the record ----------
 db.exec(`ATTACH DATABASE '${OUT.replace(/'/g, "''")}' AS rec`);
 if (FULL) {
-  for (const t of ["tokens", "trades", "hist_trades", "operator_wallets", "operator_policy", "operator_funders", "pool_map", "runs", "meta", "corrections"])
+  for (const t of ["tokens", "trades", "hist_trades", "operator_wallets", "operator_funders", "pool_map", "runs", "meta", "corrections"])
     db.exec(`DROP TABLE IF EXISTS rec.${t}`);
 }
 /**
@@ -279,9 +279,19 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS rec.operator_wallets (
     wallet TEXT PRIMARY KEY, funder TEXT, cluster TEXT, role TEXT, seeded_at INTEGER, source_mint TEXT, added_at INTEGER
   );
-  CREATE TABLE IF NOT EXISTS rec.operator_policy (
-    cluster TEXT PRIMARY KEY, policy TEXT, hold_plays INTEGER, dist_plays INTEGER, plays INTEGER, note TEXT, updated_at INTEGER
-  );
+  -- operator_policy is NOT published, and is dropped from any record that already carries it.
+  --
+  -- DROP rather than merely ceasing to create: an incremental build does not remove a table it stops writing, so
+  -- without this the 55 rows already in the deployed record would sit there indefinitely while nothing refreshed
+  -- them. What it held was policy - this project's own trading grade of a cluster, one of follow / watch /
+  -- avoid - plus two hand-written notes characterising named groups from a sample of one or two launches each.
+  -- A register records what was observed and never what it concluded about a party, and the hypothesis those
+  -- grades were formed to serve was tested and rejected. See the cluster-policy-published correction.
+  --
+  -- operator_wallets and operator_funders stay. Who funded a wallet is a chain fact, the funder note records
+  -- where a cluster is a trading terminal rather than a farm, and the pages that show them say in terms that a
+  -- shared funder is a lead and not a finding.
+  DROP TABLE IF EXISTS rec.operator_policy;
   -- The funders themselves, which every cluster label on this site is named after and which the record did not
   -- carry. operator_wallets published the wallet-to-cluster edge and nothing about the node it points at, so a
   -- reader could see that six wallets shared a funder and could not see how many wallets that funder has opened in
@@ -759,7 +769,6 @@ try {
     !!(db.prepare("SELECT 1 FROM main.sqlite_master WHERE type='table' AND name = ?").get(t) as any);
   for (const [t, cols] of [
     ["operator_wallets", "wallet, funder, cluster, role, seeded_at, source_mint, added_at"],
-    ["operator_policy", "cluster, policy, hold_plays, dist_plays, plays, note, updated_at"],
     ["operator_funders", "funder, first_seen, last_seen, txs, wallets, seeds, sampled_at, note, parent, hops"],
     ["pool_map", "pool, mint, created_at"],
     ["runs", "id, started_at, stopped_at, note, venue"],
@@ -999,6 +1008,23 @@ try {
   /** The same insert, for a correction that replaces an earlier one. Nothing here ever UPDATEs; amendment is a row. */
   const amend = db.prepare(`INSERT OR IGNORE INTO rec.corrections
     (id, issued_at, scope, subject, finding, effect, remedy, supersedes) VALUES (?,?,?,?,?,?,?,?)`);
+  ins.run("cluster-policy-published", at("2026-09-12"), "record", null,
+    "The record carried a table, operator_policy, holding this project's own grade of each wallet cluster - one of "
+    + "follow, watch or avoid - written while this was a trading project and kept after that hypothesis was tested "
+    + "and rejected. 55 rows were published: 34 avoid, 17 watch, 4 follow. Two carried hand-written notes "
+    + "characterising named groups from a sample of one or two launches each. The grade was also rendered on every "
+    + "wallet and cluster page under the heading 'Cluster behaviour', and served by api/v1 as operatorPolicy.",
+    "A reader of the record, the API or those pages was given our opinion of a group of addresses as though it were "
+    + "part of the archive, with no caveat attached to it and no way to tell it from an observation. The cluster "
+    + "pages themselves say a shared funder is a lead and not a finding, and that trading terminals fund their "
+    + "users exactly as a wallet farm does - so the grade contradicted, on the same page, the sentence written to "
+    + "qualify it. It is the failure this archive reports in others: a characterisation of a party stated as "
+    + "record. The file is public domain and mirrored under a DOI, so copies taken before this date carry it.",
+    "operator_policy is no longer published and is dropped from the record on the next build. The grade is gone "
+    + "from the wallet and cluster pages and from api/v1, and the two hand-written notes are removed from the code "
+    + "that seeded them into every database. Nothing observed was deleted: operator_wallets and operator_funders "
+    + "stay, because who funded a wallet is a chain fact, and the funder note records where a cluster is a trading "
+    + "terminal rather than a farm. What was withdrawn is only ever our conclusion about a party.");
   ins.run("zero-buyers-ungated", at("2026-09-07"), "record", null,
     "The rule that flags a launch for having no outside buyers was never made conditional on the curve having "
     + "completed. It was written for graduations and applied to every launch, including the great majority that "
@@ -1169,7 +1195,7 @@ try {
     + "each one now states how much of its curve was read.");
 }
 
-const RECORD_TABLES = new Set(["tokens", "trades", "hist_trades", "operator_wallets", "operator_policy",
+const RECORD_TABLES = new Set(["tokens", "trades", "hist_trades", "operator_wallets",
   "operator_funders", "pool_map", "runs", "wallet_flow", "meta", "corrections", "sqlite_sequence"]);
 for (const r of db.prepare("SELECT name FROM rec.sqlite_master WHERE type='table'").all() as { name: string }[]) {
   if (RECORD_TABLES.has(r.name)) continue;

@@ -1855,7 +1855,11 @@ export function walletBody(w: string, p: any, v: { label: string; why: string } 
       <tr><td class="k">Group</td><td>One of <b>${fmt(p.clusterWallets)}</b> wallets seeded from that funder, which
         together took <b>${fmt(p.clusterCurves)}</b> bonding curve${p.clusterCurves === 1 ? "" : "s"}.
         <a href="../o/${esc(p.cluster)}.html">See the whole cluster</a>, wallet by wallet and curve by curve.</td></tr>
-      ${p.policy ? `<tr><td class="k">Cluster behaviour</td><td>${esc(p.policy)}</td></tr>` : ""}
+      ${/* "Cluster behaviour" printed operator_policy.policy - our own trading grade, one of follow / watch /
+           avoid - against a named address, on a page that then tells the reader a shared funder is a lead and not
+           a finding. It contradicted the sentence directly beneath it. Removed 2026-09-12; see the
+           cluster-policy-published correction. The wallets, funders, curves and transactions stay: those are
+           observations, and they are what these pages are for. */""}
     </table>
     <p class="callout">A shared funder is a lead, not a finding. Trading terminals fund their users from one address
     the same way a wallet farm funds its own, and we cannot tell those apart from the chain alone.</p>` : "";
@@ -2153,7 +2157,7 @@ export function swimlane(events: LaneEvent[], walletCurves: Map<string, number>)
  * under it, because a reader who stops halfway must not leave with the stronger claim.
  */
 export function clusterBody(p: {
-  cluster: string; funders: { funder: string; wallets: number }[]; policy: string | null;
+  cluster: string; funders: { funder: string; wallets: number }[];
   wallets: { wallet: string; role: string | null; curves: number; sol: number }[];
   events: LaneEvent[]; curves: number; sol: number;
   sigs: Map<string, string | null>;
@@ -2227,7 +2231,11 @@ export function clusterBody(p: {
         <b>${fmt(p.funders.length)}</b> different addresses, which is why this group is named after the first six
         characters of the one at the root of the chain rather than after an address of its own.
         ${p.funders.map((f) => `<div class="mono">${esc(f.funder)} <span class="mut">· ${fmt(f.wallets)} wallet${f.wallets === 1 ? "" : "s"}</span></div>`).join("")}</td></tr>`}
-      ${p.policy ? `<tr><td class="k">Cluster behaviour</td><td>${esc(p.policy)}</td></tr>` : ""}
+      ${/* "Cluster behaviour" printed operator_policy.policy - our own trading grade, one of follow / watch /
+           avoid - against a named address, on a page that then tells the reader a shared funder is a lead and not
+           a finding. It contradicted the sentence directly beneath it. Removed 2026-09-12; see the
+           cluster-policy-published correction. The wallets, funders, curves and transactions stay: those are
+           observations, and they are what these pages are for. */""}
       ${timed ? `<tr><td class="k">Bought at launch</td><td><b>${fmt(atLaunch)}</b> of ${fmt(timed)} purchases came
         within fifteen minutes of the token being created${timed < p.events.length
           ? `. The remaining ${fmt(p.events.length - timed)} are of tokens launched before this archive began, so their launch time is not on our record` : ""}.</td></tr>` : ""}</table>` : ""}

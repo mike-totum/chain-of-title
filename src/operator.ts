@@ -15,7 +15,7 @@ const BUYOUT_SOL = 40;
 export interface Profile {
   buyouts: { mint: string; symbol: string | null; sol: number; ts: number; dormantH: number | null }[];
   curveSol: number; ammBuy: number; ammSell: number; tokens: number;
-  cluster: string | null; policy: string | null;
+  cluster: string | null;
   /** Who funded the wallet, and how big the group it belongs to is. Computed already; it was simply never returned. */
   funder: string | null; clusterWallets: number; clusterCurves: number;
 }
@@ -137,12 +137,11 @@ export function profile(dbh: any, w: string): Profile {
     // looking at either page.
     curves: clusterCurveCount(dbh, op.cluster),
   } : null;
-  const pol = op?.cluster ? (dbh.prepare("SELECT policy FROM operator_policy WHERE cluster = ?").get(op.cluster) as any) : null;
   return {
     buyouts: buyouts.map((b) => ({ mint: b.mint, symbol: b.symbol, sol: b.sol, ts: b.ts,
       dormantH: b.created_at ? (b.ts - b.created_at) / 3600_000 : null })),
     curveSol: flow.curveSol, ammBuy: flow.ammBuy, ammSell: flow.ammSell, tokens: flow.tokens,
-    cluster: op?.cluster ?? null, policy: pol?.policy ?? null,
+    cluster: op?.cluster ?? null,
     funder: op?.funder || null, clusterWallets: Number(grp?.wallets ?? 0), clusterCurves: Number(grp?.curves ?? 0),
   };
 }
@@ -196,7 +195,7 @@ export interface ClusterEvent {
 }
 
 export interface ClusterProfile {
-  cluster: string; policy: string | null;
+  cluster: string;
   /**
    * Every distinct address that funded a wallet in this group, busiest first - not one of them.
    *
@@ -230,7 +229,7 @@ export function clusterProfile(dbh: any, cluster: string): ClusterProfile {
   const wallets = dbh.prepare(
     `SELECT wallet, role, funder FROM operator_wallets WHERE cluster = ? ORDER BY wallet`
   ).all(cluster) as any[];
-  if (!wallets.length) return { cluster, funders: [], policy: null, wallets: [], events: [], curves: 0, sol: 0 };
+  if (!wallets.length) return { cluster, funders: [], wallets: [], events: [], curves: 0, sol: 0 };
 
   const list = wallets.map((w) => w.wallet);
   const holes = list.map(() => "?").join(",");
@@ -279,7 +278,13 @@ export function clusterProfile(dbh: any, cluster: string): ClusterProfile {
       return [...n.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
         .map(([funder, wallets]) => ({ funder, wallets }));
     })(),
-    policy: (dbh.prepare("SELECT policy FROM operator_policy WHERE cluster = ?").get(cluster) as any)?.policy ?? null,
+    /**
+     * `policy` is deliberately NOT returned. It is `operator_policy.policy` - this project's own trading grade
+     * (follow / watch / avoid) from a hypothesis that was tested and rejected - and it was rendered as "Cluster
+     * behaviour" against named addresses. A register states what was observed and never what it concluded about
+     * a party; see the correction `cluster-policy-published`. Removing it here rather than only in the template
+     * means a future page cannot reintroduce it by reading a field that is still on the object.
+     */
     wallets: wallets.map((w) => ({
       wallet: w.wallet, role: w.role ?? null,
       curves: per.get(w.wallet)?.curves ?? 0, sol: per.get(w.wallet)?.sol ?? 0,
@@ -343,7 +348,7 @@ if (isMain) {
   const cov = db.prepare("SELECT MIN(created_at) a FROM tokens WHERE late_discovery=0").get() as any;
   console.log(`\n${wallet}`);
   console.log(`  our archive starts ${new Date(cov.a).toISOString().slice(0, 10)}; everything below is what this wallet did inside it\n`);
-  if (p.cluster) console.log(`  operator cluster  ${p.cluster}${p.policy ? ` (policy: ${p.policy})` : ""}`);
+  if (p.cluster) console.log(`  operator cluster  ${p.cluster}`);
   console.log(`  tokens touched    ${p.tokens}`);
   console.log(`  curve buyouts     ${p.buyouts.length} (>= ${BUYOUT_SOL} SOL in a single buy)`);
   console.log(`  spent on curves   ${p.curveSol.toFixed(1)} SOL`);

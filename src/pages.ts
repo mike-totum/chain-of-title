@@ -348,7 +348,7 @@ export function dataBody(f: PageFacts, db: any, chrome: Chrome): string {
   <p class="lede">Tables: <span class="mono">tokens</span> (the launch record), <span class="mono">trades</span> and
   <span class="mono">hist_trades</span> (curve buys large enough to be a buyout), <span class="mono">wallet_flow</span>
   (what each curve-taking wallet did afterwards), <span class="mono">operator_wallets</span> and
-  <span class="mono">operator_policy</span>, <span class="mono">pool_map</span>, and <span class="mono">runs</span>
+  <span class="mono">operator_funders</span>, <span class="mono">pool_map</span>, and <span class="mono">runs</span>
   (the coverage windows, so you can check what we were awake for).</p>
   <p class="callout">The collector's own database is around 7 GB and is not this. It holds every trade on every tracked
   token and exists to derive the record; it is a research instrument on a retention window, not the archive.</p>

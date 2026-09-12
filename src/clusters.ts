@@ -45,9 +45,22 @@ db.exec(`CREATE TABLE IF NOT EXISTS operator_funders (funder TEXT PRIMARY KEY, f
 db.exec(`CREATE TABLE IF NOT EXISTS operator_wallets (wallet TEXT PRIMARY KEY, funder TEXT, cluster TEXT, role TEXT, seeded_at INTEGER, source_mint TEXT, traced INTEGER DEFAULT 0, added_at INTEGER)`);
 db.exec(`CREATE INDEX IF NOT EXISTS operator_wallets_funder ON operator_wallets(funder)`);
 db.exec(`CREATE TABLE IF NOT EXISTS operator_policy (cluster TEXT PRIMARY KEY, policy TEXT, hold_plays INTEGER, dist_plays INTEGER, plays INTEGER, manual INTEGER DEFAULT 0, note TEXT, updated_at INTEGER)`);
-// hand-set from the first two farms: FC9BqG holds for hours (Kshama, Simba), Bwpr1K sells within minutes to hours (Squads, onoda)
-db.prepare(`INSERT OR IGNORE INTO operator_policy (cluster, policy, manual, note, updated_at) VALUES ('FC9BqG', 'follow', 1, 'holds through the flat window; Kshama 660x, Simba 46x', ?)`).run(Date.now());
-db.prepare(`INSERT OR IGNORE INTO operator_policy (cluster, policy, manual, note, updated_at) VALUES ('Bwpr1K', 'avoid', 1, 'dumps into followers: Squads sold 283 SOL in 30 min, onoda drained in hours', ?)`).run(Date.now());
+/**
+ * The two hand-set rows are GONE, 2026-09-12, and this is why they must not come back.
+ *
+ * They wrote a characterisation of two identifiable groups into every database this ever ran against - "dumps
+ * into followers: Squads sold 283 SOL in 30 min, onoda drained in hours" and "holds through the flat window;
+ * Kshama 660x, Simba 46x". Both were written for trading, by hand, from a sample of one or two launches each.
+ * From there they travelled: into the collector, into `record.db` through servicedb, onto the public site as
+ * "Cluster behaviour", into the api/v1 wallet response as `operatorPolicy`, and into the DOI deposit - which the
+ * pledge says cannot be renamed, withdrawn or made private.
+ *
+ * A register records what was observed and never what it concluded about a party. `policy` is a grade, the notes
+ * name third-party launches in prose, and the hypothesis they were written to serve was tested and rejected. The
+ * generated rows below (`5 hold / 9 distribute of 15 plays`) are counts of what wallets did and are kept in the
+ * collector's own database, which is a research instrument; what changed is that none of it is published any
+ * more. See the `cluster-policy-published` correction.
+ */
 for (const col of ["parent TEXT", "hops INTEGER DEFAULT 0"]) { try { db.exec(`ALTER TABLE operator_funders ADD COLUMN ${col}`); } catch {} }
 /** a funder with almost no history is a pass-through wallet; its own funder is the real source. Follow up to this many hops. */
 const MAX_HOPS = Number(opt("hops", "3"));
