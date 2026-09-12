@@ -355,7 +355,7 @@ export async function restoreOffloaded(db: any, o: { log?: (s: string) => void }
 }
 
 // CLI. Importing must not run a pass.
-const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop() ?? " ");
+const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop() ?? "");
 if (isMain) {
   const dryRun = process.argv.includes("--dry-run");
   if (process.argv.includes("--restore")) {
