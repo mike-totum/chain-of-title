@@ -820,9 +820,11 @@ ${body}
 In property law, the chain of title is the unbroken documented history of ownership from origin: what you establish
 before you believe a claim about what something is. Coverage begins ${c.coverageFrom}${c.gapMin >= 1 ? `, with ${fmt(c.gapMin)} min of recorded downtime` : ", no recorded downtime"}.
 Everything here is read from the Solana chain. Where we recorded a launch's creation transaction, its page cites it and you can check every figure yourself; where we did not, the page says so. Where we say no markers were found, we checked the launch against every pattern we record and none was present. That is a statement about what we checked, not a prediction and not advice.
-Most launches lose money regardless: of 19,412 bonding-curve positions measured over 24 hours in September 2026,
-none reached 5x, and those were the organic ones, filtered to launches with a creator share under 50% and at
-least 30 outside buyers. A dated measurement of a favourable subset, not a running total over the archive above.
+Most launches lose money regardless: 19,412 bonding-curve entries were SIMULATED against the recorded trades over
+24 hours in September 2026 and none reached 5x, and those were the organic ones, filtered to launches with a
+creator share under 50% and at least 30 outside buyers. Simulated, not held: this archive takes no position in
+anything it reports on, and the figure is a dated measurement of a favourable subset rather than a running total
+over the archive above.
 <div class="who">Kept by <b>${esc(KEEPER)}</b> · <a href="mailto:${esc(CONTACT)}">${esc(CONTACT)}</a>${SOURCE_URL ? ` · <a href="${esc(SOURCE_URL)}">Source</a>` : ""}<br>
 Free to use, with no account and no wallet connection. The archive is public domain (<a href="${root}data.html">CC0</a>) and
 downloadable in full, so nothing here depends on trusting us to keep publishing it. Funded by grants and by the
