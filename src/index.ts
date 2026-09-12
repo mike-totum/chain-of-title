@@ -1002,8 +1002,11 @@ setInterval(() => {
     const rs = r.feed.getStats() as { creates?: number; trades?: number; curves?: number; reconnects?: number };
     return `${r.venue.id}=${r.seen}/${rs.trades ?? 0}t/${rs.curves ?? 0}c/${rs.reconnects ?? 0}r`;
   }).join(" ");
+  // On the status line as well as in the alarm, so "how full is it" is answerable from any log tail rather than
+  // only at the moment it crossed a threshold.
+  const disk = diskUsedPct === null ? "" : Number.isNaN(diskUsedPct) ? " disk=unreadable" : ` disk=${diskUsedPct.toFixed(0)}%`;
   const parts = [...realized].map(([k, v]) => `${k}: ${v.n} closed, ${v.wins}W, ${v.pnl >= 0 ? "+" : ""}${v.pnl.toFixed(3)} SOL`);
-  log(`[status] launches=${seen} ${venueParts} tracking=${tracker.tokens.size} amm=${ammMatched}/${amm?.stats.trades ?? 0} pools=${poolToMint.size} tradesStored=${trades.written} smartWallets=${broker.smartWallets.size} teamWallets=${broker.walletTeams.size}${st.subscriptions >= 0 ? ` subs=${st.subscriptions}` : ""} trades=${st.trades} reconnects=${st.reconnects} open=${broker.openPositions().length}${watcher ? ` kolPolls=${watcher.stats.polls} kolSignals=${watcher.stats.signals}` : ""}${street ? ` streetTweets=${street.stats.tweets} streetSignals=${street.stats.signals}` : ""}${tg ? ` tgEvents=${tg.stats.allEvents} tgPolls=${tg.stats.polls} tgMsgs=${tg.stats.messages} tgSignals=${tg.stats.signals}` : ""}`);
+  log(`[status] launches=${seen}${disk} ${venueParts} tracking=${tracker.tokens.size} amm=${ammMatched}/${amm?.stats.trades ?? 0} pools=${poolToMint.size} tradesStored=${trades.written} smartWallets=${broker.smartWallets.size} teamWallets=${broker.walletTeams.size}${st.subscriptions >= 0 ? ` subs=${st.subscriptions}` : ""} trades=${st.trades} reconnects=${st.reconnects} open=${broker.openPositions().length}${watcher ? ` kolPolls=${watcher.stats.polls} kolSignals=${watcher.stats.signals}` : ""}${street ? ` streetTweets=${street.stats.tweets} streetSignals=${street.stats.signals}` : ""}${tg ? ` tgEvents=${tg.stats.allEvents} tgPolls=${tg.stats.polls} tgMsgs=${tg.stats.messages} tgSignals=${tg.stats.signals}` : ""}`);
   for (const p of parts) log("   ", p);
 }, 60_000);
 
@@ -1126,6 +1129,81 @@ async function sweepMissingMeta(): Promise<void> {
 }
 setInterval(() => void sweepMissingMeta(), 60_000);
 setTimeout(() => void sweepMissingMeta(), 90_000);
+
+/**
+ * How full the volume is, and an alarm before it matters.
+ *
+ * venues.ts clause 5: "a full disk drops launches, which is the one failure that cannot be undone." Nothing in this
+ * process was watching for it. The archive has already been to 88% once, when two stale merge copies were left
+ * behind, and it was found by someone looking rather than by anything telling them.
+ *
+ * It matters more from here than it did. Retention now spares the whole curve ledger of every graduated launch,
+ * which is the right call - those rows are the evidence every finding rests on - and it costs about 116 MB a day
+ * against a 25 GB volume already near 15 GB. That is real headroom, roughly three months, and three months is
+ * exactly the horizon nobody watches. A gap caused by a full disk is indistinguishable afterwards from a gap caused
+ * by anything else, except that it was entirely predictable.
+ *
+ * Two thresholds because they mean different things. 80% is "plan something": prune harder, raise the volume, move
+ * the ledger to object storage - gzipped those rows are 138 bytes against 410, so the whole thing is ~1.8 GB a year
+ * off-volume. 92% is "this stops collecting soon", and SQLite needs room for its WAL and for a checkpoint on top of
+ * the file itself, so the last few per cent are not usable space.
+ *
+ * Alerts on the way up only, once per threshold, and once on recovery. A disk alarm that repeats every ten minutes
+ * is a disk alarm nobody reads.
+ */
+const DISK_WARN_PCT = Number(process.env.DISK_WARN_PCT || 80);
+const DISK_CRIT_PCT = Number(process.env.DISK_CRIT_PCT || 92);
+let diskAlerted: "" | "warn" | "crit" = "";
+let diskUsedPct: number | null = null;
+
+let diskPathLogged = false;
+async function checkDisk(): Promise<void> {
+  try {
+    const { statfs } = await import("node:fs/promises");
+    const { dirname, resolve } = await import("node:path");
+    /**
+     * The database's own directory, and it says which one it measured.
+     *
+     * statfs reports the filesystem the path is on, so this is right only while DB_PATH points at the volume. A
+     * local run, a --db override, or a path that does not exist yet all fall back to the working directory - which
+     * on the collector is the image, not /data - and the percentage would then be about the wrong filesystem while
+     * looking exactly as authoritative. Raised by coin-14, and the cost of getting it wrong is an alarm that stays
+     * green while the volume it was supposed to watch fills up.
+     *
+     * So the resolved path is logged once. A reader of the log can then see what the number is about, which is the
+     * difference between a measurement and a number.
+     */
+    const dir = resolve(dirname(config.dbPath) || ".");
+    const st = await statfs(dir);
+    if (!st.blocks) return;
+    if (!diskPathLogged) {
+      diskPathLogged = true;
+      log(`[disk] watching the filesystem at ${dir} (from DB_PATH=${config.dbPath})`);
+    }
+    const used = 100 * (1 - st.bavail / st.blocks);
+    const freeGb = (st.bavail * st.bsize) / 1e9;
+    diskUsedPct = used;
+    const level = used >= DISK_CRIT_PCT ? "crit" : used >= DISK_WARN_PCT ? "warn" : "";
+    // Only ever escalates. Dropping back under a threshold clears the alarm; wobbling across one does not re-fire.
+    if (level && level !== diskAlerted && !(diskAlerted === "crit" && level === "warn")) {
+      diskAlerted = level;
+      const msg = `${used.toFixed(1)}% of the collector volume used, ${freeGb.toFixed(1)} GB free`;
+      log(`[disk] ${level === "crit" ? "CRITICAL" : "warning"}: ${msg}`);
+      notify(level === "crit"
+        ? `🔴 pump-monitor: ${msg}. A full volume stops ingestion, and launch-time facts do not come back. Raise the volume or prune now.`
+        : `🟠 pump-monitor: ${msg}. Not urgent yet; decide now rather than at 92%.`);
+    } else if (!level && diskAlerted) {
+      diskAlerted = "";
+      log(`[disk] recovered: ${used.toFixed(1)}% used, ${freeGb.toFixed(1)} GB free`);
+      notify(`🟢 collector volume back under ${DISK_WARN_PCT}% (${used.toFixed(1)}%)`);
+    }
+  } catch (e) {
+    // Never fatal, and never silent either: a check that cannot run must say so once rather than read as healthy.
+    if (diskUsedPct === null) { diskUsedPct = NaN; log(`[disk] cannot read volume usage: ${(e as Error).message}`); }
+  }
+}
+setInterval(() => void checkDisk(), 10 * 60_000);
+setTimeout(() => void checkDisk(), 30_000);
 
 const RETENTION_DAYS = Number(process.env.RETENTION_DAYS || 14);
 /**
