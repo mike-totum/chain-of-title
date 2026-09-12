@@ -35,7 +35,7 @@
  * pool's own bounded signature history for curves that actually completed - roughly 0.32 requests a second, the rate
  * backfill.ts already runs at.
  */
-import { RpcFeed, type CurveUpdate } from "./rpc.ts";
+import { RpcFeed, payloadsFrom, type CurveUpdate } from "./rpc.ts";
 import type { CreateEvent } from "./pumpportal.ts";
 import { rpc } from "../rpc-http.ts";
 import {
@@ -91,12 +91,9 @@ export class LaunchLabFeed extends RpcFeed {
 
   protected handleLogs(signature: string, logs: string[], slot: number): void {
     const now = Date.now();
-    const payloads: Buffer[] = [];
-    for (const l of logs) {
-      if (!l.startsWith("Program data: ")) continue;
-      const d = Buffer.from(l.slice(14), "base64");
-      if (d.length >= 8) payloads.push(d);
-    }
+    // Only what LaunchLab emitted. Its TradeEvent discriminator is byte-identical to pump.fun's - both are
+    // sha256("event:TradeEvent") - so a transaction touching both venues would otherwise cross the streams.
+    const payloads = payloadsFrom(logs, this.program);
     if (!payloads.length) return;
     // Every payload in one transaction is about one pool in practice; grouping by pool keeps that true even if not.
     const byPool = new Map<string, Buffer[]>();

@@ -145,6 +145,57 @@ export interface CurveUpdate {
   complete: boolean;
 }
 
+/**
+ * The `Program data:` payloads a given program actually emitted, rather than every payload in the transaction.
+ *
+ * ANCHOR DISCRIMINATORS DO NOT IDENTIFY A PROGRAM, and that is not a subtlety - it is a byte-for-byte collision
+ * between the two venues this collector watches. An event discriminator is `sha256("event:<Name>")` truncated to 8
+ * bytes, derived from the event's NAME and nothing else, so pump.fun's TradeEvent and Raydium LaunchLab's are both
+ * `bddb7fd34ee661ee`. Any two programs that call an event TradeEvent collide, and two of ours do.
+ *
+ * `logsSubscribe` delivers every log line of any transaction MENTIONING our program, including lines emitted by
+ * other programs in the same transaction - an aggregator routing across both venues, say. Without attribution the
+ * pump.fun decoder reads a LaunchLab TradeEvent as its own: the length check passes, `mint` is taken from the pool
+ * state (a perfectly valid-looking pubkey) and `solAmount` off `total_base_sell`, which yields ~793,100 SOL. That
+ * is over BUYOUT_MIN_SOL, so the buyout detector fires, `restoreToken` writes a launch row for a POOL ADDRESS, and
+ * a signals row records a six-figure SOL curve buyout that never happened. A fabricated launch carrying a
+ * fabricated buyout is the exact thing this archive exists not to produce.
+ *
+ * Measured at 0 triggering transactions in 500 blocks, so this is a precondition rather than a live fault. It is
+ * fixed now because it is a precondition of running two Anchor venues on one log reader, which is what we now do.
+ *
+ * HOW: Solana frames every invocation as `Program <id> invoke [depth]` ... `Program <id> success|failed`, and a
+ * `Program data:` line belongs to whichever program is innermost at that point. So this walks the stack.
+ *
+ * WHEN IT CANNOT TELL, IT KEEPS THE PAYLOAD. An empty stack means the log shape is not what is assumed here, and
+ * the two failure modes are not equal: decoding a foreign event writes a wrong row, which is bad and rare, while
+ * dropping our own events loses launches permanently and silently, which is worse and would be total. So an
+ * unattributable payload falls back to the old behaviour, and only payloads positively attributed to SOME OTHER
+ * program are discarded. That keeps the fix from ever being the reason ingestion stops.
+ */
+export function payloadsFrom(logs: string[], program: string): Buffer[] {
+  const out: Buffer[] = [];
+  const stack: string[] = [];
+  for (const l of logs) {
+    if (l.startsWith("Program data: ")) {
+      const owner = stack[stack.length - 1];
+      // Not `owner === program`: an unknown owner is kept. See the note above on which way to fail.
+      if (owner !== undefined && owner !== program) continue;
+      const d = Buffer.from(l.slice(14), "base64");
+      if (d.length >= 8) out.push(d);
+      continue;
+    }
+    if (!l.startsWith("Program ")) continue;
+    // "Program <id> invoke [n]" - the only line that opens a frame.
+    const inv = /^Program (\S+) invoke \[\d+\]$/.exec(l);
+    if (inv) { stack.push(inv[1]); continue; }
+    // "Program <id> success" and "Program <id> failed: ..." both close one. `consumed` and `log:` do not.
+    const end = /^Program (\S+) (?:success|failed)/.exec(l);
+    if (end && stack.length && stack[stack.length - 1] === end[1]) stack.pop();
+  }
+  return out;
+}
+
 export interface RpcFeed {
   on(event: "create", listener: (e: CreateEvent, receivedAt: number) => void): this;
   on(event: "trade", listener: (e: TradeEvent & { feeBps?: number | null }, receivedAt: number) => void): this;
@@ -179,7 +230,7 @@ export class RpcFeed extends EventEmitter {
    * the seam in venues.ts, and the reason that file had no importer until now.
    */
   venueId = "pumpfun";
-  constructor(private url: string, private program: string = PUMP_PROGRAM) {
+  constructor(private url: string, protected program: string = PUMP_PROGRAM) {
     super();
   }
 
@@ -264,10 +315,9 @@ export class RpcFeed extends EventEmitter {
     const now = Date.now();
     let create: DecodedCreate | null = null;
     const trades: DecodedTrade[] = [];
-    for (const l of logs) {
-      if (!l.startsWith("Program data: ")) continue;
-      const d = Buffer.from(l.slice(14), "base64");
-      if (d.length < 8) continue;
+    // Only what this program emitted. TRADE_DISC below is byte-identical to LaunchLab's, so without this a
+    // transaction touching both venues has each decoder reading the other's events. See payloadsFrom.
+    for (const d of payloadsFrom(logs, this.program)) {
       if (d.subarray(0, 8).equals(TRADE_DISC)) {
         const t = decodeTrade(d);
         if (t) trades.push(t);
