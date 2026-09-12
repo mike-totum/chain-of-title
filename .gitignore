@@ -15,7 +15,6 @@ data/reports/
 *.log
 
 # Small derived data that IS worth versioning, because it is how claims are checked and reproduced:
-!data/labels.json
 !data/x-mute.json
 
 # Caller lists. Local operating files, never published: they name identifiable X accounts and
@@ -66,6 +65,19 @@ data/images.err
 # up by the `git add -A` that has already taken the site down once.
 data/engagements/
 *.engagement.db
+
+# The labelled validation set. 664 named mints, each carrying label "manufactured" with a family-level
+# justification applied as a per-token verdict. It is a legitimate internal instrument - it is how `npm run labels`
+# checks the clean criteria against evidence the criteria never look at - and it was committed and public from
+# 2026-09-07. But "manufactured" is a claim about PURPOSE, and it is the exact word removed from the site on
+# 2026-09-10 for that reason: we observe supply shares, buyer counts and timings, never purposes. A public file
+# asserting it against 664 identifiable mints says what the site refuses to say. `labels.ts` regenerates it with
+# `npm run labels -- --build` and exits with that instruction if it is absent, so nothing breaks.
+#
+# THE BETTER END STATE, not done here because it is a publication decision: republish it with the label naming the
+# OBSERVATION rather than the conclusion - ticker-family identity burning - which would restore the transparency
+# that publishing a validation set is for, without the purpose claim.
+data/labels.json
 
 # Hand-traced operator clusters: 50 named wallet addresses under a funder, with our own note characterising what
 # that group did. Committed in the first public commit (2026-09-07) and removed 2026-09-12 for the same reason
