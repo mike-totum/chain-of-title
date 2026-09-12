@@ -31,6 +31,7 @@
 import { rpc, base58Decode } from "./rpc-http.ts";
 import { config } from "./config.ts";
 import { openDb } from "./db.ts";
+import { VENUES } from "./venues.ts";
 
 const arg = (n: string, d = "") => {
   const i = process.argv.indexOf(`--${n}`);
@@ -260,6 +261,15 @@ async function pass(fromSlot: number, blocks: number): Promise<{ read: number; f
  * null rather than a stale or zero figure: a number that has stopped moving, presented as live, is worse than no
  * number, and both of those mistakes are already in this project's corrections.
  */
+/**
+ * The programs the collector holds a subscription to, as a SQL literal list.
+ *
+ * Built from the venue registry at startup: a venue added to `VENUES` is excluded from `beyond_pumpfun` the moment
+ * it exists, with no second place to remember. Quotes are doubled defensively even though these are base58 program
+ * ids from source, because the cost of being wrong is a broken query in the health endpoint the deploy gate reads.
+ */
+const WATCHED_PROGRAMS = VENUES.map((v) => `'${v.program.replace(/'/g, "''")}'`).join(", ");
+
 async function serveHealth(): Promise<void> {
   const { createServer } = await import("node:http");
   const port = Number(process.env.PORT ?? 8080);
@@ -269,9 +279,22 @@ async function serveHealth(): Promise<void> {
     try {
       const m = db.prepare(`SELECT COUNT(*) mints, SUM(looks_like_launch) launches,
         SUM(uri IS NOT NULL) with_uri, SUM(meta_at IS NOT NULL) documents,
-        -- Tokens the pump.fun collector is ALREADY counting. Reported separately so the two archives can be added
-        -- into one total without double counting the overlap, which is the only reason this was ever two numbers.
-        SUM(looks_like_launch AND program IS NOT '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P') beyond_pumpfun
+        -- Launches the COLLECTOR is already counting, excluded so the two archives can be added into one total
+        -- without double counting the overlap. That is the only reason this was ever two numbers, and the published
+        -- headline is literally onFile + beyondPumpfun (render.ts), so an error here is an error in the one
+        -- figure a reader sees first.
+        --
+        -- Derived from VENUES rather than named, which is the whole point of the registry and was the bug: this
+        -- excluded pump.fun's program id as a hardcoded literal. Add a second venue to the collector and its
+        -- launches are counted by the collector AND fall on the far side of a filter that only knows about
+        -- pump.fun - so every launch on venue two is added to the headline twice. The name beyond_pumpfun is
+        -- kept because it is in the published API contract; what it means is "beyond what the collector watches",
+        -- and it has meant that since the day a second venue existed.
+        --
+        -- COALESCE, not NOT IN on a bare column: a NULL program is a launch whose program we did not record, the
+        -- collector is certainly not watching it, and NULL NOT IN (...) is NULL - which SUM would drop, quietly
+        -- removing from the total the very rows we know least about.
+        SUM(looks_like_launch AND COALESCE(program,'') NOT IN (${WATCHED_PROGRAMS})) beyond_pumpfun
         FROM chain_mints`).get() as any;
       // Coverage is reported as ranges, not as a span: more than one range is a gap, and collapsing them to
       // min..max would publish a gap as continuous coverage.

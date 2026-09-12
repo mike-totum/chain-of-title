@@ -8,6 +8,7 @@
  */
 import { config } from "./config.ts";
 import { openDb } from "./db.ts";
+import { VENUES } from "./venues.ts";
 
 const JSON_OUT = process.argv.includes("--json");
 const db = openDb(config.dbPath);
@@ -26,11 +27,51 @@ const q = (sql: string, ...p: unknown[]) => db.prepare(sql).get(...p as any) as 
 // Not MAX(stopped_at) across all runs, which would look like the same thing and is the opposite of it: a fresh run
 // that has not yet stamped a heartbeat would inherit the previous run's, and a collector that is up and deaf would
 // pass the one check written to catch exactly that. A NULL heartbeat on the newest run must read as unproven.
-const lastRun = q("SELECT id, started_at, stopped_at FROM runs ORDER BY started_at DESC, id DESC LIMIT 1");
-const heartbeatAgeS = lastRun?.stopped_at ? (now - lastRun.stopped_at) / 1000 : Infinity;
+//
+// AND IT IS ONE RUN PER VENUE, which is what this check had wrong from the moment a second venue existed.
+//
+// `LIMIT 1` over the whole table answers "is SOME subscription alive", and the question this project has to answer
+// is "is EVERY subscription alive". Every venue opens its run row in the same millisecond at startup, so ordering
+// by `started_at DESC, id DESC` resolves the tie on insertion order and returns whichever venue sits last in
+// `VENUES` - a detail of a registry array deciding which feed gets monitored. Let pump.fun's socket die while any
+// later venue stays up and health reads the later venue's fresh heartbeat and reports coverage advancing: ok. The
+// primary feed dead, and the one check written to catch a collector that is up and deaf passing hardest during the
+// failure it exists for. At two venues that is a coin flip. At eight it is seven times in eight.
+//
+// So: the newest run per venue, every declared venue checked, and the worst one decides. A venue declared in
+// `VENUES` with no run row at all is a FAIL rather than a blank, because the registry entry is what publishes the
+// coverage claim - `venuePhrase()` renders it the instant the entry exists - so a declared venue nobody is
+// subscribed to means the site is claiming a scope the collector is not collecting. Unproven is not ok.
+const allRuns = (() => {
+  const sel = (cols: string) => db.prepare(`SELECT ${cols} FROM runs WHERE started_at IS NOT NULL`).all() as any[];
+  // `runs.venue` arrives by migration, so a record opened without one has no such column. Older databases collapse
+  // to a single venue rather than throwing, which is the truth about them: they were written by a one-venue collector.
+  try { return sel("id, started_at, stopped_at, venue"); } catch { return sel("id, started_at, stopped_at"); }
+})();
+const newestPerVenue = new Map<string, any>();
+for (const r of allRuns) {
+  const v = r.venue ?? "pumpfun";
+  const cur = newestPerVenue.get(v);
+  if (!cur || r.started_at > cur.started_at || (r.started_at === cur.started_at && r.id > cur.id)) newestPerVenue.set(v, r);
+}
+// A run with no heartbeat yet reads as Infinity, not as fresh: a subscription that has opened and observed nothing
+// is exactly the state a stale-heartbeat check exists to catch, and inheriting a previous run's stamp would hide it.
+const runAgeS = (r: any): number => (r?.stopped_at ? (now - r.stopped_at) / 1000 : Infinity);
+const venueRuns = VENUES.map((v) => ({ id: v.id, run: newestPerVenue.get(v.id) ?? null }))
+  .map((x) => ({ ...x, ageS: runAgeS(x.run), everRan: !!x.run }));
+const staleVenues = venueRuns.filter((x) => !(x.ageS < 180));
+// The worst venue, because a summary figure that reports the healthiest feed is how this check got here.
+const heartbeatAgeS = Math.max(...venueRuns.map((x) => x.ageS));
+const lastRun = newestPerVenue.get("pumpfun") ?? null;
 const lastLaunch = q("SELECT MAX(created_at) t FROM tokens WHERE late_discovery = 0")?.t ?? 0;
 const launchAgeS = (now - lastLaunch) / 1000;
 const launches1h = q("SELECT COUNT(*) c FROM tokens WHERE late_discovery=0 AND created_at >= ?", now - 3600_000)?.c ?? 0;
+// The rate floor below is calibrated to pump.fun's ~900-1100/h and nothing else, so it is measured on pump.fun
+// alone. Summed across venues it becomes a threshold one busy feed can satisfy on behalf of a dead one, which is
+// the same fault as the single-run heartbeat: a quiet venue cannot fail it and a dead pump.fun can be carried over
+// it. Each venue's own liveness is the heartbeat's job; this one asks whether the feed we have a number for is
+// degraded.
+const launches1hPumpfun = q("SELECT COUNT(*) c FROM tokens WHERE late_discovery=0 AND COALESCE(venue,'pumpfun')='pumpfun' AND created_at >= ?", now - 3600_000)?.c ?? 0;
 const trades5m = q("SELECT COUNT(*) c FROM trades WHERE ts >= ?", now - 300_000)?.c ?? 0;
 const pools = q("SELECT COUNT(*) c FROM pool_map")?.c ?? 0;
 const priced1h = q("SELECT COUNT(*) c FROM tokens WHERE graduated=1 AND vault_sol IS NOT NULL AND updated_at >= ?", now - 3600_000)?.c ?? 0;
@@ -90,12 +131,17 @@ const checks: Check[] = [
   // Since the heartbeat is stamped with the last launch that actually arrived rather than with the wall clock
   // (`index.ts`), this now measures ingestion, not liveness - a collector that is up and deaf fails it. That is the
   // whole point: the check that used to pass hardest during the failure it was meant to catch.
-  { name: "coverage advancing", ok: heartbeatAgeS < 180,
-    detail: heartbeatAgeS === Infinity ? "never written - collector has not completed a minute of runtime" : `last observed launch ${heartbeatAgeS.toFixed(0)}s ago (expected < 180s)` },
+  { name: "coverage advancing", ok: staleVenues.length === 0,
+    detail: staleVenues.length === 0
+      ? `${venueRuns.length} venue${venueRuns.length === 1 ? "" : "s"} advancing, worst ${heartbeatAgeS.toFixed(0)}s ago (expected < 180s)`
+      : staleVenues.map((x) => !x.everRan
+          ? `${x.id}: declared in VENUES and has never opened a run - the site claims this venue and nothing is watching it`
+          : x.ageS === Infinity ? `${x.id}: run open, no launch observed yet`
+          : `${x.id}: last observed launch ${x.ageS.toFixed(0)}s ago`).join("; ") },
   { name: "launches arriving", ok: launchAgeS < 300,
     detail: `last launch ${launchAgeS.toFixed(0)}s ago, ${launches1h} in the last hour (pump.fun runs ~900-1100/h)` },
-  { name: "launch rate sane", ok: launches1h >= 100,
-    detail: `${launches1h}/h - below 100 means the feed is degraded, not that the market is quiet` },
+  { name: "launch rate sane", ok: launches1hPumpfun >= 100,
+    detail: `pump.fun ${launches1hPumpfun}/h of ${launches1h}/h across all venues - below 100 on pump.fun means that feed is degraded, not that the market is quiet` },
   { name: "trades decoding", ok: trades5m > 0, detail: `${trades5m} trades stored in the last 5 min` },
   { name: "pool map growing", ok: pools > 0, detail: `${pools} pools known` },
   { name: "graduated tokens priced", ok: priced1h > 0, detail: `${priced1h} graduated tokens had vault balances read in the last hour` },
@@ -143,7 +189,9 @@ const healthy = checks.every((c) => c.ok !== false);
 const unknown = checks.filter((c) => c.ok === null).length;
 
 if (JSON_OUT) {
-  console.log(JSON.stringify({ healthy, unknown, checks, heartbeatAgeS, launches1h, trades5m, pools }, null, 2));
+  console.log(JSON.stringify({ healthy, unknown, checks, heartbeatAgeS, launches1h, launches1hPumpfun, trades5m, pools,
+    venues: venueRuns.map((x) => ({ venue: x.id, everRan: x.everRan, heartbeatAgeS: Number.isFinite(x.ageS) ? x.ageS : null })),
+    staleVenues: staleVenues.map((x) => x.id) }, null, 2));
 } else {
   console.log(`\ncollector: ${healthy ? "HEALTHY" : "UNHEALTHY"}${unknown ? ` (${unknown} not checkable here)` : ""}\n`);
   for (const c of checks) console.log(`  ${c.ok === null ? "----" : c.ok ? "ok  " : "FAIL"}  ${c.name.padEnd(24)} ${c.detail}`);
