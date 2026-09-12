@@ -194,6 +194,7 @@ const liveNow = () => (live && Date.now() - live.at <= LIVE_MAX_AGE_MS ? live : 
 type ChainNow = { mints: number; launches: number; documents: number; beyondPumpfun: number; ranges: { from: number; to: number }[]; at: number };
 const CHAIN_URL = process.env.CHAINMINTS_HEALTH_URL ?? "";
 let chain: ChainNow | null = null;
+let chainErr: string | null = null;
 async function pollChain(): Promise<void> {
   if (!CHAIN_URL) return;
   try {
@@ -201,9 +202,16 @@ async function pollChain(): Promise<void> {
     if (!res.ok) return;
     const j = await res.json() as any;
     if (typeof j?.mints !== "number") return;
+    chainErr = null;
     chain = { mints: j.mints, launches: j.launches ?? 0, documents: j.documents ?? 0,
       beyondPumpfun: j.beyondPumpfun ?? 0, ranges: j.ranges ?? [], at: Date.now() };
-  } catch { /* leave the previous reading to age out rather than replacing it with a zero */ }
+  } catch (e) {
+    // Said once, not swallowed. A bare catch here is the fault this project has found five times today: a poller
+    // that is configured and returning nothing looks exactly like a chain that is quiet. The previous reading is
+    // still left to age out rather than being replaced with a zero.
+    if (!chainErr) console.log(`[chain] cannot reach ${CHAIN_URL}: ${(e as Error).message}`);
+    chainErr = (e as Error).message;
+  }
 }
 const chainNow = () => (chain && Date.now() - chain.at <= 5 * 60_000 ? chain : null);
 if (CHAIN_URL) { void pollChain(); setInterval(() => void pollChain(), 30_000); }
