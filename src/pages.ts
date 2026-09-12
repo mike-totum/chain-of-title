@@ -24,6 +24,7 @@ import { renderSchema, renderSamples } from "./schema-doc.ts";
 import { reportDate } from "./reports.ts";
 import { venuePhrase, aLaunchHere, attributedPhrase, someVenueUnattributed, cannotAttributeSql } from "./venues.ts";
 import { KNOWN_PROGRAMS, launchPrograms, nonLaunchPrograms } from "./venuelist.ts";
+import { VENUES } from "./venues.ts";
 import { CANONICAL_HOST, CONTACT, SEARCH, esc, fmt, when, type Chrome } from "./render.ts";
 
 /** The site's own origin, for the copy-and-paste examples on the API page. */
@@ -669,10 +670,30 @@ export function correctionsBody(f: PageFacts): string {
 }
 
 export function venuesBody(): string {
-  const row = (p: typeof KNOWN_PROGRAMS[number]) => `
+  /**
+ * Whether this archive actually holds launches from a program, read from the registry rather than written here.
+ *
+ * IDENTIFYING A PROGRAM IS NOT WATCHING IT, and this page did not say which it meant. It lists every launch
+ * program we have identified - four as of 2026-09-12 - and the collector subscribes to two. A reader scanning a
+ * page headed "programs that create launches" on an archive whose whole claim is coverage will read the list as
+ * coverage, and would have been wrong about half of it. Nobody asserted that; the page simply did not distinguish,
+ * which is the same fault as a NULL published as a zero.
+ *
+ * Derived from VENUES, so a venue added to the collector marks itself here and a program merely identified cannot
+ * drift into looking watched. `venueById` keys on the registry's own id, and a program with no venue entry is
+ * unwatched by construction rather than by an editorial decision someone has to remember.
+ */
+const watched = (program: string): boolean => VENUES.some((v) => v.program === program);
+
+const row = (p: typeof KNOWN_PROGRAMS[number]) => `
     <tr>
       <td><b>${esc(p.name)}</b><div class="mono" style="font-size:12px">${esc(p.program)}</div></td>
-      <td>${esc(p.note)}${p.source ? ` <a href="${esc(p.source)}" rel="noopener">source</a>` : ""}</td>
+      <td>${p.kind === "not-a-launch" ? "" : watched(p.program)
+        ? `<b class="serif">Watched.</b> The collector holds a subscription to this program and this archive
+           contains its launches. `
+        : `<b class="serif">Identified, not watched.</b> This archive holds no launch from this program: it is
+           listed because we know what it is, not because we cover it. `}${
+        esc(p.note)}${p.source ? ` <a href="${esc(p.source)}" rel="noopener">source</a>` : ""}</td>
       <td class="num">${esc(p.confirmed)}</td>
     </tr>`;
   return `

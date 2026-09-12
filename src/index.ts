@@ -999,8 +999,12 @@ setInterval(() => {
    * LaunchLab counter: creates alone move slowly enough there that a dead socket would take minutes to show.
    */
   const venueParts = runs.map((r) => {
-    const rs = r.feed.getStats() as { creates?: number; trades?: number; curves?: number; reconnects?: number };
-    return `${r.venue.id}=${r.seen}/${rs.trades ?? 0}t/${rs.curves ?? 0}c/${rs.reconnects ?? 0}r`;
+    const rs = r.feed.getStats() as
+      { creates?: number; trades?: number; curves?: number; reconnects?: number; unresolved?: number };
+    // `u` only when a venue reports losses, so the line does not grow a zero for every venue that cannot lose
+    // anything. A launch this venue could not resolve is a launch it did not record - see launchlab-feed's flush.
+    const lost = rs.unresolved ? `/${rs.unresolved}u` : "";
+    return `${r.venue.id}=${r.seen}/${rs.trades ?? 0}t/${rs.curves ?? 0}c/${rs.reconnects ?? 0}r${lost}`;
   }).join(" ");
   // On the status line as well as in the alarm, so "how full is it" is answerable from any log tail rather than
   // only at the moment it crossed a threshold.

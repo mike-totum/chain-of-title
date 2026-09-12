@@ -73,6 +73,25 @@ export const KNOWN_PROGRAMS: readonly KnownProgram[] = [
     confirmed: "2026-09-11",
   },
   {
+    program: "BcyCjbQYxE2m2xTZ5tTZXDEz8Up7avTmPqhzCrASRKiQ",
+    name: "time.fun",
+    kind: "launchpad",
+    // Listed although it is dead, because this page's own rule is that an absence means we have not identified a
+    // program - and this one is identified. A register that lists only what is currently worth watching is a
+    // register that quietly rewrites itself as the market moves. Its 893 launches are historical and
+    // reconstructible; nothing here is a claim about anybody's conduct.
+    note: "Its own Anchor program, established on chain rather than from documentation - there is no published IDL "
+      + "anywhere, and the on-chain IDL account is absent, checked against pump.fun and Meteora DBC as controls. "
+      + "Not a front-end on either engine: it ran its own curve and graduated into a Raydium CPMM pool, and that "
+      + "pool's `pool_creator` is time.fun's own admin wallet. Quoted in USDC with a 37,500 USDC curve target, so "
+      + "no SOL figure applies to any launch on it. A companion program sits at "
+      + "CvejZauwmDWzNqwhPhPDUetP1ZwCPPpSQ5we2KVf6o3e. DEAD: shutdown announced 2025-11-05, no launch after "
+      + "2025-11-17, last successful program transaction 2026-03-13, front end no longer resolving as of "
+      + "2026-09-12. 893 markets over its life. This archive never watched it, so it holds no launch from it - "
+      + "which is what an absence on this list would otherwise have implied the opposite of.",
+    confirmed: "2026-09-12",
+  },
+  {
     program: "dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN",
     name: "Meteora Dynamic Bonding Curve",
     kind: "engine",

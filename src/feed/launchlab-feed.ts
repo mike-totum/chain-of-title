@@ -49,6 +49,21 @@ type Resolved = Pick<LaunchLabPool, "baseMint" | "quoteMint" | "baseDecimals" | 
 export class LaunchLabFeed extends RpcFeed {
   venueId = "launchlab";
   private pools = new Map<string, Resolved | null>();
+  /** Launches dropped because their pool account could not be read. Surfaced in getStats; see `flush`. */
+  private unresolved = 0;
+  /** Pools already reported, so the log carries one line per pool rather than one per event. */
+  private reportedUnresolved = new Set<string>();
+  /**
+   * The base stats plus this venue's own loss, because the `[status]` line is where a gap gets noticed.
+   *
+   * `unresolved` is not a detail of this feed - it is the count of launches this venue did not record. Every other
+   * figure on that line says what arrived; without this one, a venue capturing a tenth of its launches looks
+   * identical to a venue on a quiet morning, which is exactly what happened on 2026-09-12.
+   */
+  override getStats() {
+    return { ...super.getStats(), unresolved: this.unresolved };
+  }
+
   private chains = new Map<string, Promise<void>>();
   /** Reads in flight, so two events on one new pool do not both fetch it. */
   private inflight = new Map<string, Promise<Resolved | null>>();
@@ -113,9 +128,37 @@ export class LaunchLabFeed extends RpcFeed {
 
   private async flush(pool: string, ds: Buffer[], signature: string, slot: number, now: number): Promise<void> {
     const info = await this.resolve(pool);
-    // No pool account, no launch record. Emitting with a null mint would put a row in the archive that names
-    // nothing, which is worse than the gap it papers over.
-    if (!info) return;
+    /**
+     * No pool account, no launch record - and SAY SO, which it did not until 2026-09-12.
+     *
+     * Emitting with a null mint would put a row in the archive naming nothing, so returning is right. Returning
+     * SILENTLY was not. Every launch on this venue costs one `getAccountInfo` to turn its pool into a mint, so
+     * capture here is bound by RPC throughput rather than by the feed: on a throttled endpoint the read is refused
+     * and the launch is dropped, permanently, with nothing recorded anywhere that it happened.
+     *
+     * It was not hypothetical. Measured from the published record on 2026-09-12: capture climbed from 24 launches
+     * an hour at 03:00 to 229 an hour at 13:00 while pump.fun's rate stayed flat between 613 and 1,023 - so the
+     * climb is not market activity, it is RPC contention easing as other backlogs drained. Raydium's own launch
+     * API puts this venue at about 220 an hour, which the 13:00 figure matches and the 03:00 figure does not.
+     * Roughly 1,600 launches were lost in that window and the only reason anyone noticed is that someone compared
+     * our rate against an outside source by hand.
+     *
+     * So this counts, and the count goes on the `[status]` line beside the venue's other figures. A launch lost to
+     * a refused read is still lost - the fix for that is a private endpoint - but a gap that reports itself can be
+     * measured, and a gap that returns silently cannot be distinguished from a quiet market. That distinction is
+     * the whole difference between an archive with a hole in it and an archive that does not know.
+     */
+    if (!info) {
+      this.unresolved++;
+      // One line per pool, not per event: a pool that keeps failing is one fact, and several trades can arrive on
+      // it. Capped, because a throttled endpoint produces thousands of these and the log is read during outages.
+      if (!this.reportedUnresolved.has(pool) && this.reportedUnresolved.size < 50) {
+        this.reportedUnresolved.add(pool);
+        this.emit("status", `pool ${pool.slice(0, 8)}… could not be read, so its launch is unrecorded `
+          + `(${this.unresolved} so far; this is RPC throughput, not the feed)`);
+      }
+      return;
+    }
     const bScale = 10 ** info.baseDecimals, qScale = 10 ** info.quoteDecimals;
     const create = ds.find(isCreateEvent);
     const trades = ds.filter(isTradeEvent);
