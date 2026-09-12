@@ -111,3 +111,32 @@ nobody had read them in two days.
 
 The X corpus is in the same state on the collector: **0 tweets** there, against 88,133 on the laptop. Whatever is
 holding that corpus, it is not the machine that publishes the archive.
+
+## What the recurring boot error is, measured 2026-09-12
+
+`AUTH_KEY_DUPLICATED` returning on every collector boot is **not a second machine holding the session**. It is the
+dead credential from 2026-09-09 being presented again, and the distinction matters because the obvious reading —
+"something else has the key, go find it and stop it" — sends you looking for a live process that does not exist.
+
+Measured on the collector volume and in the live log:
+
+- `tg_messages` = **0**. `tg_gaps` holds the same **21 rows**, all stamped 2026-09-09, and **no row has been added
+  since** — so the per-channel resolve loop in `TelegramWatcher.start()` is never reached. Every channel failing
+  would have written 23 gap rows.
+- `tgPolls=0` in the status line, indefinitely. `pollAll()` increments that counter once per entry in `entities`,
+  so an empty `entities` map is the only state that keeps it at zero while the timer runs.
+- Together those place the failure at `await this.client.connect()`, the first line of `start()`, before any
+  channel is touched. `src/index.ts` catches it as one `[tg] failed to start:` line and the collector carries on.
+- The gramjs client is nonetheless constructed and its transport keeps retrying: `connection closed` →
+  `Started reconnecting` → `Connection to 149.154.175.52:80/TCPFull complete!` about every 90 seconds, forever,
+  in the one log that gets read during an outage.
+
+The laptop is not the other holder. `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` are still commented out in its `.env`,
+the watcher is gated on both being present (`src/index.ts`, the `telegramConfigured(...) && channels.length`
+condition), no launchd job runs any `telegram:*` script — `com.pumpmonitor.history` is the chain reconstruction
+daemon, not this — and `data/telegram.session` has not been written since 2026-09-09 09:51 local, half an hour
+before the key died. Nothing has to be stopped anywhere to free the session.
+
+So the choice is only ever: mint a new session for the collector and collect again, or unset the archiver family and
+stop claiming to. There is no third state where the current configuration starts working. Per DEPLOY.md, the two
+`TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` alert variables are a separate family and must stay set either way.

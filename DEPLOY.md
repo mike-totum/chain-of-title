@@ -31,7 +31,22 @@ Required:
 | `PUMPSWAP_WS_URL` | your RPC websocket |
 | `DB_PATH` | `/data/pump.db` (already set in the Dockerfile) |
 
-Recommended: `SOLANA_RPC_URLS`, `CURVEPOLL_RPC_URLS` (comma-separated HTTP endpoints for vault reads and curve polling).
+Recommended: `SOLANA_RPC_URLS`, `CURVEPOLL_RPC_URLS`, `CONFIRM_RPC_URLS` (comma-separated HTTP endpoints for vault
+reads, curve polling and the graduation-confirmation sweep).
+
+All three are read **in priority order**, not round-robin: `rpc-http.ts` takes the first endpoint that is not
+currently penalised, and a 429 or 5xx penalises it and falls through to the next. So a keyed endpoint belongs
+**first** and a public one after it as the fallback — listing the public endpoint first spends the key only after
+the free node has already failed the request.
+
+`CONFIRM_RPC_URLS` is the one that is easy to miss and the most valuable: `confirmGraduations` reads
+`getMultipleAccounts` at a hundred addresses per call, the public endpoints cap that far below a hundred, and the
+collector's in-process confirm loop deliberately inherits `SOLANA_RPC_URLS` rather than reconfiguring the shared
+list. Keying `SOLANA_RPC_URLS` therefore fixes the sweep too; `CONFIRM_RPC_URLS` only matters for `npm run confirm`
+run directly.
+
+`HELIUS_MIN_GAP_MS` defaults to 110 ms — the free tier's 10 req/s — and is matched on the hostname. **On a paid plan
+this must be set**, or the limiter caps the key at the free-tier rate and the purchased capacity is never used.
 
 **Leave the Twitter and Telegram variables unset.** The collector starts cleanly without them, logging `watcher
 disabled`. Nothing in the archive comes from Twitter - creator share, buyer counts, graduation timing and operator
@@ -39,8 +54,22 @@ clusters are all on-chain. The X listener exists for `kol-signal`, which returne
 lead/lag research that is finished. It stores ~18,600 tweets/day and costs credits, bandwidth and database growth for
 a feature the product does not use.
 
-Unset: `TWITTER_PROVIDER`, `TWITTERAPI_IO_KEY`, `X_BEARER_TOKEN`, `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`,
-`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
+Unset: `TWITTER_PROVIDER`, `TWITTERAPI_IO_KEY`, `X_BEARER_TOKEN`.
+
+**`TELEGRAM_*` is two different families and this line used to conflate them.** Corrected 2026-09-12, after the
+worklist carried "unset the TELEGRAM_ vars" as one decision:
+
+| family | vars | effect of unsetting |
+|---|---|---|
+| channel archiver | `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_SESSION`, `TELEGRAM_ARCHIVE` | the watcher logs `watcher disabled` and stops. Loses nothing that exists: **0 `tg_messages` on the collector**, measured on the volume 2026-09-12. |
+| alert delivery | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | **silences every alarm.** `notify()` becomes a no-op, the site watch at `src/index.ts` logs instead of telling anyone, and `scripts/run-freshness.sh` reports a successful notification with nobody on the other end. |
+
+The second row is why this page must not be read as "unset all of them". Alerting was wired after this paragraph was
+written; the paragraph is what was stale, not the alerting. Keep `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` set.
+
+The archiver family is a live question and not a technical one: `TELEGRAM.md` records that the owner decided to
+collect the channel corpus, so switching it off is a change to that decision. The technical state is already off —
+the session was killed by a duplicate on 2026-09-09T14:22Z and every boot since has presented a dead credential.
 
 (Worth keeping in mind for later: "this token was manufactured and these accounts promoted it" is a good feature for a
 warning product. Build it aimed at already-flagged tokens, not as a broad firehose.)

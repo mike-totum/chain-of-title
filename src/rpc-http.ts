@@ -11,8 +11,17 @@ import { PUMP_PROGRAM, base58 } from "./feed/rpc.ts";
 
 const DEFAULT_URLS = ["https://solana-rpc.publicnode.com", "https://api.mainnet-beta.solana.com"];
 interface Ep { url: string; penaltyUntil: number; nextAt: number; minGapMs: number; errors: number; calls: number; rateLimited: number }
-/** Helius free tier is 10 req/s and credit-metered; the official endpoint 429s under load; publicnode is generous but blocks some calls */
-const gapFor = (url: string) => (url.includes("mainnet-beta") ? 600 : url.includes("helius") ? 110 : 70);
+/**
+ * Per-endpoint minimum gap between requests. The official endpoint 429s under load; publicnode is generous but
+ * blocks some calls.
+ *
+ * `HELIUS_MIN_GAP_MS` exists because this limiter was written against the FREE tier's 10 req/s and matched on the
+ * hostname, so a paid key would have been throttled to 9 req/s by a hardcoded constant with nothing logging that it
+ * was the constant and not the plan. Buying capacity and not receiving it is the kind of failure that looks like the
+ * vendor's fault for a week. Default unchanged at 110 ms; set it when the plan says otherwise.
+ */
+const HELIUS_GAP_MS = Number(process.env.HELIUS_MIN_GAP_MS ?? 110) || 110;
+const gapFor = (url: string) => (url.includes("mainnet-beta") ? 600 : url.includes("helius") ? HELIUS_GAP_MS : 70);
 let eps: Ep[] = [];
 /** Endpoints in priority order: the first non-penalised one that accepts the method is used. */
 export function configureEndpoints(urls: string[]): void {
