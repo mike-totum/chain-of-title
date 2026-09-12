@@ -105,9 +105,50 @@ export function decodeCreate(d: Buffer): DecodedCreate | null {
   }
 }
 
+/**
+ * A reading of a venue's curve account, with nobody attached to it.
+ *
+ * The second venue needed this and pump.fun did not, which is the whole reason it exists as a separate event.
+ * pump.fun's TradeEvent carries the trading wallet, so every curve reading arrives welded to the person who caused
+ * it and one event can be both. LaunchLab's does not: its TradeEvent names a pool and an amount and no wallet at
+ * all, so the same log line is a fact about the curve and nothing whatsoever about a trader.
+ *
+ * Splitting them is what lets the collector record the first without inventing the second. A `trade` carries a
+ * wallet by definition - `trades.wallet` is NOT NULL, and a trade row with no wallet cannot answer the question
+ * that table exists for - so a venue that cannot name the trader emits `curve` and stays silent about who.
+ *
+ * `vSol` is null rather than 0 for a pool quoted in something other than wrapped SOL, because 0 SOL in a curve is a
+ * real and different state (a launch nobody has bought) and this archive has already published one invented zero
+ * per quarter. A consumer that wants the number in the pool's own units reads `quoteReserve` and `quoteMint`.
+ */
+export interface CurveUpdate {
+  /** Which venue read this. Stamped at decode, never defaulted. venues.ts clause 4. */
+  venue: string;
+  mint: string;
+  /** The account the reading came from: pump.fun's bonding curve, LaunchLab's pool state. */
+  curveAccount: string;
+  signature: string;
+  slot: number;
+  vTokens: number;
+  /** Virtual SOL, or null when this curve is not quoted in SOL and therefore has no SOL figure at all. */
+  vSol: number | null;
+  realTokens: number;
+  /** Real reserve of the quote asset, in that asset's own units. Named for what it is, not assumed to be SOL. */
+  quoteReserve: number;
+  quoteMint: string;
+  /**
+   * Did the curve finish, according to the program's own status field?
+   *
+   * Not an inference from a threshold. pump.fun's ~115 vSOL rule is a guess that `graduated_confirmed_by` exists to
+   * mark as unconfirmed; this is the venue saying so itself, which is the same authority as reading the account.
+   */
+  complete: boolean;
+}
+
 export interface RpcFeed {
   on(event: "create", listener: (e: CreateEvent, receivedAt: number) => void): this;
   on(event: "trade", listener: (e: TradeEvent & { feeBps?: number | null }, receivedAt: number) => void): this;
+  on(event: "curve", listener: (u: CurveUpdate, receivedAt: number) => void): this;
   on(event: "status", listener: (msg: string) => void): this;
 }
 
@@ -126,7 +167,7 @@ export class RpcFeed extends EventEmitter {
    * connection, backoff and watchdog logic. Nothing about pump.fun's path changes: `handleLogs` below is still the
    * only implementation this class uses.
    */
-  protected stats = { messages: 0, creates: 0, trades: 0, reconnects: 0 };
+  protected stats = { messages: 0, creates: 0, trades: 0, curves: 0, reconnects: 0 };
   private lastMessageAt = 0;
   private openedAt = 0;
   private reconnectTimer: NodeJS.Timeout | null = null;

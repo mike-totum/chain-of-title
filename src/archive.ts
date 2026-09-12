@@ -81,7 +81,7 @@ out.exec("BEGIN");
 let observed = 0;
 for (const r of rows) {
   // observed = we saw it launch AND the collector was demonstrably running at that moment
-  const obs = !r.late_discovery && covered(r.created_at) ? 1 : 0;
+  const obs = !r.late_discovery && covered(r) ? 1 : 0;
   if (obs) observed++;
   ins.run(r.mint, r.symbol, r.name, r.creator, r.created_at, obs,
     obs ? r.dev_pct : null, obs ? r.dev_sold : null, obs ? r.unique_buyers : null,

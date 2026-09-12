@@ -19,14 +19,24 @@
  * are serialised per pool: every event for a pool joins that pool's chain and they emit in arrival order. Different
  * pools proceed independently, so one slow lookup cannot stall the feed.
  *
- * WHAT THIS DOES NOT PRODUCE, and says so rather than inventing it. LaunchLab's TradeEvent carries no trader
- * wallet, so `traderPublicKey` is null on trades. Distinct-buyer counts and creator-sold are therefore not
- * answerable from this stream, and resolve later from the pool's own bounded signature history for curves that
- * actually completed - roughly 0.32 requests a second, the rate backfill.ts already runs at. A null trader must
- * never be read as "no trader" or counted as a distinct one.
+ * WHAT THIS DOES NOT PRODUCE, and says so by emitting a different event rather than a hollow one.
+ *
+ * LaunchLab's TradeEvent carries no trader wallet. An earlier draft of this file emitted `trade` anyway with
+ * `traderPublicKey: null`, and that was the wrong shape: `trades.wallet` is NOT NULL, so those rows could only ever
+ * reach the database by relaxing the one constraint that makes the table answerable, or by being dropped at the
+ * writer - a feed emitting events nobody may store. Either way the null would have had to be read as something, and
+ * the thing it would have been read as is "a buyer", which is how a distinct-buyer count gets a wallet that does not
+ * exist.
+ *
+ * So the curve reading and the trade are separate events (`CurveUpdate` in feed/rpc.ts). This feed emits `create`
+ * and `curve` and never `trade`, which is enforced rather than described: see venues.test.ts. Distinct-buyer counts
+ * and creator-sold are not answerable from this stream and the venue says so in `tradeAttribution`, so the record
+ * publishes NULL for them instead of a zero nobody measured. They resolve later, if they resolve at all, from the
+ * pool's own bounded signature history for curves that actually completed - roughly 0.32 requests a second, the rate
+ * backfill.ts already runs at.
  */
-import { RpcFeed } from "./rpc.ts";
-import type { CreateEvent, TradeEvent } from "./pumpportal.ts";
+import { RpcFeed, type CurveUpdate } from "./rpc.ts";
+import type { CreateEvent } from "./pumpportal.ts";
 import { rpc } from "../rpc-http.ts";
 import {
   LAUNCHLAB_PROGRAM, WSOL, poolOf, isCreateEvent, isTradeEvent, createParts, tradeParts, decodePool,
@@ -34,7 +44,7 @@ import {
 } from "./launchlab.ts";
 
 /** What a pool read tells us, kept so no later event on this pool costs anything. */
-type Resolved = Pick<LaunchLabPool, "baseMint" | "quoteMint" | "baseDecimals" | "quoteDecimals" | "solQuoted" | "creator">;
+type Resolved = Pick<LaunchLabPool, "baseMint" | "quoteMint" | "baseDecimals" | "quoteDecimals" | "solQuoted" | "creator" | "supply">;
 
 export class LaunchLabFeed extends RpcFeed {
   venueId = "launchlab";
@@ -64,6 +74,7 @@ export class LaunchLabFeed extends RpcFeed {
         const r: Resolved = {
           baseMint: decoded.baseMint, quoteMint: decoded.quoteMint, baseDecimals: decoded.baseDecimals,
           quoteDecimals: decoded.quoteDecimals, solQuoted: decoded.solQuoted, creator: decoded.creator,
+          supply: decoded.supply,
         };
         this.pools.set(pool, r);
         return r;
@@ -111,8 +122,10 @@ export class LaunchLabFeed extends RpcFeed {
     const bScale = 10 ** info.baseDecimals, qScale = 10 ** info.quoteDecimals;
     const create = ds.find(isCreateEvent);
     const trades = ds.filter(isTradeEvent);
-    // The creator's own buy rides in the create transaction: five of five sampled. It is the dev buy, and it is the
-    // only trade in that batch, so it is not re-emitted as an ordinary trade below.
+    // The creator's own buy rides in the create transaction: confirmed on chain, not assumed. In the sampled
+    // creation transactions the `initialize` instruction and the `buy_exact_in` beside it share one signer, and that
+    // signer is the `creator` the PoolCreateEvent names. So this buy may be attributed to the creator, which is the
+    // one wallet attribution this venue's stream does support - and the only reason `dev_pct` is answerable here.
     const devBuy = create ? trades[0] : undefined;
 
     if (create) {
@@ -126,10 +139,20 @@ export class LaunchLabFeed extends RpcFeed {
         traderPublicKey: c.creator,
         txType: "create",
         initialBuy: t ? t.baseRaw / bScale : 0,
-        // Only a wrapped-SOL pool has a SOL amount, and 21.4% of pools are not one. `solAmount: 0` on those would
-        // be indistinguishable from a launch that raised nothing, which is inventing a zero - the fault this
-        // codebase keeps producing. `quoteMint` and `solQuoted` travel with the event so no consumer has to guess,
-        // and a consumer that ignores them still sees 0 rather than a quantity of some other token read as SOL.
+        /**
+         * Tokens this launch minted, read from its own pool account.
+         *
+         * `dev_pct` is `initialBuy / totalSupply`, and until now the denominator was `curve.ts`'s TOTAL_SUPPLY -
+         * 1,000,000,000, which is a fact about pump.fun. LaunchLab sets supply per pool. Carrying the real number
+         * with the event is what stops the most load-bearing field in the file from being computed against another
+         * venue's constant.
+         */
+        totalSupply: info.supply,
+        decimals: info.baseDecimals,
+        // Only a wrapped-SOL pool has a SOL amount, and most are not one (34 of 41 launches sampled). `solAmount: 0`
+        // on those would be indistinguishable from a launch that raised nothing, which is inventing a zero - the
+        // fault this codebase keeps producing. `quoteMint` and `solQuoted` travel with the event so no consumer has
+        // to guess, and one that ignores them sees 0 rather than a quantity of some other token read as SOL.
         solAmount: t && info.solQuoted ? t.quoteRaw / qScale : 0,
         quoteMint: info.quoteMint,
         solQuoted: info.solQuoted,
@@ -146,31 +169,34 @@ export class LaunchLabFeed extends RpcFeed {
       } as unknown as CreateEvent, now);
     }
 
+    /**
+     * Every swap is a reading of the curve and nothing else.
+     *
+     * Not a `trade`: the event names no wallet, and an event that cannot name a wallet is not a trade this archive
+     * can record. The devBuy is included rather than skipped, because as a curve reading it is not a duplicate of
+     * anything - the create carried the same reserves as a launch fact, and this carries them as the curve's state
+     * at that moment, which is the series `curve` exists to build.
+     */
     for (const d of trades) {
-      if (d === devBuy) continue;
       const t = tradeParts(d);
       if (!t) continue;
-      this.stats.trades++;
-      this.emit("trade", {
-        signature,
+      this.stats.curves++;
+      this.emit("curve", {
+        venue: this.venueId,
         mint: info.baseMint,
-        // Not in the event. Null, never a placeholder: a fabricated wallet would be counted as a distinct buyer.
-        traderPublicKey: null,
-        txType: t.isBuy ? "buy" : "sell",
-        tokenAmount: t.baseRaw / bScale,
-        solAmount: info.solQuoted ? t.quoteRaw / qScale : 0,
-        quoteMint: info.quoteMint,
-        solQuoted: info.solQuoted,
-        quoteAmountRaw: t.quoteRaw,
-        newTokenBalance: NaN,
-        bondingCurveKey: t.poolState,
-        vTokensInBondingCurve: t.vBaseRaw / bScale,
-        vSolInBondingCurve: info.solQuoted ? t.vQuoteRaw / qScale : 0,
-        marketCapSol: 0,
-        pool: t.poolState,
+        curveAccount: t.poolState,
+        signature,
         slot,
-        feeBps: null,
-      } as unknown as TradeEvent, now);
+        vTokens: t.vBaseRaw / bScale,
+        // Null, not zero, when the pool is quoted in something else. See CurveUpdate in feed/rpc.ts.
+        vSol: info.solQuoted ? t.vQuoteRaw / qScale : null,
+        realTokens: t.realBaseRaw / bScale,
+        quoteReserve: t.realQuoteRaw / qScale,
+        quoteMint: info.quoteMint,
+        // The pool's own status field, carried in the event the program emitted. Leaving Fund (0) is this venue's
+        // graduation, and it is the venue saying so rather than us inferring it from a threshold.
+        complete: t.status !== 0,
+      } satisfies CurveUpdate, now);
     }
   }
 }

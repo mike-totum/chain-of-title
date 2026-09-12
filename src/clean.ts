@@ -39,7 +39,7 @@ const all = db.prepare(`SELECT mint, symbol, creator, created_at, dev_pct, uniqu
   vault_sol, dev_sold FROM tokens
   WHERE late_discovery = 0 AND graduated = 1 AND created_at >= ?`).all(since) as any[];
 
-const inCov = all.filter((t) => covered(t.created_at));
+const inCov = all.filter((t) => covered(t));
 // Inclusion requires positive verification, not merely the absence of a flag. An unread pool disqualifies: we cannot
 // vouch for liquidity we have not measured. A first pass without these produced a list where most entries held 1-6 SOL
 // or the creator had already sold - a clean token nobody can exit is not a useful thing to hand someone.

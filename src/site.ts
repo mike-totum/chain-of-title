@@ -21,6 +21,7 @@ import {
   assess, cleanAtBirth, readingCertifies, MAX_READING_AGE_MS, coverageWindows, TOKEN_COLUMNS, optionalColumns, graduationDisproved,
   BUYOUT_SOL, MAX_DEV_PCT, MIN_BUYERS, MIN_GRAD_MS, MIN_POOL_SOL,
   type Assessment, type Flag, coverageFor } from "./provenance.ts";
+import { VENUES } from "./venues.ts";
 
 const arg = (k: string, d: string) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : d; };
 const OUT = arg("--out", "site");
@@ -59,11 +60,25 @@ const now = Date.now();
 const win = coverageWindows(db);
 // Per venue; see coverageFor. Identical to the old predicate while pumpfun is the only venue.
 const covered = coverageFor(db);
+/**
+ * Each venue's own coverage start, for the sentence that would otherwise assert one date for all of them.
+ *
+ * Read from `runs` per venue rather than from the first window overall: a venue subscribed today has no coverage
+ * before today, and saying otherwise would answer a launch it never saw as watched. A venue with no windows at all
+ * is omitted rather than given "unknown" - the published record is the file being served, and a venue absent from
+ * it was not being watched when it was built.
+ */
+const coverageByVenue = () => VENUES.map((v) => {
+  const w = coverageWindows(db, v.id);
+  return w.length ? { label: v.label, from: when(w[0].a) } : null;
+}).filter((x): x is { label: string; from: string } => x !== null);
+
 const chrome: Chrome = {
   coverageFrom: win.length ? when(win[0].a) : "unknown",
   gapMin: win.slice(1).reduce((a, w, i) => a + Math.max(0, w.a - win[i].b), 0) / 60_000,
   onFile: (db.prepare("SELECT COUNT(*) c FROM tokens WHERE COALESCE(late_discovery,0)=0").get() as any).c,
   builtAt: null,
+  coverageByVenue: coverageByVenue(),
 };
 /**
  * The same coverage statement the page footer makes, in the shape the JSON records carry. `builtAt` is the database's

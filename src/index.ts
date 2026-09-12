@@ -10,7 +10,7 @@ import { PumpSwapFeed } from "./feed/pumpswap.ts";
 import { Tracker, fetchMeta, fetchMetaResult } from "./tracker.ts";
 import { PaperBroker } from "../research/paper.ts";
 import { strategies, ALL_STRATEGIES, type OperatorActivity } from "../research/strategies/index.ts";
-import { VENUES } from "./venues.ts";
+import { VENUES, type LaunchVenue } from "./venues.ts";
 import { rpc as rpcHttpCall } from "./rpc-http.ts";
 import { BUYOUT_SOL, TOKEN_COLUMNS, KEEP_TRADE_EVIDENCE, keepTweetEvidence, coverageWindows, assess } from "./provenance.ts";
 import { base58 } from "./feed/rpc.ts";
@@ -61,18 +61,42 @@ if (process.env.SEED_PATH) {
 }
 
 /**
- * The venue this collector observes, taken from the registry rather than from a constant in the feed.
+ * Every venue this collector observes, taken from the registry rather than from a constant in the feed.
  *
- * venues.ts described the seam - the interface, the contract, pump.fun bound to it - and nothing imported it, so
- * the plan for breadth was a document rather than a wiring. It is wired now, with exactly one venue in the list, so
- * that the change is verifiable: every figure the site publishes must be identical before and after. Adding the
- * second venue is then a second entry in VENUES and a second subscription, not an edit to the decode path.
+ * venues.ts described the seam - the interface, the contract, pump.fun bound to it - and nothing imported it, so the
+ * plan for breadth was a document rather than a wiring. It was wired on 2026-09-11 with exactly one venue in the
+ * list, so that the change was verifiable: every figure the site published had to be identical before and after.
+ * The second venue is now a second entry in VENUES and a second subscription, which is what that shape was for.
+ *
+ * PumpPortal is the exception and stays single-venue: it is a third-party feed of pump.fun and knows nothing about
+ * anything else, so selecting it selects one venue. It is not the production source.
+ *
+ * COVERAGE IS PER VENUE (clause 3), so each venue opens its OWN `runs` row. A single interval cannot answer "were
+ * you watching THIS launch" once there are two, and a launch on a venue we were not subscribed to must read as
+ * unwatched rather than as clean. This is also why the heartbeat below is per venue: one venue's socket dying while
+ * the other stays up is the ordinary failure here, and a shared heartbeat would record the dead one as watching.
  */
-const VENUE = VENUES[0];
+interface VenueRun {
+  venue: LaunchVenue;
+  feed: RpcFeed | PumpPortalFeed;
+  runId: number | bigint;
+  /** Launches this venue has produced this run. The staleness check compares it against itself a minute later. */
+  seen: number;
+  lastSeenCount: number;
+  lastSeenChangeAt: number;
+  staleAlerted: boolean;
+}
 
-const runId = (db.prepare("INSERT INTO runs (started_at, venue) VALUES (?, ?)").run(Date.now(), VENUE.id) as any).lastInsertRowid;
-const feed = config.tradeSource === "pumpportal" ? new PumpPortalFeed(config.pumpportalApiKey) : new RpcFeed(config.solanaWsUrl, VENUE.program);
-if (feed instanceof RpcFeed) feed.venueId = VENUE.id;
+const observed: LaunchVenue[] = config.tradeSource === "pumpportal" ? [VENUES[0]] : [...VENUES];
+const runs: VenueRun[] = observed.map((venue) => {
+  const feed = config.tradeSource === "pumpportal" ? new PumpPortalFeed(config.pumpportalApiKey) : venue.feed(config.solanaWsUrl);
+  if (feed instanceof RpcFeed) feed.venueId = venue.id;
+  const runId = (db.prepare("INSERT INTO runs (started_at, venue) VALUES (?, ?)").run(Date.now(), venue.id) as any).lastInsertRowid;
+  return { venue, feed, runId, seen: 0, lastSeenCount: 0, lastSeenChangeAt: Date.now(), staleAlerted: false };
+});
+/** The pump.fun run, which everything not yet venue-aware still talks to by name rather than by accident. */
+const feed = runs[0].feed;
+const runFor = (venueId: string | undefined | null): VenueRun | undefined => runs.find((r) => r.venue.id === (venueId ?? "pumpfun"));
 
 const tracker = new Tracker({ watchMinutes: config.watchMinutes, deadAfterSeconds: config.deadAfterSeconds, watchMaxMinutes: config.watchMaxMinutes });
 const broker = new PaperBroker(db, tracker, strategies, config);
@@ -268,16 +292,32 @@ for (const s of strategies) realized.set(s.name, { n: 0, pnl: 0, wins: 0 });
 const RECENT_MAX = 400;
 const recent: { mint: string; symbol: string; name: string; creator: string; at: number; devPct: number; sig: string | null }[] = [];
 
-feed.on("create", (e, now) => {
+/**
+ * Attached per venue rather than to one feed, so a second subscription is a second entry in VENUES and nothing else.
+ * `r` is the venue's run: its own launch counter, its own `runs` row, its own heartbeat. Everything inside is
+ * venue-neutral - it works on the decoded event, which is the point of the decoders being where they are.
+ */
+for (const r of runs) {
+r.feed.on("create", (e, now) => {
   seen++;
+  r.seen++;
   const t = tracker.onCreate(e, now);
   recent.push({ mint: e.mint, symbol: e.symbol ?? "?", name: e.name ?? "", creator: e.traderPublicKey ?? "",
     at: now, devPct: t.devPct, sig: e.signature ?? null });
   if (recent.length > RECENT_MAX) recent.splice(0, recent.length - RECENT_MAX);
-  feed.subscribeTrades(e.mint);
+  r.feed.subscribeTrades(e.mint);
   broker.evaluateEntries(t, now);
   upsertToken(db, t);
-  if (e.initialBuy > 0)
+  /**
+   * The creator's own buy, recorded only where there is a SOL amount to record.
+   *
+   * `trades.sol` is SOL by name and by every consumer: the 40 SOL buyout rule reads it, `buy_vol_sol` sums it,
+   * `wallet_flow` aggregates it. A LaunchLab pool quoted in some other asset has no SOL figure at all, and writing
+   * 0 there would say the creator bought nothing - beside a `dev_pct` saying they took 12% of supply. The share of
+   * supply is the fact worth having and it is on the token row either way; the SOL price of it is not a fact we
+   * hold. Most of this venue's launches are in this state, so it is the common case rather than an edge.
+   */
+  if (e.initialBuy > 0 && (e.solQuoted ?? true))
     trades.push({ mint: e.mint, wallet: e.traderPublicKey, side: "buy", sol: e.solAmount, tokens: e.initialBuy, price: t.launchPrice, ts: now, slot: e.slot ?? 0, sig: e.signature, ageMs: 0, buyerRank: 0, isDev: true });
   // 1) a watched account pre-announced this ticker
   const exp = expectations.get(e.symbol.toUpperCase());
@@ -296,7 +336,14 @@ feed.on("create", (e, now) => {
   });
 });
 
-feed.on("trade", (e, now) => {
+/**
+ * Only a venue whose events name the trader produces these. See venues.ts clause 10: LaunchLab's TradeEvent carries
+ * a pool and an amount and nobody, so it emits `curve` below instead and never reaches this handler. Binding it
+ * anyway would be harmless and misleading - the feed would simply never fire it - so it is bound to the venues that
+ * can, and `venues.test.ts` holds the two facts together.
+ */
+if (r.venue.tradeAttribution === "wallets")
+r.feed.on("trade", (e, now) => {
   const cluster = broker.operatorWallets.get(e.traderPublicKey) ?? (blindOperators.has(e.traderPublicKey) ? "unknown" : undefined);
   const untracked = !tracker.tokens.has(e.mint);
   // detect the operator by what it does, not by whether we already know its wallet: farms burn a fresh wallet per buyout
@@ -334,7 +381,33 @@ feed.on("trade", (e, now) => {
   broker.update(t, now);
 });
 
-feed.on("status", (m) => log("[feed]", m));
+/**
+ * The curve moved and we cannot say who moved it.
+ *
+ * No `trades.push`: that table's `wallet` is NOT NULL and correctly so, and this event has no wallet to put in it.
+ * No broker call either - every strategy reads flow, buyers and sellers, none of which exist here, and feeding a
+ * strategy a curve with no participants would have it evaluating an entry against an empty order book.
+ *
+ * Nothing is written to the database per reading. The tracker holds the state and the existing checkpoint and
+ * finalize paths persist it, exactly as a pump.fun token's thousand trades reach `tokens` through checkpoints rather
+ * than a thousand upserts. Graduation is the one exception: it is rare, it is the fact this venue is here to
+ * contribute, and losing it to a crash before the next checkpoint would lose it permanently.
+ */
+if (r.feed instanceof RpcFeed)
+r.feed.on("curve", (u, now) => {
+  const before = tracker.tokens.get(u.mint)?.graduated ?? false;
+  const t = tracker.onCurve(u, now);
+  if (!t) return;
+  if (!before && t.graduated) {
+    upsertToken(db, t);
+    // Only `u.complete` can flip it here, so the line says what confirmed it rather than offering a branch that
+    // cannot be taken - the shape of a message that looks like it is reporting something and never is.
+    log(`[grad] ${t.symbol} ${short(t.mint)} left the curve on ${r.venue.label}, confirmed by the pool's own status`);
+  }
+});
+
+r.feed.on("status", (m) => log(`[feed:${r.venue.id}]`, m));
+} // end of the per-venue handler loop opened above `feed.on("create")`
 
 tracker.on("preannounced", (t, k) => {
   log(`[kol] PRE-ANNOUNCED launch: ${t.symbol} ${short(t.mint)} was posted ${k}x before it existed - evaluating entry at creation`);
@@ -349,7 +422,9 @@ tracker.on("checkpoint", (t) => {
 tracker.on("finalize", (t) => {
   broker.closeForToken(t, Date.now(), "watch-window-ended");
   upsertToken(db, t);
-  feed.unsubscribeTrades(t.mint);
+  // The token's own venue, not whichever feed happens to be first. Per-token subscriptions are a no-op on the RPC
+  // feeds, but calling the wrong venue's would be a quiet lie the day one of them needs it.
+  runFor(t.venue)?.feed.unsubscribeTrades(t.mint);
   trades.flush();
   const entered = broker.everEntered(t.mint, ["kol-signal", "smart-wallet", "team-wallet", "grad-runner", "survivor-trail", "early-momentum", "strict-momentum"]);
   const interesting = t.kolSignals > 0 || entered || (t.graduated && t.lastPrice >= 2 * (t.gradPrice ?? Infinity));
@@ -868,21 +943,30 @@ setInterval(() => {
   tracker.tick(now, (m) => broker.hasOpenPosition(m) || operatorInterest(m));
 }, 1000);
 
-let lastSeenCount = 0, lastSeenChangeAt = Date.now(), staleAlerted = false;
 setInterval(() => {
-  const st = feed.getStats();
-  if (seen !== lastSeenCount) {
-    lastSeenCount = seen;
-    lastSeenChangeAt = Date.now();
-    if (staleAlerted) {
-      staleAlerted = false;
-      notify("🟢 launch feed recovered");
+  /**
+   * Per venue, because a shared heartbeat records a dead socket as watching.
+   *
+   * One venue's subscription dying while the other stays up is the ordinary failure with two of them, and it is
+   * exactly the shape this project keeps meeting: a process that is alive and deaf. A single counter summed across
+   * venues would still be moving - pump.fun alone produces a launch a second - so the silent one would go on
+   * stamping `runs.stopped_at` forward and every launch inside that window would answer as watched. A clean result
+   * about a token nobody saw is the one error here that cannot be walked back, so each venue proves its own
+   * ingestion or records its own gap. venues.ts clause 3 and clause 6, which is what clause 6 was asking for.
+   */
+  for (const r of runs) {
+    if (r.seen !== r.lastSeenCount) {
+      r.lastSeenCount = r.seen;
+      r.lastSeenChangeAt = Date.now();
+      if (r.staleAlerted) {
+        r.staleAlerted = false;
+        notify(`🟢 ${r.venue.label} launch feed recovered`);
+      }
+    } else if (Date.now() - r.lastSeenChangeAt > 5 * 60_000 && !r.staleAlerted) {
+      r.staleAlerted = true;
+      log(`[health] no ${r.venue.label} launches for 5 minutes - feed may be down`);
+      notify(`🔴 pump-monitor: no ${r.venue.label} launches seen for 5 minutes (feed down?)`);
     }
-  } else if (Date.now() - lastSeenChangeAt > 5 * 60_000 && !staleAlerted) {
-    staleAlerted = true;
-    log("[health] no launches for 5 minutes - feed may be down");
-    notify("🔴 pump-monitor: no launches seen for 5 minutes (feed down?)");
-  }
   // Heartbeat. The product's whole claim is "we watched this launch happen", so it has to be able to say when it was
   // NOT watching. stopped_at was only written on a clean shutdown, so a crash or a closed lid left a run open and its
   // downtime invisible. Refreshing it every minute makes coverage the union of run intervals and gaps everything else;
@@ -895,9 +979,20 @@ setInterval(() => {
   // answered as watched - a clean result about a token nobody saw, which is the one error here that cannot be walked
   // back. Stamping the last arrival makes a deaf collector write a truthful gap by itself, with no detector to get
   // right, and errs toward claiming less coverage than we had rather than more.
-  try { db.prepare("UPDATE runs SET stopped_at = ? WHERE id = ?").run(lastSeenChangeAt, runId); } catch {}
+    try { db.prepare("UPDATE runs SET stopped_at = ? WHERE id = ?").run(r.lastSeenChangeAt, r.runId); } catch {}
+  }
+  const st = feed.getStats();
+  /**
+   * One cell per venue, so "did the new venue actually ingest anything" is answered by reading two timestamped
+   * status lines - which is what clause 6 asks for and what a process staying up does not prove. `curves` is the
+   * LaunchLab counter: creates alone move slowly enough there that a dead socket would take minutes to show.
+   */
+  const venueParts = runs.map((r) => {
+    const rs = r.feed.getStats() as { creates?: number; trades?: number; curves?: number; reconnects?: number };
+    return `${r.venue.id}=${r.seen}/${rs.trades ?? 0}t/${rs.curves ?? 0}c/${rs.reconnects ?? 0}r`;
+  }).join(" ");
   const parts = [...realized].map(([k, v]) => `${k}: ${v.n} closed, ${v.wins}W, ${v.pnl >= 0 ? "+" : ""}${v.pnl.toFixed(3)} SOL`);
-  log(`[status] launches=${seen} tracking=${tracker.tokens.size} amm=${ammMatched}/${amm?.stats.trades ?? 0} pools=${poolToMint.size} tradesStored=${trades.written} smartWallets=${broker.smartWallets.size} teamWallets=${broker.walletTeams.size}${st.subscriptions >= 0 ? ` subs=${st.subscriptions}` : ""} trades=${st.trades} reconnects=${st.reconnects} open=${broker.openPositions().length}${watcher ? ` kolPolls=${watcher.stats.polls} kolSignals=${watcher.stats.signals}` : ""}${street ? ` streetTweets=${street.stats.tweets} streetSignals=${street.stats.signals}` : ""}${tg ? ` tgEvents=${tg.stats.allEvents} tgPolls=${tg.stats.polls} tgMsgs=${tg.stats.messages} tgSignals=${tg.stats.signals}` : ""}`);
+  log(`[status] launches=${seen} ${venueParts} tracking=${tracker.tokens.size} amm=${ammMatched}/${amm?.stats.trades ?? 0} pools=${poolToMint.size} tradesStored=${trades.written} smartWallets=${broker.smartWallets.size} teamWallets=${broker.walletTeams.size}${st.subscriptions >= 0 ? ` subs=${st.subscriptions}` : ""} trades=${st.trades} reconnects=${st.reconnects} open=${broker.openPositions().length}${watcher ? ` kolPolls=${watcher.stats.polls} kolSignals=${watcher.stats.signals}` : ""}${street ? ` streetTweets=${street.stats.tweets} streetSignals=${street.stats.signals}` : ""}${tg ? ` tgEvents=${tg.stats.allEvents} tgPolls=${tg.stats.polls} tgMsgs=${tg.stats.messages} tgSignals=${tg.stats.signals}` : ""}`);
   for (const p of parts) log("   ", p);
 }, 60_000);
 
@@ -1119,8 +1214,9 @@ function pruneWorkingData(): void {
 setInterval(pruneWorkingData, 6 * 3600_000);
 setTimeout(pruneWorkingData, 10 * 60_000); // once shortly after start, not during boot
 
-feed.connect();
+for (const r of runs) r.feed.connect();
 log(`source=${config.tradeSource}${config.tradeSource === "rpc" ? ` (${config.solanaWsUrl.replace(/\?.*$/, "")})` : ""}`);
+log(`watching ${runs.length} venue(s): ${runs.map((r) => `${r.venue.label} [${r.venue.id}, trades ${r.venue.tradeAttribution}]`).join(", ")}`);
 /**
  * Say which it is. "paper trading 0 strategies" is the kind of line a reader skims past as a rounding error rather
  * than reading as a deliberate state, and this one is deliberate: the thesis is dead and the strategies are off so
@@ -1139,12 +1235,12 @@ function shutdown() {
   broker.closeAll(Date.now(), "shutdown");
   for (const t of tracker.tokens.values()) upsertToken(db, t);
   trades.close();
-  db.prepare("UPDATE runs SET stopped_at=? WHERE id=?").run(Date.now(), runId);
+  for (const r of runs) db.prepare("UPDATE runs SET stopped_at=? WHERE id=?").run(Date.now(), r.runId);
   watcher?.stop();
   street?.stop();
   tg?.stop();
   amm?.close();
-  feed.close();
+  for (const r of runs) r.feed.close();
   db.close();
   process.exit(0);
 }
@@ -1678,13 +1774,22 @@ if (process.env.RECORD_PORT) {
            * If the heartbeat is stale we were not reliably watching, and the honest answer is the unextended
            * window: uncovered, which reads as UNKNOWN rather than as a finding.
            */
-          const win = coverageWindows(db);
+          /**
+           * Per venue, and extended to now only for the venue asked about.
+           *
+           * The old version merged every venue's windows and asked whether the archive was watching at that moment,
+           * which answers a different question than "were you watching THIS launch". With two venues that reads a
+           * launch on a silent feed as observed, on the endpoint the public service trusts in preference to its own
+           * record. venues.ts clause 3.
+           */
+          const win = coverageWindows(db, t.venue || "pumpfun");
           const last = win[win.length - 1];
           const nowMs = Date.now();
-          if (last && nowMs - last.b < 180_000) last.b = nowMs;
-          const covered = (ts: number) => win.some((w) => ts >= w.a && ts <= w.b);
+          // Still watching it right now: this venue's own run is open, so its window runs to now.
+          if (last && nowMs - last.b < 180_000 && runFor(t.venue)) last.b = nowMs;
+          const covered = (l: { created_at: number }) => win.some((w) => l.created_at >= w.a && l.created_at <= w.b);
           // Coverage is a statement about what this process did, and this process is the only authority on that.
-          const observed = !t.late_discovery && covered(t.created_at);
+          const observed = !t.late_discovery && covered(t);
           res.writeHead(200, { "content-type": "application/json" });
           return res.end(JSON.stringify({ held: true, observed, t, a: assess(db, t, covered) }));
         } catch (e) {

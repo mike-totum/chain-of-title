@@ -18,11 +18,11 @@
 import { statSync, readFileSync } from "node:fs";
 import { openDb } from "./db.ts";
 import { assess, cleanAtBirth, TOKEN_COLUMNS, optionalColumns,
-  BUYOUT_SOL, MAX_DEV_PCT, MIN_BUYERS, MIN_GRAD_MS } from "./provenance.ts";
+  BUYOUT_SOL, MAX_DEV_PCT, MIN_BUYERS, MIN_GRAD_MS, type CoverableLaunch } from "./provenance.ts";
 import { API_VERSION, PER_IP_PER_HOUR, type Coverage } from "./api.ts";
 import { renderSchema, renderSamples } from "./schema-doc.ts";
 import { reportDate } from "./reports.ts";
-import { venuePhrase, aLaunchHere } from "./venues.ts";
+import { venuePhrase, aLaunchHere, attributedPhrase, someVenueUnattributed, cannotAttributeSql } from "./venues.ts";
 import { KNOWN_PROGRAMS, launchPrograms, nonLaunchPrograms } from "./venuelist.ts";
 import { CANONICAL_HOST, CONTACT, SEARCH, esc, fmt, when, type Chrome } from "./render.ts";
 
@@ -57,7 +57,7 @@ export interface PageFacts {
  * file this process reads - on a build they differ, and a page that states a number about the archive and gets it
  * from anywhere but the archive is the exact failure this site reports in other people.
  */
-export function buildFacts(db: any, covered: (ts: number) => boolean, COV: Coverage, recordPath: string): PageFacts {
+export function buildFacts(db: any, covered: (launch: CoverableLaunch) => boolean, COV: Coverage, recordPath: string): PageFacts {
   const recStat = (() => { try { return statSync(recordPath); } catch { return null; } })();
   const labelled = (() => {
     try {
@@ -103,7 +103,16 @@ export function buildFacts(db: any, covered: (ts: number) => boolean, COV: Cover
      * A reconstruction is not an observation either. Both are excluded, and the raw counts are shown so the size of
      * the exclusion is visible rather than buried.
      */
-    const LIVE = "graduated_confirmed_by IS NOT NULL AND COALESCE(late_discovery,0) = 0 AND rebuilt_at IS NULL";
+    /**
+     * And the population is scoped to the venues that can answer the question, which is new with the second venue.
+     *
+     * `curve_buyers` is NULL for a venue whose events carry no wallet (venues.ts clause 10), so those launches can
+     * never be in the numerator. Leaving them in the denominator would quietly deflate the headline share by a
+     * population it is arithmetically impossible to count - a number that looks like a measured fall in
+     * manufacturing and is only a change in who we watch. One population, and it is the one the question applies to.
+     */
+    const LIVE = "graduated_confirmed_by IS NOT NULL AND COALESCE(late_discovery,0) = 0 AND rebuilt_at IS NULL"
+      + ` AND NOT (${cannotAttributeSql()})`;
     const watched = q(LIVE);
     return {
       launches: q("1=1"),
@@ -177,10 +186,15 @@ export function methodBody(f: PageFacts, chrome: Chrome): string {
 
   <div class="sec"><h2>What is recorded, and when</h2></div>
   <p class="lede">A collector decodes the launch program's own events as they happen, on ${venuePhrase()}, and writes down, for every
-  launch: the creator, the share of supply the creator took in the creation transaction, every distinct wallet that
-  bought on the bonding curve, how long the curve took to fill, whether a single buy completed it, and whether the
-  creator sold. These are facts about a moment. They stop being observable once the float is spread across wallets,
-  which is why they are recorded live rather than inferred later.</p>
+  launch: the creator, the share of supply the creator took in the creation transaction, what the token claimed to be,
+  the state of its bonding curve as it moved, and whether that curve completed. These are facts about a moment. They
+  stop being observable once the float is spread across wallets, which is why they are recorded live rather than
+  inferred later.</p>
+  ${someVenueUnattributed() ? `<p class="lede">Two further facts need the venue's events to name the wallet that
+  traded, and not every venue's do: every distinct wallet that bought on the bonding curve, and whether the creator
+  sold. On ${attributedPhrase()} the trade events carry the trader, so both are recorded. Where they do not, those
+  fields are <b>empty</b> rather than zero, and a launch there is never described as having had no outside buyer. An
+  absence of data is not a finding, least of all one that accuses.</p>` : ""}
   <p class="callout">Coverage begins ${chrome.coverageFrom}${chrome.gapMin >= 1 ? `, with ${fmt(chrome.gapMin)} minutes of recorded downtime` : ", with no recorded downtime"}. A launch that
   happened while the collector was down has no record, and is reported as unobserved rather than as anything else.</p>
 
@@ -230,7 +244,7 @@ export function methodBody(f: PageFacts, chrome: Chrome): string {
     <tr><td>The launch happened before coverage, or while the collector was down</td><td>UNKNOWN, with an offer to rebuild the record from chain history</td></tr>
     <tr><td>A rebuild could not read every transaction</td><td>UNKNOWN, because a truncated history looks exactly like a quiet launch</td></tr>
     <tr><td>The pool balance could not be read</td><td>no liquidity figure quoted, and the row says <i>not read</i>. The launch record is unaffected</td></tr>
-    <tr><td>We hold no record and the address has no bonding curve on ${venuePhrase()}</td><td>we say so, rather than guess</td></tr>
+    <tr><td>We hold no record and the address has no bonding curve we can rebuild from</td><td>we say so, rather than guess</td></tr>
   </table>
 
   <div class="sec"><h2>Rebuilt records</h2></div>
@@ -273,7 +287,10 @@ export function methodBody(f: PageFacts, chrome: Chrome): string {
     <tr><td>Thresholds are judgements. They are set where the labelled set shows no false certification, not where some theory says they belong.</td></tr>
     <tr><td>Operator attribution describes wallets' behaviour inside this archive only, and says nothing about intent or identity.</td></tr>
     <tr><td>A trade is timestamped when we decode it, not by block time, so the interval between a launch and the buy that completed its curve is only as fine as the batch both arrived in. Where that interval reads as zero we say the events arrived together, rather than quoting a duration. The slot is published in <span class="mono">trades</span> for anyone who wants to settle it exactly.</td></tr>
-    <tr><td>Coverage of ${venuePhrase()} begins ${chrome.coverageFrom}. Launch venues other than ${venuePhrase()} are not recorded at all, and a launch on one of them reads as unwatched rather than as clean.</td></tr>
+    <tr><td>Each venue has its own coverage and a launch is answered against its own venue's windows${
+      chrome.coverageByVenue?.length ? `: ${chrome.coverageByVenue.map((c) => `${esc(c.label)} from ${esc(c.from)}`).join(", ")}` : `, beginning ${chrome.coverageFrom}`
+    }. Launch venues other than ${venuePhrase()} are not recorded at all, and a launch on one of them reads as unwatched rather than as clean.</td></tr>
+    ${someVenueUnattributed() ? `<tr><td>Counts of distinct buyers, and whether the creator sold, are recorded only on ${attributedPhrase()}, whose trade events name the trading wallet. Elsewhere those fields are empty, and every finding below that counts buyers is measured over ${attributedPhrase()} alone.</td></tr>` : ""}
   </table>`;
 }
 
@@ -478,7 +495,7 @@ export function pledgeBody(): string {
 export function findingsBody(f: PageFacts, builtAt: number | null): string {
   return `
   <h1 class="headline">Nearly half of the graduations we watched had no outside buyer</h1>
-  <p class="lede">Of <b>${fmt(f.F.watched)}</b> tokens that completed a bonding curve on ${venuePhrase()}, which this archive
+  <p class="lede">Of <b>${fmt(f.F.watched)}</b> tokens that completed a bonding curve on ${attributedPhrase()}, which this archive
   watched from the creation transaction and confirmed against the curve account itself,
   <b>${fmt(f.F.noBuyer)}</b> (<b>${pct(f.F.noBuyer, f.F.watched)}</b>) had no outside buyer at all. Not one wallet
   other than the creator ever bought on the curve. The creator funded the entire graduation.</p>

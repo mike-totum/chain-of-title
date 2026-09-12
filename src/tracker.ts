@@ -1,5 +1,7 @@
 import { EventEmitter } from "node:events";
 import type { CreateEvent, TradeEvent } from "./feed/pumpportal.ts";
+import type { CurveUpdate } from "./feed/rpc.ts";
+import { venueById } from "./venues.ts";
 import { TOTAL_SUPPLY, isGraduated, price, type Curve } from "./curve.ts";
 import { fetchContent, ipfsPath, verifyCid } from "./ipfs.ts";
 
@@ -22,6 +24,15 @@ export interface TokenState {
   createSig: string;
   /** Launchpad slug, e.g. "pumpfun". Omitted by the pump.fun collector, which is the default in `upsertToken`. */
   venue?: string;
+  /**
+   * Where this launch's curve state lives, when the mint does not determine it. Null for pump.fun, whose curve is a
+   * PDA anyone can recompute from the mint. See venues.ts CurveLocation and tokens.curve_account.
+   */
+  curveAccount?: string | null;
+  /** What the curve is priced in. Null means SOL. See tokens.quote_mint. */
+  quoteMint?: string | null;
+  /** False when this launch has no SOL price at all, so no SOL figure may be stated for it. */
+  solQuoted?: boolean;
   /**
    * How we know the curve completed: "pool" or "curve_complete". Left undefined when `graduated` was inferred from
    * decoded trade events reaching the threshold, which is not proof - see `graduated_confirmed_by` in db.ts.
@@ -136,6 +147,8 @@ export interface TokenMeta {
 export interface Tracker {
   on(event: "new", l: (t: TokenState) => void): this;
   on(event: "trade", l: (t: TokenState, e: TradeEvent, now: number) => void): this;
+  /** A curve reading with no trader attached. See `onCurve`. */
+  on(event: "curve", l: (t: TokenState, u: CurveUpdate, now: number) => void): this;
   on(event: "checkpoint", l: (t: TokenState, key: CheckpointKey) => void): this;
   on(event: "finalize", l: (t: TokenState) => void): this;
   on(event: "preannounced", l: (t: TokenState, signals: number) => void): this;
@@ -195,6 +208,14 @@ export class Tracker extends EventEmitter {
       mint: e.mint,
       // Stamped from the decoder that produced the event, never left to the column default. See venues.ts clause 4.
       venue: e.venue,
+      // Recorded only where the mint does not determine it, and the venue is asked rather than named: a venue whose
+      // curve is a PDA (pump.fun) leaves this null, because the address is recomputable and storing it says nothing.
+      // A non-null value means "this address is the only way back to the curve". See venues.ts CurveLocation.
+      curveAccount: venueById(e.venue ?? "pumpfun")?.curveLocation(e.mint).kind === "recorded"
+        ? e.bondingCurveKey || null : null,
+      quoteMint: e.quoteMint ?? null,
+      // Absent means SOL. Only a venue that can be quoted in something else sends this, and it sends it explicitly.
+      solQuoted: e.solQuoted ?? true,
       name: e.name,
       symbol: e.symbol,
       uri: e.uri,
@@ -212,7 +233,10 @@ export class Tracker extends EventEmitter {
       peakAt: now,
       devInitialTokens: e.initialBuy,
       devInitialSol: e.solAmount,
-      devPct: (e.initialBuy / TOTAL_SUPPLY) * 100,
+      // The venue's own supply when it states one, pump.fun's constant when it does not. A creator's share of supply
+      // divided by another venue's supply is a wrong number in the field the data dictionary calls the most
+      // load-bearing in the file: pump.fun mints 1e9 every time, LaunchLab does not. venues.ts clause 10's sibling.
+      devPct: (e.initialBuy / (e.totalSupply && e.totalSupply > 0 ? e.totalSupply : TOTAL_SUPPLY)) * 100,
       devTokenBalance: e.initialBuy,
       devSold: false,
       devSoldAt: null,
@@ -239,7 +263,7 @@ export class Tracker extends EventEmitter {
       postGradHigh: null,
       postGradSamples: 0,
       buyersAtGrad: null,
-      decimals: 6,
+      decimals: e.decimals ?? 6,
       suspectPrice: null,
       recent: [],
       pool: null,
@@ -381,6 +405,69 @@ export class Tracker extends EventEmitter {
     t.lastTrade = { wallet: e.traderPublicKey, side: e.txType, sol: e.solAmount, buyerRank };
     pushRecent(t, { ts: now, side: e.txType, sol: e.solAmount, wallet: e.traderPublicKey, price: p });
     this.emit("trade", t, e, now);
+    return t;
+  }
+
+  /**
+   * A reading of the curve with no trader attached.
+   *
+   * The second venue's whole stream arrives this way: LaunchLab's TradeEvent names a pool and amounts and nobody, so
+   * it can move the curve, the price and the graduation flag and must move nothing that counts people. Everything
+   * `onTrade` does with `e.traderPublicKey` - balances, buyers, sellers, bundled buyers, devSold, buyerRank - is
+   * absent here on purpose. A curve reading is evidence about a curve; reading it as evidence about a wallet is the
+   * mistake this split exists to make impossible.
+   *
+   * `buys` and `sells` are not incremented either, and that is deliberate rather than an oversight. They are
+   * published beside `unique_buyers`, and a row reading 1,160 buys against 0 distinct buyers invites exactly the
+   * inference the venue cannot support. A venue that cannot attribute says nothing about trade counts and lets the
+   * NULL stand, which is what `tradeAttribution` is for.
+   */
+  onCurve(u: CurveUpdate, now: number): TokenState | null {
+    const t = this.tokens.get(u.mint);
+    if (!t || t.finalized) return null;
+    // The curve moved, so this token is alive. The dead-timer reads this field; it is named for pump.fun's case,
+    // where a curve only ever moves because someone traded, and that is still what happened here.
+    t.lastTradeAt = now;
+    /**
+     * Priced only where there is a price to state.
+     *
+     * `vSol` is null for a pool quoted in something other than wrapped SOL, and about a fifth of this venue's pools
+     * are. Writing `curve = { vSol: 0, ... }` there would publish `last_price` and `peak_price` of zero for a token
+     * that is trading perfectly well in some other asset - an invented zero in two more columns. The curve reserves
+     * are left as recorded at creation and the price simply does not move, which is the truthful state: we are
+     * watching this launch and we cannot price it in SOL.
+     */
+    if (u.vSol !== null && u.vTokens > 0) {
+      t.curve = { vSol: u.vSol, vTokens: u.vTokens };
+      const p = price(t.curve);
+      if (t.launchPrice === 0) t.launchPrice = p;
+      t.lastPrice = p;
+      if (p > t.peakPrice) {
+        t.peakPrice = p;
+        t.peakAt = now;
+        t.peakSource = "curve";
+      }
+    }
+    /**
+     * Graduation from the program's own status field, which is confirmation and not inference.
+     *
+     * `isGraduated` is pump.fun's ~115 vSOL threshold and must not be applied here: it is a fact about one venue's
+     * curve parameters, and on a LaunchLab pool quoted in some other asset it would be comparing SOL to nothing at
+     * all. `graduated_confirmed_by` is set to `curve_complete` because that is exactly what this is - the venue's
+     * own completion bit, the same authority curvepoll gets by reading the account, arriving in the event instead.
+     */
+    if (u.complete && !t.graduated) {
+      t.graduated = true;
+      t.graduatedAt = now;
+      t.gradPrice = t.lastPrice;
+      t.postGradHigh = t.lastPrice;
+      // NOT t.buyers.size. That set is empty for this venue and would publish "graduated with 0 buyers" as a
+      // measurement. Null is the answer, and null is what the column already means.
+      t.buyersAtGrad = null;
+      if (t.creator) this.gradCreators.add(t.creator);
+    }
+    if (u.complete) t.graduatedConfirmedBy = "curve_complete";
+    this.emit("curve", t, u, now);
     return t;
   }
 

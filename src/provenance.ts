@@ -14,6 +14,18 @@
  */
 import type { DatabaseSync } from "node:sqlite";
 import { profile, verdictLine, findBuyout } from "./operator.ts";
+import { venueById } from "./venues.ts";
+
+/**
+ * Can this launch's venue name the wallet behind a curve trade?
+ *
+ * A launch whose venue cannot is watched, recorded and unjudged on one axis: we hold its creator, its share of
+ * supply, its claim about itself and its curve, and we hold nothing about who bought. A venue this archive does not
+ * know is treated as able to - it is either pump.fun predating the column, or a rebuild, and both are - because the
+ * consequence of guessing wrong in the other direction is silently withdrawing findings that were measured.
+ */
+const attributesTrades = (venue: string | null | undefined): boolean =>
+  (venueById(venue ?? "pumpfun")?.tradeAttribution ?? "wallets") === "wallets";
 
 /** A single large buy that completes a curve is a buyout, not demand. */
 export const BUYOUT_SOL = 40;
@@ -259,13 +271,44 @@ export function coverageWindows(db: DatabaseSync, venue?: string): { a: number; 
  * Windows are read once per database and cached per venue. A launch whose venue is missing is treated as pumpfun,
  * which is what every row in the archive predating the column actually is; it is a fact about the history, not a
  * default that a new venue may inherit, because `CreateEvent.venue` is stamped at decode for anything live.
+ *
+ * IT TAKES THE ROW, NOT A TIMESTAMP, AND THAT IS THE WHOLE POINT.
+ *
+ * The venue used to be an optional second argument, and four of the five callers omitted it - so they asked "were
+ * you watching at this moment" and silently got pump.fun's answer. Harmless with one venue and wrong the day there
+ * were two: `serve.ts` refused a LaunchLab launch it held a complete record of, told the reader "we have no record
+ * of this launch", and offered to rebuild a pump.fun curve that does not exist. Found by rendering the page, not by
+ * reading the code, which is the only way this class of fault has ever been found here.
+ *
+ * An optional argument is a default nobody types, and clause 3 says a venue we were not watching must never read as
+ * clean. Taking the row makes the venue impossible to drop: there is no call that compiles without it.
  */
-export function coverageFor(db: DatabaseSync): (ts: number, venue?: string | null) => boolean {
+export interface CoverableLaunch {
+  created_at: number;
+  /** Missing or null means pump.fun: every row predating the column is one. See above. */
+  venue?: string | null;
+}
+
+export function coverageFor(db: DatabaseSync): (launch: CoverableLaunch) => boolean {
   const byVenue = new Map<string, { a: number; b: number }[]>();
-  return (ts: number, venue?: string | null) => {
-    const v = venue || "pumpfun";
+  return (launch: CoverableLaunch) => {
+    /**
+     * Checked at runtime because the type alone cannot check it.
+     *
+     * Every caller reads its row out of SQLite as `any`, so `covered(t.created_at)` type-checks perfectly: `any` is
+     * assignable to anything, and the compiler reports nothing. That is exactly how the old optional argument
+     * survived in four places. A number arriving here is a caller that dropped the venue, and the consequence is a
+     * launch answered against the wrong venue's windows - silently, in the direction that calls an unwatched launch
+     * watched. Loud is strictly better than that. venues.ts clause 3.
+     */
+    if (typeof launch !== "object" || launch === null)
+      throw new TypeError(
+        "coverage takes the launch row, not a timestamp. The venue decides which windows apply, so it cannot be " +
+        "left out: pass the row (it needs created_at and venue). See venues.ts clause 3.");
+    const v = launch.venue || "pumpfun";
     let win = byVenue.get(v);
     if (!win) { win = coverageWindows(db, v); byVenue.set(v, win); }
+    const ts = launch.created_at;
     return win.some((w) => ts >= w.a && ts <= w.b);
   };
 }
@@ -283,13 +326,13 @@ function curveBuyersQ(db: DatabaseSync) {
   return s;
 }
 
-export function assess(db: DatabaseSync, t: any, covered: (ts: number, venue?: string | null) => boolean): Assessment {
+export function assess(db: DatabaseSync, t: any, covered: (launch: CoverableLaunch) => boolean): Assessment {
   const flags: Flag[] = [];
   // A launch is judgeable if we watched it, or if its complete history was rebuilt from chain - the same on-chain
   // events, read later. This must be decided here rather than patched onto the result afterwards: the checks below
   // are skipped entirely for an unjudgeable token, so flipping the flag after the fact produced a rebuilt page for
   // USWS (wash factory: graduated instantly with one buyer) carrying no warnings at all.
-  const watched = (!t.late_discovery && covered(t.created_at, t.venue)) || !!t.rebuilt_complete;
+  const watched = (!t.late_discovery && covered(t)) || !!t.rebuilt_complete;
   const bo = findBuyout(db, t.mint, BUYOUT_SOL);
   // tokens.unique_buyers also counts post-graduation AMM buyers, which is not what "outside buyers before it
   // graduated" means. Count from the trade rows; no rows at all is unknown, and unknown never certifies.
@@ -304,6 +347,16 @@ export function assess(db: DatabaseSync, t: any, covered: (ts: number, venue?: s
     flags.push({ level: "UNKNOWN", text: "We did not observe this launch, so its creator share and outside-buyer count are not on record. Once a float has been spread, a launch that was assembled and one that was not look the same on-chain." });
     return { flags, watched, buyout: bo, curveBuyers, completed: false };
   }
+  /**
+   * Watched, and still unable to answer one whole class of question.
+   *
+   * Said out loud rather than left to be inferred from a blank field. Every check below that counts wallets is
+   * skipped for these launches, and a page that simply omitted them would read as a launch we checked and cleared -
+   * which is the same error as an unwatched launch reading as clean, one layer in. The reader is told which half of
+   * the record exists. venues.ts clause 10.
+   */
+  if (!attributesTrades(t.venue)) flags.push({ level: "UNKNOWN", text:
+    "This launch was recorded live, but its venue's trade events do not name the wallet that traded. Who bought on the bonding curve, and whether the creator sold, are therefore not on our record - not zero, and not checked and cleared. The creator's share of supply, the launch's own claim about itself, and whether the curve completed are recorded as normal." });
   /**
    * The creator bought its own curve.
    *

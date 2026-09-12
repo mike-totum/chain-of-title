@@ -18,6 +18,28 @@ export interface CreateEvent {
   txType: "create";
   initialBuy: number; // tokens the dev bought at creation
   solAmount: number; // SOL the dev spent
+  /**
+   * Tokens this launch minted, when the venue states it.
+   *
+   * `dev_pct` is `initialBuy / totalSupply`, and it was computed against `curve.ts`'s TOTAL_SUPPLY - which is
+   * 1,000,000,000 because that is what pump.fun mints, every time, for every launch. That is a fact about one venue
+   * standing in for a universal. LaunchLab sets supply per pool, so its feed reads the pool's own `supply` and sends
+   * it here; the field is optional because pump.fun's constant is genuinely right for pump.fun and PumpPortal
+   * predates the question. Absent means "use the venue's own constant", never "zero".
+   */
+  totalSupply?: number;
+  /** Base decimals, when the venue states them. Absent means the 6 that pump.fun mints. */
+  decimals?: number;
+  /**
+   * The asset this launch's curve is priced in. Absent means SOL, which is every pump.fun launch by construction.
+   *
+   * Carried because a LaunchLab pool names its quote asset per pool and most name something other than wrapped SOL.
+   * Every SOL-denominated figure downstream - launch_price, the 40 SOL buyout rule, buy_vol_sol - is a quantity of
+   * whatever this says, and publishing one of those as SOL is the 1000x error this venue already produced once.
+   */
+  quoteMint?: string;
+  /** True only when `quoteMint` is wrapped SOL. Derived, and carried so no consumer has to know the address. */
+  solQuoted?: boolean;
   bondingCurveKey: string;
   vTokensInBondingCurve: number;
   vSolInBondingCurve: number;

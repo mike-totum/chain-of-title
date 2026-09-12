@@ -29,7 +29,7 @@
  */
 import { config } from "./config.ts";
 import { openDb } from "./db.ts";
-import { assess, TOKEN_COLUMNS, coverageWindows } from "./provenance.ts";
+import { assess, coverageFor, TOKEN_COLUMNS } from "./provenance.ts";
 import { throttle, twitterApiIoProvider, xApiProvider, type TweetProvider, type Tweet } from "./signals/twitter.ts";
 
 const arg = (k: string, d: string) => { const i = process.argv.indexOf(`--${k}`); return i > 0 ? process.argv[i + 1] : d; };
@@ -93,8 +93,9 @@ const queryFor = (mint: string) => `${mint} -filter:retweets`;
 function flagged(): { mint: string; symbol: string | null; created_at: number }[] {
   if (ONE) return db.prepare(`SELECT mint, symbol, created_at FROM tokens WHERE mint = ?`).all(ONE) as any[];
   const since = Date.now() - DAYS * 86400_000;
-  const win = coverageWindows(db);
-  const covered = (ts: number) => win.some((w) => ts >= w.a && ts <= w.b);
+  // Per venue via coverageFor, not a merged window: a launch on a venue we were not watching must not be assessed
+  // as one we were. It takes the row so the venue cannot be dropped - see coverageFor.
+  const covered = coverageFor(db);
   const rows = db.prepare(
     `SELECT ${TOKEN_COLUMNS} FROM tokens WHERE graduated = 1 AND created_at >= ? ORDER BY created_at DESC`).all(since) as any[];
   return rows

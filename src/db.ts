@@ -83,7 +83,20 @@ export function openDb(path: string, opts: { migrate?: boolean } = {}): Database
       venue TEXT NOT NULL DEFAULT 'pumpfun',
       -- How we know the curve actually completed. See the ALTER below for why this is a nullable source rather than
       -- a boolean. Appended last for the same positional-copy reason as venue.
-      graduated_confirmed_by TEXT
+      graduated_confirmed_by TEXT,
+      -- The account holding this launch's curve state, where the mint does not determine it.
+      --
+      -- pump.fun's bonding curve is a PDA derived from the mint, so it never needed storing: anyone can recompute
+      -- it. LaunchLab's pool is seeded with the platform config and the quote mint as well, so it is NOT a function
+      -- of the mint and is unrecoverable if we do not write it down - which would leave the venue's curve
+      -- unreadable afterwards and make the deferred buyer-count work (the pool's own signature history) impossible
+      -- to start. NOT tokens.pool: that column means the AMM pool a token graduated into, and assess() reads a
+      -- non-null there as confirmation that the curve completed. See venues.ts CurveLocation.
+      curve_account TEXT,
+      -- What this launch's curve is priced in. NULL means SOL, which every row predating the column is, and every
+      -- pump.fun launch is by construction. A LaunchLab pool names its quote asset per pool and most name something
+      -- else, so a SOL figure for those would be a quantity of another token wearing SOL's name.
+      quote_mint TEXT
     );
     CREATE INDEX IF NOT EXISTS tokens_created ON tokens(created_at);
     CREATE TABLE IF NOT EXISTS positions (
@@ -253,6 +266,16 @@ export function openDb(path: string, opts: { migrate?: boolean } = {}): Database
   try { db.exec("ALTER TABLE tokens ADD COLUMN venue TEXT NOT NULL DEFAULT 'pumpfun'"); } catch {}
   // Same reasoning for runs, and the same default: every window already recorded was a pump.fun window.
   try { db.exec("ALTER TABLE runs ADD COLUMN venue TEXT NOT NULL DEFAULT 'pumpfun'"); } catch {}
+  /**
+   * Appended in this order, matching the CREATE TABLE above, so a database created fresh and one migrated in place
+   * have identical column order - the rule `venue` and `graduated_confirmed_by` already follow.
+   *
+   * Both are nullable with no default, and for both NULL is a fact rather than a gap: a launch with no
+   * `curve_account` is one whose curve address is a function of its mint, and a launch with no `quote_mint` is
+   * quoted in SOL. Every row that predates them is both.
+   */
+  try { db.exec("ALTER TABLE tokens ADD COLUMN curve_account TEXT"); } catch {}
+  try { db.exec("ALTER TABLE tokens ADD COLUMN quote_mint TEXT"); } catch {}
 
   /**
    * trades.venue becomes trades.market.
@@ -419,8 +442,8 @@ export function upsertToken(db: DatabaseSync, t: TokenState): void {
       create_sig, create_slot,
       dev_pct, dev_sold, dev_sold_at, buys, sells, buy_vol_sol, sell_vol_sol, unique_buyers, unique_sellers, bundled_buyers,
       snap30_buyers, snap30_buys, snap30_sells, snap30_vol, graduated, graduated_at, p_1m, p_5m, p_15m, p_60m,
-      twitter, telegram, website, image, description, meta_at, kol_signals, pool, amm_trusted, vault_sol, vault_at, finalized, updated_at, venue, graduated_confirmed_by, meta_json, meta_bytes)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      twitter, telegram, website, image, description, meta_at, kol_signals, pool, amm_trusted, vault_sol, vault_at, finalized, updated_at, venue, graduated_confirmed_by, meta_json, meta_bytes, curve_account, quote_mint)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(mint) DO UPDATE SET
       name=excluded.name, symbol=excluded.symbol, launch_price=excluded.launch_price, last_price=excluded.last_price,
       -- The three move together or not at all: a peak is a price, a moment, and where it came from. Splitting them
@@ -502,6 +525,9 @@ export function upsertToken(db: DatabaseSync, t: TokenState): void {
     t.graduatedConfirmedBy ?? null,
     // Appended last, matching the column list: this INSERT names its columns but binds positionally.
     t.meta?.raw ?? null, t.meta?.bytes ?? null,
+    // Launch facts, written once. Neither is in the ON CONFLICT clause: where a launch's curve lives and what it is
+    // priced in cannot change, the same reason `created_at` and `venue` are never updated.
+    t.curveAccount ?? null, t.quoteMint ?? null,
   );
 }
 

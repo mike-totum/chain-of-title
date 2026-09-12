@@ -19,7 +19,7 @@ import { join, normalize } from "node:path";
 import { config } from "./config.ts";
 import { openDb } from "./db.ts";
 import * as usage from "./usage.ts";
-import { venuePhrase } from "./venues.ts";
+import { venuePhrase, VENUES, cannotAttributeSql } from "./venues.ts";
 import { DatabaseSync } from "node:sqlite";
 import { type Assessment, assess, cleanAtBirth, coverageWindows, TOKEN_COLUMNS, optionalColumns, graduationDisproved, MIN_POOL_SOL,
   readingCertifies, readingIsFresh, MAX_READING_AGE_MS, MAX_DEV_PCT, MIN_BUYERS, BUYOUT_SOL , coverageFor} from "./provenance.ts";
@@ -484,10 +484,24 @@ let win = coverageWindows(db);
 // Per venue, not per clock. A launch on a venue we were not subscribed to must read as unwatched, never as
 // clean, and with one venue in VENUES this returns exactly what the old whole-archive predicate did.
 const covered = coverageFor(db);
+/**
+ * Each venue's own coverage start, for the sentence that would otherwise assert one date for all of them.
+ *
+ * Read from `runs` per venue rather than from the first window overall: a venue subscribed today has no coverage
+ * before today, and saying otherwise would answer a launch it never saw as watched. A venue with no windows at all
+ * is omitted rather than given "unknown" - the published record is the file being served, and a venue absent from
+ * it was not being watched when it was built.
+ */
+const coverageByVenue = () => VENUES.map((v) => {
+  const w = coverageWindows(db, v.id);
+  return w.length ? { label: v.label, from: when(w[0].a) } : null;
+}).filter((x): x is { label: string; from: string } => x !== null);
+
 let chrome: Chrome = {
   coverageFrom: win.length ? when(win[0].a) : "unknown",
   gapMin: win.slice(1).reduce((a, w, i) => a + Math.max(0, w.a - win[i].b), 0) / 60_000,
   onFile: observed, builtAt: null,   // builtAt filled in below, once readBuiltAt() has been declared
+  coverageByVenue: coverageByVenue(),
 };
 /** The same coverage statement the page footer makes, in the shape the JSON records carry. */
 /**
@@ -544,7 +558,7 @@ function reloadRecord(): void {
     chrome = {
       coverageFrom: win.length ? when(win[0].a) : "unknown",
       gapMin: win.slice(1).reduce((a, w, i) => a + Math.max(0, w.a - win[i].b), 0) / 60_000,
-      onFile: observed, builtAt: recordBuiltAt,
+      onFile: observed, builtAt: recordBuiltAt, coverageByVenue: coverageByVenue(),
     };
     Object.defineProperty(chrome, "chain", { get: chainNow, enumerable: true, configurable: true });
     // The prose pages state figures about the record; adopting a new one without recomputing them would leave
@@ -936,7 +950,11 @@ async function decide(mint: string, ip: string): Promise<Decision> {
   // Holding a *row* for a mint is not the same as holding its launch: tokens discovered late (named by a post, found
   // by a detector) have no curve history, and treating their presence as an answer meant the most useful thing we
   // could do for them - rebuild the launch from chain - was never attempted.
-  const judgeable = !!t && (!!t.rebuilt_complete || (!t.late_discovery && covered(t.created_at)));
+  // `covered(t)`, not `covered(t.created_at)`: the row carries the venue and the venue decides which windows apply.
+  // Passing the timestamp asked pump.fun's windows about every launch, so a LaunchLab launch we held a complete
+  // record of was refused with "we have no record of this launch" and offered a rebuild of a curve that does not
+  // exist. Found by rendering the page. venues.ts clause 3.
+  const judgeable = !!t && (!!t.rebuilt_complete || (!t.late_discovery && covered(t)));
   if (judgeable) return { kind: "record", t, judgeable: true };
 
   /**
@@ -1140,7 +1158,16 @@ let homeCache: { at: number; h: Home; html: string } | null = null;
 let everCache: { watched: number; noBuyer: number } | null = null;
 function everFinding(): { watched: number; noBuyer: number } {
   if (everCache) return everCache;
-  const LIVE = "graduated_confirmed_by IS NOT NULL AND COALESCE(late_discovery,0) = 0 AND rebuilt_at IS NULL";
+  /**
+     * And the population is scoped to the venues that can answer the question, which is new with the second venue.
+     *
+     * `curve_buyers` is NULL for a venue whose events carry no wallet (venues.ts clause 10), so those launches can
+     * never be in the numerator. Leaving them in the denominator would quietly deflate the headline share by a
+     * population it is arithmetically impossible to count - a number that looks like a measured fall in
+     * manufacturing and is only a change in who we watch. One population, and it is the one the question applies to.
+     */
+    const LIVE = "graduated_confirmed_by IS NOT NULL AND COALESCE(late_discovery,0) = 0 AND rebuilt_at IS NULL"
+      + ` AND NOT (${cannotAttributeSql()})`;
   const c = (w: string) => (db.prepare(`SELECT COUNT(*) c FROM tokens WHERE ${w}`).get() as any).c as number;
   try { everCache = { watched: c(LIVE), noBuyer: c(`${LIVE} AND curve_buyers = 0`) }; }
   catch { everCache = { watched: 0, noBuyer: 0 }; }

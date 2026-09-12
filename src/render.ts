@@ -588,6 +588,12 @@ export function navCurrent(href: string, path?: string): boolean {
  */
 export interface Chrome {
   coverageFrom: string; gapMin: number; onFile?: number; builtAt?: number | null;
+  /**
+   * When each venue's own coverage begins. `coverageFrom` is the earliest across all of them, which is the right
+   * answer for "how far back does this archive go" and the wrong one for "since when have you watched THIS venue" -
+   * a second venue subscribed today does not inherit the first one's history. venues.ts clause 3, in prose.
+   */
+  coverageByVenue?: { label: string; from: string }[];
   chain?: { mints: number; launches: number; documents: number; beyondPumpfun: number; ranges: { from: number; to: number }[] } | null;
 }
 
@@ -989,8 +995,33 @@ export function tokenBody(
     <tr><td class="k">Creator</td><td class="mono">${t.creator
       ? `<a href="../w/${esc(t.creator)}.html">${esc(t.creator)}</a>` : "unknown"}</td></tr>
     <tr><td class="k">Creator took</td><td><b>${t.dev_pct?.toFixed(1) ?? "?"}%</b> of supply in the first block</td></tr>
-    <tr><td class="k">Outside buyers</td><td><b>${a.curveBuyers === null ? "unknown" : fmt(a.curveBuyers)}</b> distinct wallets, not counting the creator, bought on the bonding curve before it graduated${origin === "observed" ? `: ${fmt(t.snap30_buyers ?? 0)} within the first 30s, ${fmt(t.bundled_buyers ?? 0)} bundled into the creation block.` : "."}</td></tr>
-    <tr><td class="k">Graduated</td><td>${t.graduated_at ? `${curveAge(t.graduated_at - t.created_at)} after launch` : "yes"}</td></tr>
+    <tr><td class="k">Outside buyers</td><td><b>${a.curveBuyers === null ? "unknown" : fmt(a.curveBuyers)}</b> distinct wallets, not counting the creator, bought on the bonding curve${
+      /*
+       * Each figure appears only where we have it. `?? 0` stood here and printed a fabricated zero: on a venue whose
+       * trade events carry no wallet these columns are NULL, and "0 within the first 30s" beside "unknown" is a
+       * measurement the record does not hold, in the sentence a reader reads first. Two nulls, two omissions, and
+       * where both are missing the sentence simply ends.
+       */
+      ""}${origin === "observed" && (t.snap30_buyers != null || t.bundled_buyers != null)
+        ? `: ${[t.snap30_buyers != null ? `${fmt(t.snap30_buyers)} within the first 30s` : null,
+               t.bundled_buyers != null ? `${fmt(t.bundled_buyers)} bundled into the creation block` : null]
+              .filter(Boolean).join(", ")}.`
+        : "."}</td></tr>
+    <tr><td class="k">Graduated</td><td>${
+      /*
+       * "yes" was the fallback for a NULL graduated_at, so every watched launch that never completed its curve was
+       * told, on its own page, that it graduated. Not an edge case: most launches never graduate, and this row was
+       * printing the opposite of the record for all of them. Found by rendering a page rather than by reading the
+       * code, which is how every fault of this shape here has been found.
+       *
+       * Never completing a curve is the ordinary way a token dies and is not evidence of anything, so the negative
+       * says what we observed and stops there.
+       */
+      // curveAge() already ends in "after launch"; the literal beside it printed the phrase twice on every
+      // graduated launch's page. The other four callers pass it unadorned, which is what made this visible.
+      t.graduated_at ? curveAge(t.graduated_at - t.created_at)
+        : t.graduated ? "yes; we did not record when"
+        : "not while we were watching"}</td></tr>
     ${/*
         Whether we went and read the curve account ourselves, and what it said.
         
@@ -1004,7 +1035,15 @@ export function tokenBody(
         an unchecked curve is not a disproved one, and the difference is the whole point of writing it down.
       */ ""}
     <tr><td class="k">Curve, read on chain</td><td>${t.curve_checked_at == null
-      ? `<span class="sub">Not read. We have the feed's graduation event and have not confirmed it against the curve account itself. That is a gap in our checking, not a finding about this launch.</span>`
+      /*
+       * The unread message asserted "we have the feed's graduation event" on every launch, including the majority
+       * that never produced one. The same presupposition as the row above and found in the same pass: this table
+       * was written for graduated launches and then shown for all of them. Where there is no graduation on record
+       * there is nothing to confirm, and saying so is shorter and true.
+       */
+      ? (t.graduated_at || t.graduated
+        ? `<span class="sub">Not read. We have the feed's graduation event and have not confirmed it against the curve account itself. That is a gap in our checking, not a finding about this launch.</span>`
+        : `<span class="sub">Not read. No graduation was recorded for this launch, so there was nothing to confirm against the curve account. Never completing a curve is the ordinary way a token dies, and is not a finding about it.</span>`)
       : t.curve_complete == null
         ? `<b>Read, and the account had gone.</b> We went to the bonding curve account
            ${ago(Date.now() - Number(t.curve_checked_at))} and it no longer existed, so the reading settles nothing
@@ -1015,7 +1054,14 @@ export function tokenBody(
         : `<b>Incomplete.</b> We read the bonding curve account ${ago(Date.now() - Number(t.curve_checked_at))} and it
            had <b>not</b> finished, though a graduation event was recorded for it. This launch is not counted as a
            graduation anywhere on this site. <span class="sub">Checked ${when(Number(t.curve_checked_at))}.</span>`}</td></tr>
-    <tr><td class="k">Creator sold</td><td>${t.dev_sold ? "yes" : origin === "observed" ? "not while we watched" : "no"}</td></tr>
+    <tr><td class="k">Creator sold</td><td>${
+      /*
+       * NULL is a third answer here and it arrived with the second venue: a venue whose trade events carry no
+       * wallet cannot tell a creator's sale from anyone else's, so `dev_sold` is neither 1 nor 0. "Not while we
+       * watched" would be a claim we did not observe, in the direction that reassures.
+       */
+      t.dev_sold == null ? "not recorded - this venue's trades do not name the wallet"
+        : t.dev_sold ? "yes" : origin === "observed" ? "not while we watched" : "no"}</td></tr>
     ${/*
         The transaction every figure above was decoded from. Absence is stated as ours, not the launch's: a launch
         that predates this column, or whose trade rows retention took before the backfill reached them, has no

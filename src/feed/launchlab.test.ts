@@ -35,6 +35,25 @@ test("the pool account decodes to the mint its own create event reported", () =>
   assert.equal(p.status, 0, "status 0 is Fund: still on the curve");
 });
 
+/**
+ * The denominator of dev_pct, read rather than assumed.
+ *
+ * `tracker.onCreate` divided the creator's tokens by `curve.ts`'s TOTAL_SUPPLY - 1,000,000,000, which is a fact
+ * about pump.fun, not about launches. LaunchLab sets supply per pool. Every pool sampled so far does mint 1e9,
+ * which is exactly why this is pinned: a constant that happens to be right is indistinguishable from one that is
+ * right until the day it is not, and the field it would be wrong in is the one the data dictionary calls the most
+ * load-bearing in the file.
+ *
+ * `supply` sits at 21 and `total_base_sell` at 29, both before the reserves and well before the VestingSchedule
+ * that moves everything after 101.
+ */
+test("the pool states its own supply, and it is not read from a pump.fun constant", () => {
+  const p = decodePool(POOL_B64)!;
+  assert.equal(p.supply, 1_000_000_000, "supply is at offset 21, scaled by the pool's own base decimals");
+  assert.equal(p.totalBaseSell, 793_100_000, "total_base_sell is at offset 29: what the curve sells before it completes");
+  assert.ok(p.totalBaseSell < p.supply, "the curve cannot sell more than exists; one of these offsets is wrong");
+});
+
 test("a pool not quoted in wrapped SOL is refused rather than priced in SOL", () => {
   const p = decodePool(POOL_B64)!;
   assert.equal(p.solQuoted, false, "this fixture is quote-mint SNAPcES…, deliberately not WSOL");

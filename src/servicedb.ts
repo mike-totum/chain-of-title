@@ -24,6 +24,21 @@ import { openDb } from "./db.ts";
 import { config } from "./config.ts";
 import { statSync } from "node:fs";
 import { BUYOUT_SOL } from "./provenance.ts";
+import { cannotAttributeSql, nullForUnattributed } from "./venues.ts";
+
+/**
+ * TRUE for a launch whose venue cannot name a trader, and the reason it is a venue property rather than a row test.
+ *
+ * `curve_buyers` is `COUNT(DISTINCT wallet)` over `trades`, and SQL's COUNT returns **0 for no rows**, never NULL.
+ * A venue whose events carry no trader produces no trade rows, so every one of its launches would be published
+ * holding a measured-looking zero - and zero outside buyers is the most damaging thing this archive says about a
+ * launch. `assess` raises DANGER `few_outside_buyers` on it, the front page counts it, and the certification gate
+ * treats 0 and NULL as opposites. The null had no way to be produced, because COUNT will not produce one.
+ *
+ * Derived from the registry, so a third venue that cannot attribute its trades is covered by declaring itself
+ * rather than by somebody remembering this file. venues.ts clause 10; `venues.test.ts` runs it against a database.
+ */
+const CANNOT_ATTRIBUTE = cannotAttributeSql();
 
 const arg = (k: string, d: string) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : d; };
 const OUT = arg("--out", "data/record.db");
@@ -73,6 +88,10 @@ if (!READ_ONLY) db.exec(`
   )
   WHERE ${FULL ? "1=1" : `curve_buyers IS NULL OR updated_at >= ${Date.now() - RECENT_MS}`}
     AND EXISTS (SELECT 1 FROM trades tr2 WHERE tr2.mint = tokens.mint)
+    -- A launch on a venue that cannot name a trader is never counted. Its dev buy IS attributable and does produce
+    -- one row, so the EXISTS above passes and the count would come back 0 - a number about the absence of a table
+    -- rather than about the launch. See CANNOT_ATTRIBUTE above.
+    AND NOT (${CANNOT_ATTRIBUTE})
 `);
 if (!READ_ONLY) {
   const counted = (db.prepare("SELECT COUNT(*) c FROM tokens WHERE curve_buyers IS NOT NULL").get() as any).c;
@@ -95,6 +114,10 @@ if (FULL) {
 try { db.exec("ALTER TABLE rec.trades RENAME COLUMN venue TO market"); } catch {}
 // Same reason: a record written before this change has no runs.venue and CREATE TABLE IF NOT EXISTS will not add it.
 try { db.exec("ALTER TABLE rec.runs ADD COLUMN venue TEXT NOT NULL DEFAULT 'pumpfun'"); } catch {}
+// And the same again for the second venue's two launch facts. CREATE TABLE IF NOT EXISTS will not widen a record
+// database built before them, and the copy below names these columns, so without this every incremental build dies.
+try { db.exec("ALTER TABLE rec.tokens ADD COLUMN curve_account TEXT"); } catch {}
+try { db.exec("ALTER TABLE rec.tokens ADD COLUMN quote_mint TEXT"); } catch {}
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS rec.tokens (
@@ -111,6 +134,9 @@ db.exec(`
     -- Nullable on purpose: NULL means the graduation was inferred and never confirmed, which is a real third state
     -- and must not be collapsed into a boolean. See db.ts.
     graduated_confirmed_by TEXT,
+    -- Where this launch's curve lives when the mint does not determine it, and what the curve is priced in. NULL on
+    -- both means the pump.fun case: a PDA anyone can recompute, quoted in SOL. See db.ts.
+    curve_account TEXT, quote_mint TEXT,
     -- The transaction the launch record was decoded from: the one carrying the creator's initial buy, and therefore
     -- the one dev_pct is computed from. This is what turns every row above from a figure a reader must take on
     -- trust into one they can decode for themselves against the chain.
@@ -465,13 +491,37 @@ try {
        unique_buyers, curve_buyers, snap30_buyers, bundled_buyers, graduated, graduated_at,
        pool, vault_sol, vault_at, last_price, rebuilt_at, rebuilt_complete, updated_at,
        venue, graduated_confirmed_by, create_sig, create_slot, uri, image, description, meta_at,
-       image_sha256, image_bytes, image_at, meta_sha256, meta_bytes, meta_lag_ms)
-    SELECT mint, name, symbol, creator, created_at, COALESCE(late_discovery,0), dev_pct, dev_sold,
-           unique_buyers,
-           ${READ_ONLY ? `COALESCE(curve_buyers, (SELECT COUNT(DISTINCT tr.wallet) FROM trades tr
-             WHERE tr.mint = main.tokens.mint AND tr.market='curve' AND tr.side='buy' AND COALESCE(tr.is_dev,0)=0))` : "curve_buyers"},
-           snap30_buyers, bundled_buyers, graduated, graduated_at,
-           pool, vault_sol, vault_at, last_price, rebuilt_at, rebuilt_complete, updated_at,
+       image_sha256, image_bytes, image_at, meta_sha256, meta_bytes, meta_lag_ms, curve_account, quote_mint)
+    SELECT mint, name, symbol, creator, created_at, COALESCE(late_discovery,0), dev_pct,
+           -- Every count of PEOPLE is NULL for a venue that cannot name one, not only the outside-buyer count.
+           --
+           -- The tracker keeps these in sets keyed by wallet, so on a venue whose events carry no wallet each of
+           -- them is an empty set faithfully reporting 0 - and 0 published beside "distinct buyers" or "bundled
+           -- into the creation block" is a measurement a reader will act on. dev_sold is the same shape pointed the
+           -- other way: false there means "the creator did not sell", which we did not observe and cannot assert.
+           --
+           -- dev_pct is NOT in this list, and that is the line between the two. The creator's share comes from the
+           -- creation transaction - the initialize instruction and the buy beside it share one signer, over the
+           -- pool's own supply - so it is measured on every venue here, which is why that denominator had to stop
+           -- being pump.fun's constant.
+           ${nullForUnattributed("dev_sold")},
+           ${nullForUnattributed("unique_buyers")},
+           -- Same guard on the way into the record, and it has to be here too: production builds with --read-only,
+           -- so the UPDATE above never runs on the collector and THIS is the expression that decides what the
+           -- public file says. CASE before COALESCE, because COALESCE would compute the count first.
+           ${nullForUnattributed(READ_ONLY ? `COALESCE(curve_buyers, (SELECT COUNT(DISTINCT tr.wallet) FROM trades tr
+             WHERE tr.mint = main.tokens.mint AND tr.market='curve' AND tr.side='buy' AND COALESCE(tr.is_dev,0)=0))` : "curve_buyers")},
+           ${nullForUnattributed("snap30_buyers")},
+           ${nullForUnattributed("bundled_buyers")},
+           graduated, graduated_at,
+           pool, vault_sol, vault_at,
+           -- A price in SOL, or nothing. A launch quoted in some other asset has no SOL price, and 0 there would be
+           -- published as a token that trades at zero - which is the invented zero this file is full of guards
+           -- against, in the column a reader looks at first. The launch, its creator and its share of supply are
+           -- all still recorded; only the figure we do not hold is absent.
+           CASE WHEN quote_mint IS NULL OR quote_mint = 'So11111111111111111111111111111111111111112'
+                THEN last_price END,
+           rebuilt_at, rebuilt_complete, updated_at,
            -- Last, matching both schemas. COALESCE because a collector database migrated mid-run can hold rows
            -- written before the default applied; an unstamped launch is pump.fun for the same recorded reason.
            COALESCE(venue, 'pumpfun'),
@@ -490,7 +540,9 @@ try {
            meta_bytes,
            -- How long after the launch we read its document. A fact, not a classification: the reader chooses the
            -- cut, and DATA.md publishes the distribution so they can see the choice barely matters.
-           CASE WHEN meta_at IS NOT NULL AND created_at IS NOT NULL THEN meta_at - created_at END
+           CASE WHEN meta_at IS NOT NULL AND created_at IS NOT NULL THEN meta_at - created_at END,
+           -- Launch facts, carried as recorded. Both NULL for pump.fun and for every row predating them.
+           curve_account, quote_mint
     FROM main.tokens WHERE COALESCE(updated_at, 0) >= ${since}
       -- The quote asset is not a launch. Wrapped SOL was copied into the record as one and served as a token page.
       AND main.tokens.mint NOT IN ('So11111111111111111111111111111111111111112',
@@ -503,6 +555,9 @@ try {
       unique_buyers=excluded.unique_buyers, curve_buyers=excluded.curve_buyers, snap30_buyers=excluded.snap30_buyers,
       bundled_buyers=excluded.bundled_buyers, graduated=excluded.graduated, graduated_at=excluded.graduated_at,
       pool=excluded.pool, vault_sol=excluded.vault_sol, vault_at=excluded.vault_at, last_price=excluded.last_price,
+      -- Launch facts: written once, never revised, and never blanked by a later writer that does not have them.
+      curve_account=COALESCE(rec.tokens.curve_account, excluded.curve_account),
+      quote_mint=COALESCE(rec.tokens.quote_mint, excluded.quote_mint),
       rebuilt_at=excluded.rebuilt_at, rebuilt_complete=excluded.rebuilt_complete, updated_at=excluded.updated_at`);
 
   // Buyouts only. Rebuilt in full each time: it is small and cheap, and a partial buyout table would understate a

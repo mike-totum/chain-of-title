@@ -37,6 +37,14 @@
  *    the wrong unit. Every SOL-denominated rule in this archive - the 40 SOL buyout, MIN_POOL_SOL, buy_vol_sol -
  *    would otherwise fire on quantities that are not SOL.
  *
+ *    AND IT IS THE MAJORITY CASE, not an edge. Measured over LAUNCHES rather than swaps, because an
+ *    activity-weighted sample inverts population facts and this codebase has made that mistake three times: of 41
+ *    consecutive launches the collector recorded on 2026-09-12, **7 were quoted in wrapped SOL and 34 were not** -
+ *    the rest in a long tail of other tokens, with no single quote asset above four. So for roughly five launches in
+ *    six this venue contributes a launch record, a creator, a share of supply and a curve, and no SOL figure of any
+ *    kind. A guard that fired on one launch in five would be an edge case worth a comment; this one carries most of
+ *    the venue.
+ *
  * PREFIX ONLY, DELIBERATELY. `PoolCreateEvent` continues past the fields read here into `curve_param`, whose enum
  * variants each carry a different struct, so the tail's layout depends on which curve the launch chose. Reading the
  * fixed prefix and stopping is what `decodeTrade` already does for pump.fun, for the same reason: a layout that
@@ -198,6 +206,21 @@ export interface LaunchLabPool {
   quoteMint: string;
   baseDecimals: number;
   quoteDecimals: number;
+  /**
+   * Tokens that exist, scaled. Read from the pool, never assumed, and this is not a detail.
+   *
+   * `dev_pct` is the creator's share of supply, and the data dictionary calls it the most load-bearing number in the
+   * file. `tracker.onCreate` computed it against `curve.ts`'s `TOTAL_SUPPLY`, which is 1,000,000,000 because that is
+   * what pump.fun mints for every launch. LaunchLab does not mint a fixed supply: `PoolState.supply` is per pool,
+   * chosen by whichever front-end created it. Dividing a LaunchLab creator's tokens by pump.fun's constant is the
+   * same class of error as reading a 6-decimal quote as 9-decimal SOL, in the one field a reader trusts most.
+   *
+   * Every pool sampled so far does mint 1e9, which is exactly why this is read rather than assumed: a constant that
+   * happens to be right is indistinguishable from one that is right, until the day it is not.
+   */
+  supply: number;
+  /** Tokens the curve will sell before it completes; the rest is seeded into the AMM at migration. */
+  totalBaseSell: number;
   creator: string;
   platformConfig: string;
   /** PoolStatus: 0 Fund (still on the curve), 1 Migrate, 2 Trade (graduated to an AMM). */
@@ -224,6 +247,8 @@ export function decodePool(b64: string): LaunchLabPool | null {
     quoteMint,
     baseDecimals,
     quoteDecimals,
+    supply: u(21) / bScale,
+    totalBaseSell: u(29) / bScale,
     creator: base58(b.subarray(333, 365)),
     platformConfig: base58(b.subarray(173, 205)),
     status: b[17],
