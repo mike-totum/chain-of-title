@@ -48,6 +48,25 @@ run directly.
 `HELIUS_MIN_GAP_MS` defaults to 110 ms — the free tier's 10 req/s — and is matched on the hostname. **On a paid plan
 this must be set**, or the limiter caps the key at the free-tier rate and the purchased capacity is never used.
 
+**Divide the gap by the number of processes that share the key.** `minGapMs` is enforced per process, in that
+process's own `eps` array, and the processes do not coordinate. Production runs **two** consumers on one key —
+`collector` (feeds, vault reads, and the in-process confirm loop) and `chainmints` (the `getBlock` scanner, ~7.55
+blocks/s) — so the aggregate rate is twice what the single-process arithmetic suggests. `web` holds
+`SOLANA_RPC_URLS` but currently imports only `rpcStats` and issues no calls; it starts counting the day it does.
+
+Measured against a counting server, two processes, 2.5 s each:
+
+| `HELIUS_MIN_GAP_MS` | one process | two processes |
+|---|---|---|
+| 25 | 39.2 req/s | **78.2 req/s** |
+| 40 | — | 49.5 req/s |
+| 50 | — | 40.2 req/s |
+
+So on Developer (50 req/s) the per-process value is **50 ms**, not the 25 ms that the rate alone implies: 25 ms
+across two processes is 78 req/s, over the cap by half, and 40 ms lands exactly on it with no headroom. The gap is a
+floor on spacing rather than a target rate, so this only bites when a process saturates — which is precisely the
+confirm backlog sweep, the one case where the throughput was the reason for buying the key.
+
 **Leave the Twitter and Telegram variables unset.** The collector starts cleanly without them, logging `watcher
 disabled`. Nothing in the archive comes from Twitter - creator share, buyer counts, graduation timing and operator
 clusters are all on-chain. The X listener exists for `kol-signal`, which returned **-13.8 % over 543 entries**, and for
