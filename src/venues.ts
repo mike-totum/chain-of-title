@@ -144,6 +144,45 @@ import { LaunchLabFeed } from "./feed/launchlab-feed.ts";
  * stream can attribute, and the record build reads that declaration rather than inferring capability from row
  * counts. Absence of data as a finding, in the direction that accuses, is the one direction this project cannot
  * afford - and the guard is `venues.test.ts`, not this paragraph.
+ *
+ * 11. A CURVE IS NOT NECESSARILY ONE ACCOUNT, AND `decodeCurve` ASSUMED IT WAS.
+ *
+ * Written 2026-09-12 against a real decoder rather than in anticipation, which is the only reason it is specific.
+ *
+ * `decodeCurve(b64)` takes one account's bytes and returns a CurveState. True of pump.fun, whose bonding curve
+ * account carries everything, and of LaunchLab, whose pool state does. NOT true of Meteora DBC: its `VirtualPool`
+ * holds the reserves and the completion state, and the QUOTE MINT - what the launch is priced in - is in a second
+ * account, the `PoolConfig`, along with the base decimals and the migration threshold. 89.8% of DBC configs are
+ * wrapped SOL and 9.1% are USDC, so a decoder that cannot see the config must either guess the quote asset or
+ * refuse every pool. Guessing is how a quantity of USDC gets published in a column named for SOL; refusing
+ * everything is a venue that reads as having no curve at all, which clause 7's note on `curveAddress` already
+ * forbade in writing.
+ *
+ * THE INTERFACE IS DELIBERATELY NOT WIDENED YET, and that is clause 9's lesson applied to itself. `decodeCurve`
+ * and `curveAddress` have no consumer anywhere in this repo - `curvepoll` and `confirm` import pump.fun's straight
+ * from `rpc-http.ts` - so widening them now would be a second round of describing capabilities nobody calls. The
+ * shape it will need is recorded here instead: a venue declares which accounts a curve reading is made of, and the
+ * caller fetches them; `feed/dbc.ts` already exports `poolCurve(pool, config)` and a `curveState` that returns a
+ * reading only for a pool quoted in wrapped SOL, so the decoder half exists and is tested against real bytes. Do
+ * it when the first caller needs it, and not before.
+ *
+ * 12. THE CURVE MATHS IN `curve.ts` IS PUMP.FUN'S, AND NOTHING STOPS IT BEING APPLIED TO ANOTHER VENUE.
+ *
+ * `price(c)` is `vSol / vTokens` and `isGraduated(c)` is `vSol >= 115`. Both are the pump.fun constant-product
+ * curve on virtual reserves, and the module's own header says so - but `tracker.ts` and `index.ts` call them on
+ * state that will carry any venue's launch the moment a third one ingests.
+ *
+ * Meteora DBC has NO virtual reserves at all. Its price is `sqrt_price` squared, and its graduation threshold is
+ * per PoolConfig - 10.95 SOL on the pool sampled, against pump.fun's 115 vSOL. So `isGraduated` on a DBC reading
+ * does not merely give a wrong number, it answers a question the venue does not have, and it answers it in the
+ * direction that calls an unfinished curve finished. LaunchLab's thresholds differ again and are per platform
+ * config.
+ *
+ * The guard is not written yet because the decision belongs with the first venue that needs it: either these
+ * helpers take the threshold and the pricing rule from the venue, or they refuse a launch whose venue is not
+ * pump.fun and the caller asks the venue. What must not happen is the third venue arriving and these two functions
+ * being applied to it silently, because a wrong graduation is the inference this archive has already had to
+ * publish a correction about once.
  */
 export type EventChannel = "logs" | "cpi";
 
