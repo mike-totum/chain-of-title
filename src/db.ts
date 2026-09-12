@@ -645,8 +645,42 @@ export function finalizeTokenTrades(db: DatabaseSync, t: TokenState, opts: { kee
   ).run(t.createdSlot, t.createdSlot, t.lastPrice, t.graduated ? 1 : 0, t.launchPrice > 0 ? t.peakPrice / t.launchPrice : null, t.createdAt, t.mint);
   if (!opts.keepAll) {
     const keepCurve = opts.keepCurve ?? 100, keepAmm = opts.keepAmm ?? 0;
-    db.prepare(`DELETE FROM trades WHERE mint = ? AND market = 'curve' AND id NOT IN (SELECT id FROM trades WHERE mint = ? AND market = 'curve' ORDER BY ts, id LIMIT ?)`).run(t.mint, t.mint, keepCurve);
-    db.prepare(`DELETE FROM trades WHERE mint = ? AND market = 'amm' AND id NOT IN (SELECT id FROM trades WHERE mint = ? AND market = 'amm' ORDER BY ts, id LIMIT ?)`).run(t.mint, t.mint, keepAmm);
+    /**
+     * The first N and the LAST N, not the first N.
+     *
+     * `ORDER BY ts, id LIMIT N` keeps the oldest rows, so on any curve with more than N trades the ledger stops
+     * partway and the END of the launch is deleted - which is where the most consequential trade always is. The
+     * trade that COMPLETES a bonding curve is by definition its last curve trade, and that is the single most
+     * probative row a launch has: it is what distinguishes a curve filled by a crowd from one bought out by one
+     * wallet, and the buyout detectors and `assess` are built on it.
+     *
+     * Measured on one launch rather than reasoned about: a 3 h 42 m curve kept its first 27 minutes, and the
+     * 84.2 SOL buy that finished it is gone. It survives only as prose in `signals` and as an 84.187 SOL
+     * discrepancy between `wallet_token_stats.sol_in` and the trade rows that are left - a figure the archive can
+     * still see the shadow of and can no longer cite. The other pruners protect exactly this row through
+     * `KEEP_TRADE_EVIDENCE`; this deleter, which runs first and on every token, honoured nothing.
+     *
+     * The same argument applies to the AMM side and for a sharper reason: `wallet_flow.amm_sell` is computed from
+     * post-graduation sells, which are by definition late, so keeping only the earliest rows published a wallet
+     * that sold thousands of SOL as a wallet that never sold. Absence of data reading as a finding, in the
+     * direction that makes an operator look clean.
+     *
+     * This can only ever keep MORE than before - the old keep-set is the first half of the new one - so it cannot
+     * delete a row that previously survived. That is the right direction for an archive to be wrong in, and it is
+     * why this is a safe change to a deletion path. The cost is up to 2N rows per token instead of N.
+     *
+     * A note on shape: SQLite will not take `ORDER BY` inside an operand of a UNION, so each half is wrapped in
+     * its own subselect. Written out rather than factored into a helper because the two halves differ only by a
+     * direction and collapsing them hid which end was which, which is how this went unnoticed.
+     */
+    const keepEnds = (market: string, keep: number) => db.prepare(
+      `DELETE FROM trades WHERE mint = ? AND market = '${market}' AND id NOT IN (
+         SELECT id FROM (SELECT id FROM trades WHERE mint = ? AND market = '${market}' ORDER BY ts, id LIMIT ?)
+         UNION
+         SELECT id FROM (SELECT id FROM trades WHERE mint = ? AND market = '${market}' ORDER BY ts DESC, id DESC LIMIT ?))`,
+    ).run(t.mint, t.mint, keep, t.mint, keep);
+    keepEnds("curve", keepCurve);
+    keepEnds("amm", keepAmm);
   }
 }
 
