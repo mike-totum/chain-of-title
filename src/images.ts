@@ -31,7 +31,15 @@ import { resolve } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { config } from "./config.ts";
 import { openDb } from "./db.ts";
-import { fetchContent, ipfsPath, verifyCid } from "./ipfs.ts";
+import { fetchContent, ipfsPath, verifyCid, notDefinitiveSql } from "./ipfs.ts";
+
+/**
+ * How long before a transiently-failed picture is asked for again. Matches META_RETRY_HOURS in index.ts in both
+ * default and shape - read from the environment at the point of use rather than added to config.ts, because that is
+ * where the metadata sweep's two clocks already live and one convention beats a tidier one that is only half adopted.
+ * A definitive 404 or 410 is not governed by this at all: notDefinitiveSql excludes it, so it is never re-requested.
+ */
+const IMAGE_RETRY_MS = Number(process.env.IMAGE_RETRY_HOURS ?? 6) * 3600_000;
 
 /** Bigger than this is not a token icon, and we are not a CDN. Skipped and recorded as skipped, never retried blindly. */
 const MAX_BYTES = 5 * 1024 * 1024;
@@ -89,12 +97,33 @@ export async function captureImages(
    * behind, and it is the one on a deadline - those pins are the ones closest to lapsing.
    */
   const order = opts.order === "oldest" ? "ASC" : "DESC";
+  /**
+   * A failure is not a verdict, and this line used to treat it as one.
+   *
+   * The picker below read `image_error IS NULL`, so the first failure of any kind retired a launch's picture
+   * permanently. The comment above says that is how a dead pin stops costing a request on every run, which is the
+   * right goal aimed at the wrong predicate: measured on the collector, 23,833 launches were retired on a
+   * TRANSIENT error against 840 on a real 404 or 410, and the four largest reasons are all a gateway saying
+   * "cooling down" - rate limiting, our problem and not the pin's. Roughly 96% of the abandoned pictures were
+   * abandoned because we asked too fast.
+   *
+   * This is the exact inverse of the metadata sweep's fault that de4585a fixed next door, and it is the worse
+   * direction of the two. That one spent its budget re-requesting documents that were already gone. This one
+   * threw away pictures that were still there - and an image is retrievable once, so a pin we stop asking for
+   * before it lapses is not delayed, it is lost.
+   *
+   * Same classifier, deliberately: `notDefinitiveSql` takes a column name precisely so a second judgement about
+   * what "definitive" means cannot grow up beside the first and drift from it.
+   */
+  const retryBefore = Date.now() - IMAGE_RETRY_MS;
+  const eligible = `image_sha256 IS NULL
+       AND (image_error IS NULL OR (${notDefinitiveSql("image_error")} AND COALESCE(image_at, 0) < ?))`;
   const pending = db.prepare(`
     SELECT mint, image FROM tokens
      WHERE image IS NOT NULL AND image != ''
-       AND image_sha256 IS NULL AND image_error IS NULL
+       AND ${eligible}
        ${opts.all ? "" : "AND graduated = 1"}
-     ORDER BY created_at ${order} LIMIT ?`).all(opts.limit) as { mint: string; image: string }[];
+     ORDER BY created_at ${order} LIMIT ?`).all(retryBefore, opts.limit) as { mint: string; image: string }[];
 
   /**
    * The whole backlog, not just this pass's slice. Published in the stats so the caller can say out loud whether it
@@ -103,8 +132,9 @@ export async function captureImages(
    */
   const backlog = (db.prepare(`
     SELECT COUNT(*) c FROM tokens
-     WHERE image IS NOT NULL AND image != '' AND image_sha256 IS NULL AND image_error IS NULL
-       ${opts.all ? "" : "AND graduated = 1"}`).get() as any).c as number;
+     WHERE image IS NOT NULL AND image != ''
+       AND ${eligible}
+       ${opts.all ? "" : "AND graduated = 1"}`).get(retryBefore) as any).c as number;
 
   const st: CaptureStats = { attempted: pending.length, kept: 0, skipped: 0, failed: 0, bytes: 0, reused: 0, backlog };
   if (pending.length === 0) return st;
